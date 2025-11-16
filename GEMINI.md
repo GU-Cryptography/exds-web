@@ -112,28 +112,55 @@ npm test --prefix frontend
    - 使用 MongoDB 聚合管道优化复杂查询
    - 公开/受保护路由分离
 
-## 开发指南
-
-- **[CRUD 功能模块开发指南](docs/CRUD_Module_Development_Guide.md)**：以“零售套餐管理”为例，提供标准增删改查模块的详细开发步骤和规范。
-
 ## 关键开发规范
 
-### 0. 前端页面设计规范（必读）
+### 1. 时序数据处理规范（前后端强制）
 
-**开发任何前端页面前必须阅读**：`docs/前端页面设计规范.md`
+**核心原则**：为保证数据一致性，时序数据（负荷、价格等）的处理必须遵循严格的职责划分。
 
-该规范涵盖：
-- 页面结构标准（容器、标题、面包屑）
-- 组件样式规范（Paper、Typography、Grid v7）
-- 布局模式（Tab 式导航、仪表板式）
-- 响应式设计要求
-- 开发检查清单
+#### 后端职责 (强制)
+1.  **存储格式**：所有时序数据**必须**采用"长/窄"格式存储，即每个时间点一条记录。
+    ```python
+    # 正确：每个时间点一条记录
+    {
+        "timestamp": datetime(2025, 11, 10, 0, 15, 0), # 本地时间
+        "customer_id": "...",
+        "value": 23.1
+    }
+    ```
+2.  **24:00时刻处理**：业务日的第96个点（`24:00`）在数据库中**必须**存储为**次日的 `00:00:00`**。
+3.  **查询区间**：查询一天的数据时，时间区间**必须**使用**左开右闭 `(start_of_day, end_of_day]`**，以正确包含第96个点并排除前一天的最后一个点。
+    ```python
+    query = {
+        "timestamp": {
+            "$gt": start_of_day,   # 大于
+            "$lte": end_of_day     # 小于等于
+        }
+    }
+    ```
+4.  **API响应格式化**：API在返回给前端时，**必须**将时间戳格式化为业务时间标签，特别是将次日 `00:00:00` 转换为 `"24:00"`。
+    ```json
+    {
+      "date": "2025-11-10",
+      "data": [
+        {"time": "00:15", "value": 23.1, "timestamp": "2025-11-10T00:15:00"},
+        ...
+        {"time": "24:00", "value": 22.8, "timestamp": "2025-11-11T00:00:00"}
+      ]
+    }
+    ```
 
-**参考示例**：`LoadAnalysisPage`、`MarketPriceAnalysisPage`、`GridAgencyPricePage`
+#### 前端职责 (强制)
+1.  **直接消费**：前端**必须**直接使用后端返回的 `time` 字段作为图表的X轴标签。
+2.  **禁止转换**：前端**严禁**对 `timestamp` 或 `time` 字段进行任何形式的计算或转换。所有时间相关的业务逻辑由后端统一处理。
+    ```tsx
+    // ✅ 正确：直接使用 time 字段
+    <XAxis dataKey="time" />
 
----
+    // ❌ 错误：在前端进行任何时间格式化或计算
+    ```
 
-### 1. Material-UI Grid 组件语法（v7 版本）
+### 2. Material-UI Grid 组件 v7 语法（前端强制）
 
 **极其重要**：本项目使用 Material-UI v7，其 `Grid` 组件 API 与 v5 **不兼容**。
 
@@ -155,7 +182,7 @@ npm test --prefix frontend
 </Grid>
 ```
 
-### 2. 图表横屏全屏功能
+### 3. 图表横屏全屏功能（前端强制）
 
 **强制要求**：所有 Recharts 图表在移动端**必须**支持"横屏最大化"功能。
 
@@ -182,13 +209,10 @@ return (
   <Box ref={chartRef} sx={{...}}>
     {/* 进入全屏按钮 */}
     <FullscreenEnterButton />
-
     {/* 退出全屏按钮 */}
     <FullscreenExitButton />
-
     {/* 全屏标题 */}
     <FullscreenTitle />
-
     {/* 导航按钮（上一个/下一个） */}
     <NavigationButtons />
 
@@ -200,395 +224,109 @@ return (
 );
 ```
 
-### 3. 图表曲线选择功能
-
-**强制要求**：对于需要用户交互式选择显示/隐藏图表曲线的场景，**必须**使用项目内置的可复用 Hook `useSelectableSeries`。
-
-**位置**：`frontend/src/hooks/useSelectableSeries.tsx`
-
-**使用方法**：参考 `docs/技术方案与编码规范.md` 中 `3.8.2. useSelectableSeries` 的详细说明（如果存在）。
-
-### 4. 移动端响应式设计规范
-
-**强制要求**：
-- 所有页面和组件**必须**采用移动端优先的响应式设计
-- 优先使用 Material-UI 的栅格系统（`Grid`）和断点（`sx` 属性）实现响应式布局
-- 在开发新的图表功能或交互时，**必须**首先检查 `frontend/src/hooks/` 目录下是否存在已有的可复用 Hook
-- 避免重复造轮子，优先使用现有 Hook
-
-#### 4.1 标准响应式断点
-
-Material-UI 提供的标准断点：
-
-| 断点 | 屏幕宽度 | 设备类型 |
-|------|---------|---------|
-| `xs` | 0px+ | 手机（竖屏） |
-| `sm` | 600px+ | 手机（横屏）、小平板 |
-| `md` | 900px+ | 平板 |
-| `lg` | 1200px+ | 桌面 |
-| `xl` | 1536px+ | 大屏桌面 |
-
-#### 4.2 日期选择器规范
-
-**统一标准**（参考：MarketDashboardTab、DayAheadAnalysisTab、RealTimeAnalysisTab、SpreadAnalysisTab）
-
-```tsx
-import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { zhCN } from 'date-fns/locale';
-import ArrowLeftIcon from '@mui/icons-material/ArrowLeft';
-import ArrowRightIcon from '@mui/icons-material/ArrowRight';
-import { addDays } from 'date-fns';
-
-// 1. 状态管理
-const [selectedDate, setSelectedDate] = useState<Date | null>(addDays(new Date(), -1));
-
-// 2. 自动加载数据（监听日期变化）
-useEffect(() => {
-    fetchData(selectedDate);
-}, [selectedDate]);
-
-// 3. 日期导航
-const handleShiftDate = (days: number) => {
-    if (!selectedDate) return;
-    const newDate = addDays(selectedDate, days);
-    setSelectedDate(newDate);  // useEffect 会自动触发 fetchData
-};
-
-// 4. UI 渲染（必须用 LocalizationProvider 包裹整个组件）
-return (
-    <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
-        <Box>
-            <Paper variant="outlined" sx={{ p: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                <IconButton onClick={() => handleShiftDate(-1)}>
-                    <ArrowLeftIcon />
-                </IconButton>
-
-                <DatePicker
-                    label="选择日期"
-                    value={selectedDate}
-                    onChange={(date) => setSelectedDate(date)}
-                    slotProps={{
-                        textField: {
-                            sx: { width: { xs: '150px', sm: '200px' } }  // 响应式宽度
-                        }
-                    }}
-                />
-
-                <IconButton onClick={() => handleShiftDate(1)}>
-                    <ArrowRightIcon />
-                </IconButton>
-            </Paper>
-
-            {/* 其他内容 */}
-        </Box>
-    </LocalizationProvider>
-);
-```
-
-**关键要点**：
-- ✅ 日期框宽度：`xs: 150px`, `sm: 200px`（确保手机端单行显示）
-- ✅ 使用 `ArrowLeft`/`ArrowRight` 图标（不使用 `ArrowBackIosNew`/`ArrowForwardIos`）
-- ✅ 自动加载：监听 `selectedDate` 变化，**无需查询按钮**
-- ✅ Paper 容器：`p: 2, gap: 1, flexWrap: 'wrap'`
-- ✅ LocalizationProvider 包裹整个组件返回内容
-
-#### 4.3 图表容器规范
-
-**统一的图表高度设置**（参考：所有已优化的 Tab 组件）
-
-```tsx
-<Box
-    ref={chartRef}
-    sx={{
-        height: { xs: 350, sm: 400 },  // 移动端 350px，桌面端 400px
-        position: 'relative',
-        backgroundColor: isFullscreen ? 'background.paper' : 'transparent',
-        p: isFullscreen ? 2 : 0,
-        ...(isFullscreen && {
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            width: '100vw',
-            height: '100vh',
-            zIndex: 1400
-        })
-    }}
->
-    <ResponsiveContainer width="100%" height="100%">
-        {/* Recharts 图表 */}
-    </ResponsiveContainer>
-</Box>
-```
-
-**关键要点**：
-- ✅ 响应式高度：移动端 350px，桌面端 400px
-- ✅ 使用 `ResponsiveContainer` 确保图表自适应
-- ✅ 全屏状态样式：固定定位 + 全屏尺寸 + 高 z-index
-
-#### 4.4 Grid 布局规范
-
-**响应式间距**（参考：MarketDashboardTab、SpreadAnalysisTab）
-
-```tsx
-<Grid container spacing={{ xs: 1, sm: 2 }}>
-    <Grid size={{ xs: 12, md: 6 }}>
-        {/* 移动端全宽，桌面端半宽 */}
-    </Grid>
-    <Grid size={{ xs: 12, md: 6 }}>
-        {/* 移动端全宽，桌面端半宽 */}
-    </Grid>
-    <Grid size={{ xs: 12 }}>
-        {/* 始终全宽 */}
-    </Grid>
-</Grid>
-```
-
-**关键要点**：
-- ✅ 间距响应式：`spacing={{ xs: 1, sm: 2 }}`（移动端减小间距）
-- ✅ 使用 `size` 属性而非 `xs`/`md` 属性（Grid v7 语法）
-- ✅ 常见布局：`xs: 12`（移动端全宽）+ `md: 6`（桌面端两列）
-
-#### 4.5 表格响应式规范
-
-**移动端表格优化**（参考：MarketDashboardTab、SpreadAnalysisTab）
-
-```tsx
-<TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
-    <Table
-        sx={{
-            '& .MuiTableCell-root': {
-                fontSize: { xs: '0.75rem', sm: '0.875rem' },  // 响应式字体
-                px: { xs: 0.5, sm: 2 },  // 响应式内边距
-            }
-        }}
-    >
-        {/* 表格内容 */}
-    </Table>
-</TableContainer>
-```
-
-**关键要点**：
-- ✅ 添加 `overflowX: 'auto'` 确保横向滚动
-- ✅ 字体大小：`xs: 0.75rem`, `sm: 0.875rem`
-- ✅ 内边距：`xs: 0.5`, `sm: 2`
-- ✅ 移动端减小字体和内边距以节省空间
-
-#### 4.6 Paper 容器响应式规范
-
-```tsx
-<Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 }, mt: 2 }}>
-    {/* 内容 */}
-</Paper>
-```
-
-**关键要点**：
-- ✅ 内边距响应式：`p: { xs: 1, sm: 2 }`
-- ✅ 移动端减小内边距以节省空间
-
-#### 4.7 响应式开发检查清单
-
-开发完成后，使用以下检查清单进行自检：
-
-**日期选择器**
-- [ ] 日期框宽度为 `{ xs: '150px', sm: '200px' }`
-- [ ] 使用 `ArrowLeft`/`ArrowRight` 图标
-- [ ] 实现自动加载（监听 `selectedDate` 变化）
-- [ ] Paper 容器使用 `p: 2, gap: 1, flexWrap: 'wrap'`
-- [ ] LocalizationProvider 包裹整个组件
-
-**图表容器**
-- [ ] 图表高度为 `{ xs: 350, sm: 400 }`
-- [ ] 使用 `useChartFullscreen` Hook
-- [ ] 使用 `ResponsiveContainer`
-
-**Grid 布局**
-- [ ] 间距使用 `spacing={{ xs: 1, sm: 2 }}`
-- [ ] 使用 `size` 属性（Grid v7 语法）
-- [ ] 移动端优先（`xs: 12` 全宽）
-
-**表格**
-- [ ] TableContainer 设置 `overflowX: 'auto'`
-- [ ] 字体大小：`{ xs: '0.75rem', sm: '0.875rem' }`
-- [ ] 内边距：`{ xs: 0.5, sm: 2 }`
-
-**测试设备**
-- [ ] iPhone SE (375px 宽)
-- [ ] iPhone 12/13 (390px 宽)
-- [ ] Galaxy S8 (360px 宽)
-- [ ] 桌面端 (1200px+ 宽)
-
 ---
-
-### 5. Tab 组件开发模板
-
-当开发新的 Tab 组件时，请参考以下模板以确保符合所有规范：
-
-**位置**：`docs/TabComponentTemplate.tsx`（如果存在）
-
-**核心结构**：
-```tsx
-import React, { useState, useEffect, useRef } from 'react';
-import { Box, CircularProgress, Typography, Paper, IconButton, Grid } from '@mui/material';
-import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { zhCN } from 'date-fns/locale';
-import ArrowLeftIcon from '@mui/icons-material/ArrowLeft';
-import ArrowRightIcon from '@mui/icons-material/ArrowRight';
-import { format, addDays } from 'date-fns';
-import apiClient from '../api/client';
-import { useChartFullscreen } from '../hooks/useChartFullscreen';
-// 根据需要导入其他 Hooks
-
-export const MyNewTab: React.FC = () => {
-    const [selectedDate, setSelectedDate] = useState<Date | null>(addDays(new Date(), -1));
-    const [loading, setLoading] = useState(false);
-    const [data, setData] = useState<any[]>([]);
-
-    const chartRef = useRef<HTMLDivElement>(null);
-    const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
-
-    // 全屏 Hook
-    const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, NavigationButtons } =
-        useChartFullscreen({
-            chartRef,
-            title: `标题 (${dateStr})`,
-            onPrevious: () => handleShiftDate(-1),
-            onNext: () => handleShiftDate(1)
-        });
-
-    // 数据加载
-    const fetchData = (date: Date | null) => {
-        if (!date) return;
-        setLoading(true);
-        const formattedDate = format(date, 'yyyy-MM-dd');
-        apiClient.get(`/api/v1/your-endpoint?date=${formattedDate}`)
-            .then(response => setData(response.data))
-            .catch(error => {
-                console.error('Error:', error);
-                setData([]);
-            })
-            .finally(() => setLoading(false));
-    };
-
-    // 自动加载
-    useEffect(() => {
-        fetchData(selectedDate);
-    }, [selectedDate]);
-
-    // 日期导航
-    const handleShiftDate = (days: number) => {
-        if (!selectedDate) return;
-        const newDate = addDays(selectedDate, days);
-        setSelectedDate(newDate);
-    };
-
-    return (
-        <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
-            <Box>
-                {/* 日期选择器 */}
-                <Paper variant="outlined" sx={{ p: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <IconButton onClick={() => handleShiftDate(-1)}><ArrowLeftIcon /></IconButton>
-                    <DatePicker
-                        label="选择日期"
-                        value={selectedDate}
-                        onChange={(date) => setSelectedDate(date)}
-                        slotProps={{ textField: { sx: { width: { xs: '150px', sm: '200px' } } } }}
-                    />
-                    <IconButton onClick={() => handleShiftDate(1)}><ArrowRightIcon /></IconButton>
-                </Paper>
-
-                {/* 图表容器 */}
-                <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
-                    <Typography variant="h6" gutterBottom>图表标题</Typography>
-                    <Box
-                        ref={chartRef}
-                        sx={{
-                            height: { xs: 350, sm: 400 },
-                            position: 'relative',
-                            backgroundColor: isFullscreen ? 'background.paper' : 'transparent',
-                            p: isFullscreen ? 2 : 0,
-                            ...(isFullscreen && { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1400 })
-                        }}
-                    >
-                        <FullscreenEnterButton />
-                        <FullscreenExitButton />
-                        <FullscreenTitle />
-                        <NavigationButtons />
-
-                        {loading ? (
-                            <Box sx={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
-                                <CircularProgress />
-                            </Box>
-                        ) : !data || data.length === 0 ? (
-                            <Box sx={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
-                                <Typography>无数据</Typography>
-                            </Box>
-                        ) : (
-                            <ResponsiveContainer width="100%" height="100%">
-                                {/* Recharts 图表 */}
-                            </ResponsiveContainer>
-                        )}
-                    </Box>
-                </Paper>
-            </Box>
-        </LocalizationProvider>
-    );
-};
-```
-
-
 
 ## 后端开发规范
 
-- **类型提示**：所有新代码**必须**添加明确的 Python 类型提示
-- **代码风格**：遵循 PEP 8 规范，推荐使用 `Black` 或 `Ruff` 进行格式化
-- **命名约定**：变量和函数使用 `snake_case`，类名使用 `PascalCase`
-- **API 设计**：遵循 RESTful 原则，使用 Pydantic 模型进行数据校验和序列化
-- **错误处理**：使用 FastAPI 的 `HTTPException` 来处理 HTTP 相关的客户端错误
-- **数据库访问**：所有数据库操作应通过 `webapp.tools.mongo.DATABASE` 全局实例进行
+### 1. 数据模型设计规范 (Pydantic)
 
-## 前端开发规范
+#### 1.1 模型分层模式（强制）
+所有实体必须定义 `Create`, `Update`, `Full`, `ListItem`, `ListResponse` 五种模型，以实现清晰的数据流转和校验。
 
-### 📋 页面设计规范（强制）
+-   **Create Model**: 仅包含创建时必需的字段。
+-   **Update Model**: 所有字段均为 `Optional`，用于部分更新。
+-   **Full Model**: 对应数据库的完整结构，包含 `id` 和时间戳。
+-   **ListItem Model**: 用于列表展示的轻量化模型，不含复杂嵌套数据。
+-   **ListResponse Model**: 标准的分页响应结构，包含 `total`, `page`, `items` 等。
 
-**极其重要**：所有前端页面开发**必须**严格遵循《前端页面设计规范》。
+#### 1.2 字段命名约定（强制）
+-   **主键**: `id: PyObjectId = Field(..., alias="_id")`
+-   **时间戳**: `created_at`, `updated_at` (使用 `datetime.now()` 获取本地时间)
+-   **操作人**: `created_by`, `updated_by`
+-   **状态**: `status: Literal[...]`
+-   **布尔值**: `is_{condition}` 或 `has_{item}`
+-   **外键**: `{entity}_id`
+-   **列表**: 复数形式 (e.g., `utility_accounts`)
 
-**规范文档位置**：`docs/前端页面设计规范.md`
+### 2. Service 层开发规范
 
-**强制要求**：
-- 在开发任何新页面或修改现有页面前，**必须**先完整阅读该规范文档
-- 所有页面必须遵循规范中定义的：
-  - 页面结构（外层容器、页面标题）
-  - 组件样式（Paper、Typography、Grid v7 语法）
-  - 布局模式（Tab 式导航、仪表板式）
-  - 响应式设计要求
-- 使用规范文档第 5 节的"开发检查清单"进行自检
+-   **统一结构**: Service 类必须包含 `__init__(self, db: Database)` 和 `_ensure_indexes()` 方法。
+-   **标准方法命名**: CRUD 操作必须使用 `create`, `get_by_id`, `list`, `update`, `delete`。
+-   **记录操作人**: 所有修改操作（`create`, `update`）必须接受 `operator: str` 参数。
+-   **错误处理**: 业务逻辑错误应 `raise ValueError`，由 API 层捕获并转换为 `HTTPException`。
 
-**参考示例页面**：
-- `LoadAnalysisPage` - Tab 式导航布局标准
-- `MarketPriceAnalysisPage` - Tab 式导航布局标准
-- `GridAgencyPricePage` - 仪表板式布局标准
+### 3. API 路由开发规范
+
+-   **RESTful 设计**: 遵循标准的 RESTful 路由设计（`GET /items`, `POST /items`, `GET /items/{id}` 等）。
+-   **HTTP 状态码**:
+    -   `200 OK`: GET, PUT, PATCH 成功
+    -   `201 Created`: POST 成功
+    -   `204 No Content`: DELETE 成功 (必须 `return None`)
+    -   `400 Bad Request`: 业务逻辑错误
+    -   `404 Not Found`: 资源不存在
+    -   `409 Conflict`: 资源冲突（如名称重复）
+-   **API 文档**: 所有端点必须提供 `summary` 和参数的 `description`。
+
+### 4. 错误处理与日志
+
+-   **使用 `logging`**: 禁止使用 `print` 进行日志输出。
+-   **记录异常**: 记录 ERROR 级别日志时，使用 `logger.exception()` 或 `exc_info=True` 来包含完整的堆栈跟踪。
+-   **精确捕获**: 避免使用宽泛的 `except Exception:`，应捕获具体的异常类型。
 
 ---
 
-### 通用开发规范
+## 前端开发规范
 
-- **代码风格**：推荐使用 `Prettier` 进行自动代码格式化
-- **命名约定**：组件（及文件名）使用 `PascalCase`，变量和函数使用 `camelCase`
-- **组件开发**：优先使用函数式组件和 Hooks，并保持组件的单一职责原则
-- **API 通信**：所有对后端的请求都应通过 `src/api/client.ts` 中预配置的 axios 实例发出
-- **可复用 Hook 原则**：
-  - 开发新功能前，**必须**先检查 `frontend/src/hooks/` 目录
-  - 优先使用现有 Hook，避免重复实现
-  - 如果现有 Hook 无法满足需求且功能具有通用性，应封装为新的可复用 Hook
+### 1. 页面与组件设计
+
+-   **页面结构**: 标准页面应包含 `Typography` 标题和 `Paper` 主内容区。
+-   **布局模式**: 优先使用 **Tab式导航** (`LoadAnalysisPage`)，对于概览页可使用 **仪表板式布局** (`MarketDashboardTab`)。
+-   **Loading状态管理**:
+    -   **区分首次加载和刷新**：首次加载（`loading && !data`）可显示占位符，数据刷新时（`loading && data`）**必须**使用覆盖层，**严禁**卸载组件，以保证图表全屏等状态不丢失。
+    -   **禁用交互**：在 `loading` 状态下，必须禁用日期切换、分页等数据触发控件。
+
+### 2. 响应式设计规范
+
+-   **移动端优先**: 所有页面和组件必须采用移动端优先的响应式设计。
+-   **标准断点**:
+    -   **间距/内边距**: `spacing={{ xs: 1, sm: 2 }}`, `p={{ xs: 1, sm: 2 }}`
+    -   **Grid布局**: `size={{ xs: 12, md: 6 }}` (移动端全宽，桌面端半宽)
+    -   **图表高度**: `height={{ xs: 350, sm: 400 }}`
+-   **表格响应式**:
+    -   容器添加 `overflowX: 'auto'` 以支持横向滚动。
+    -   减小移动端字体和内边距: `fontSize: { xs: '0.75rem', sm: '0.875rem' }`, `px: { xs: 0.5, sm: 2 }`
+-   **移动端交互模式**:
+    -   **数据列表**: 使用 `MobileDataCard` 组件展示。
+    -   **数据编辑**: 桌面端使用 **对话框(Dialog)**，移动端使用 **独立页面**。
+    -   **筛选**: 移动端的筛选条件必须包裹在 `Collapse` 组件中，可折叠。
+
+### 3. 日期选择器规范
+
+-   **统一实现**: 必须使用 `LocalizationProvider` 包裹，并集成 `ArrowLeft`/`ArrowRight` 按钮用于快速切换日期。
+-   **自动加载**: **必须**通过 `useEffect` 监听日期变化来自动加载数据，**禁止**添加额外的“查询”按钮。
+-   **响应式宽度**: `DatePicker` 的宽度应设为 `{ xs: '150px', sm: '200px' }`，确保移动端单行显示。
+
+### 4. 状态芯片 (Chip) 规范
+
+-   **统一颜色**: 必须遵循统一的状态颜色映射。
+    -   `success`: 成功 / 生效 / 执行中
+    -   `warning`: 草稿 / 待处理 / 暂停
+    -   `default`: 终止 / 归档 / 过期
+    -   `error`: 错误 / 失败
+    -   `info`: 意向 / 信息
+-   **统一尺寸**: 使用 `size="small"`。
+
+### 5. API 调用与代理
+
+-   **统一客户端**: 所有请求必须通过 `src/api/client.ts` 发出。
+-   **代理配置**: **必须**使用 `package.json` 中的 `"proxy": "http://127.0.0.1:8005"` 配置。**禁止**使用 `setupProxy.js` 或设置 `REACT_APP_API_BASE_URL` 环境变量。
 
 ## 未来技术优化建议
 
 以下是为提升项目可维护性和开发效率的建议，可在未来的迭代中考虑引入：
 
-- **前端状态管理**：考虑使用 **Zustand** 来管理全局状态（如用户信息），以简化逻辑、提升性能
-- **前端数据请求**：考虑使用 **TanStack Query** (原 React Query) 来替代手动的 `useEffect` + `axios` 模式，以自动化管理数据缓存、加载和错误状态
+-   **前端状态管理**：考虑使用 **Zustand** 来管理全局状态（如用户信息），以简化逻辑、提升性能
+-   **前端数据请求**：考虑使用 **TanStack Query** (原 React Query) 来替代手动的 `useEffect` + `axios` 模式，以自动化管理数据缓存、加载和错误状态
 
 ## 项目要求
 
