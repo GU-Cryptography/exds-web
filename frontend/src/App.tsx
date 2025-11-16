@@ -20,6 +20,7 @@ import GridAgencyPricePage from './pages/GridAgencyPricePage';
 import RetailPackagePage from './pages/RetailPackagePage';
 import RetailContractPage from './pages/RetailContractPage';
 import { CustomerManagementPage } from './pages/CustomerManagementPage';
+import { ForecastBaseDataPage } from './pages/ForecastBaseDataPage';
 import { TabProvider } from './contexts/TabContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { DesktopTabLayout } from './layouts/DesktopTabLayout';
@@ -71,7 +72,7 @@ const ResponsiveLayout: React.FC = () => {
                     <Route path="price-analysis/comparison" element={<PlaceholderPage />} />
 
                     {/* 价格预测 */}
-                    <Route path="price-forecast/baseline-data" element={<PlaceholderPage />} />
+                    <Route path="price-forecast/baseline-data" element={<ForecastBaseDataPage />} />
                     <Route path="price-forecast/d-2" element={<PlaceholderPage />} />
                     <Route path="price-forecast/day-ahead" element={<PlaceholderPage />} />
                     <Route path="price-forecast/monthly" element={<PlaceholderPage />} />

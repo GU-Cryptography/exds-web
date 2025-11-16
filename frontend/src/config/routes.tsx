@@ -6,6 +6,7 @@ import GridAgencyPricePage from '../pages/GridAgencyPricePage';
 import RetailPackagePage from '../pages/RetailPackagePage';
 import { CustomerManagementPage } from '../pages/CustomerManagementPage';
 import RetailContractPage from '../pages/RetailContractPage';
+import { ForecastBaseDataPage } from '../pages/ForecastBaseDataPage';
 
 // 路由配置接口
 export interface RouteConfig {
@@ -36,7 +37,7 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/price-analysis/comparison', title: '价格对比分析', component: PlaceholderPage },
 
     // 价格预测
-    { path: '/price-forecast/baseline-data', title: '预测基础数据', component: PlaceholderPage },
+    { path: '/price-forecast/baseline-data', title: '预测基础数据', component: ForecastBaseDataPage },
     { path: '/price-forecast/d-2', title: 'D-2价格预测', component: PlaceholderPage },
     { path: '/price-forecast/day-ahead', title: '日前价格预测', component: PlaceholderPage },
     { path: '/price-forecast/monthly', title: '月度价格预测', component: PlaceholderPage },

@@ -185,6 +185,8 @@ class ForecastBaseDataService:
             days = [base_date - timedelta(days=i) for i in range(7, -1, -1)]  # D-7 ... D
         elif range_type == "historical_10":
             days = [base_date - timedelta(days=i) for i in range(10, 0, -1)]  # D-10 ... D-1
+        elif range_type == "desktop_full_range":
+            days = [base_date + timedelta(days=i) for i in range(-10, 3)]  # D-10 ... D-1, D, D+1, D+2
         else:
             raise ValueError(f"无效的日期范围类型: {range_type}")
         return [d.strftime("%Y-%m-%d") for d in days]
