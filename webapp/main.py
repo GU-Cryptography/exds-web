@@ -8,7 +8,9 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from webapp.tools.mongo import DATABASE as db
+from webapp.tools.logging_config import configure_logging
 from webapp.api import v1
+from webapp.api import v1_forecast_base_data
 
 # Import security functions and models from the new security tool
 from webapp.tools.security import (
@@ -20,6 +22,9 @@ from webapp.tools.security import (
 )
 
 # --- Initialization ---
+
+# 全局日志初始化（方案A）
+configure_logging()
 
 def get_real_ip(request: Request) -> str:
     if "x-forwarded-for" in request.headers:
@@ -66,6 +71,7 @@ async def login_for_access_token(request: Request, form_data: OAuth2PasswordRequ
 # Include v1 routers
 app.include_router(v1.public_router)
 app.include_router(v1.router, dependencies=[Depends(get_current_active_user)])
+app.include_router(v1_forecast_base_data.router, dependencies=[Depends(get_current_active_user)])
 
 @app.get("/", tags=["Root"], summary="应用根路径")
 def read_root():

@@ -2,6 +2,7 @@ import os
 import configparser
 import json
 import pymongo
+import logging
 
 import os
 
@@ -12,6 +13,7 @@ base_path = os.path.expanduser('~')
 exds_path = f'{base_path}{os.sep}.exds'
 # 构建配置文件的完整路径
 config_path = f'{exds_path}{os.sep}config.ini'
+logger = logging.getLogger(__name__)
 
 # 从配置文件config.ini中读取指定的配置参数。
 def get_config(section, option, default_value=None):
