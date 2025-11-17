@@ -1,8 +1,16 @@
-from bson import ObjectId
-from pymongo.errors import DuplicateKeyError
-from webapp.tools.mongo import DATABASE
-from webapp.models.retail_package import RetailPackage, RetailPackageListItem, ValidationResult
+import logging
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from bson import ObjectId
+from pymongo.database import Database
+from pymongo.errors import DuplicateKeyError
+
+from webapp.models.retail_package import RetailPackage, RetailPackageListItem, ValidationResult
+from webapp.tools.mongo import DATABASE
+
+
+logger = logging.getLogger(__name__)
 
 
 class PackageService:
@@ -18,11 +26,11 @@ class PackageService:
         "archived": []                 # 归档不能转换到其他状态
     }
 
-    def __init__(self, db):
+    def __init__(self, db: Database) -> None:
         self.db = db
         self.collection = self.db.retail_packages
 
-    def create_package(self, package_data: dict, operator: str, status: str = "draft") -> dict:
+    def create(self, package_data: Dict[str, Any], operator: str, status: str = "draft") -> Dict[str, Any]:
         """
         创建新的零售套餐
 
@@ -81,7 +89,7 @@ class PackageService:
             "created_at": package.created_at.isoformat()
         }
 
-    def list_packages(self, filters: dict, page: int, page_size: int) -> dict:
+    def list(self, filters: Dict[str, Optional[str]], page: int, page_size: int) -> Dict[str, Any]:
         """
         Retrieves a paginated list of retail packages.
         """
@@ -207,7 +215,7 @@ class PackageService:
             ).isoformat()
         }
 
-    def get_package_by_id(self, package_id: str) -> dict:
+    def get_by_id(self, package_id: str) -> Dict[str, Any]:
         """
         根据ID获取套餐详情
 
@@ -239,7 +247,7 @@ class PackageService:
         doc["contract_count"] = contract_count
         return doc
 
-    def update_package(self, package_id: str, package_data: dict, operator: str) -> dict:
+    def update(self, package_id: str, package_data: Dict[str, Any], operator: str) -> Dict[str, Any]:
         """
         更新套餐
 
@@ -321,9 +329,9 @@ class PackageService:
             raise ValueError(f"更新失败: {package_id}")
 
         # 7. 返回更新后的数据
-        return self.get_package_by_id(package_id)
+        return self.get_by_id(package_id)
 
-    def delete_package(self, package_id: str) -> None:
+    def delete(self, package_id: str) -> None:
         """
         删除套餐（仅草稿状态）
 
@@ -401,8 +409,8 @@ class PackageService:
         # 4. 设置为草稿状态
         new_package_data["status"] = "draft"
 
-        # 5. 使用create_package方法创建新套餐
-        return self.create_package(
+        # 5. 使用统一 create 方法创建新套餐
+        return self.create(
             package_data=new_package_data,
             operator=operator,
             status="draft"

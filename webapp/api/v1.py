@@ -310,7 +310,7 @@ def get_sgcc_prices(page: int = 1, pageSize: int = 10):
         return json.loads(json_util.dumps(response))
 
     except Exception as e:
-        print(f"[DEBUG] Error in get_sgcc_prices: {e}")
+        logger.error(f"Error in get_sgcc_prices: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取国网代购电价数据时出错: {str(e)}")
 
 # ##############################################################################
@@ -339,7 +339,7 @@ def get_pricing_models(
         )
         return models
     except Exception as e:
-        print(f"[DEBUG] Error in get_pricing_models: {e}")
+        logger.error(f"Error in get_pricing_models: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取定价模型列表时出错: {str(e)}")
 
 
@@ -364,7 +364,7 @@ def get_pricing_model(model_code: str):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[DEBUG] Error in get_pricing_model: {e}")
+        logger.error(f"Error in get_pricing_model: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取定价模型详情时出错: {str(e)}")
 
 
@@ -390,7 +390,7 @@ def validate_pricing_config(model_code: str, data: dict = Body(...)):
 
         return result
     except Exception as e:
-        print(f"[DEBUG] Error in validate_pricing_config: {e}")
+        logger.error(f"Error in validate_pricing_config: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"验证定价配置时出错: {str(e)}")
 
 # ##############################################################################
@@ -747,7 +747,7 @@ def get_sgcc_price_pdf(month: str):
         document = PRICE_SGCC_COLLECTION.find_one({'_id': month}, {'pdf_binary_data': 1, 'attachment_name': 1})
         if document and 'pdf_binary_data' in document and document['pdf_binary_data']:
             pdf_bytes = document['pdf_binary_data']
-            print(f"[DEBUG] Found PDF for month {month}. Size: {len(pdf_bytes)} bytes.")
+            logger.debug(f"Found PDF for month {month}. Size: {len(pdf_bytes)} bytes.")
             attachment_name = document.get('attachment_name', f"sgcc_price_{month}.pdf")
 
             headers = {
@@ -755,8 +755,10 @@ def get_sgcc_price_pdf(month: str):
             }
             return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
         else:
-            print(f"[DEBUG] PDF not found or empty for month {month}.")
+            logger.warning(f"PDF not found or empty for month {month}.")
             raise HTTPException(status_code=404, detail=f"未找到月份 {month} 的PDF文件或文件为空.")
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"[DEBUG] Error in get_sgcc_price_pdf: {e}")
+        logger.error(f"Error in get_sgcc_price_pdf: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取PDF文件时出错: {str(e)}")

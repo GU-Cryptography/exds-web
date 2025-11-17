@@ -1,5 +1,7 @@
+import logging
 from bson import ObjectId
 from typing import Optional, Dict, Any, List
+from pymongo.database import Database
 from webapp.tools.mongo import DATABASE
 from webapp.models.contract import (
     Contract, ContractCreate, ContractListItem, calculate_contract_status
@@ -8,13 +10,16 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
 
+logger = logging.getLogger(__name__)
+
+
 class ContractService:
     """
     Service layer for contract management.
     Handles business logic for creating, retrieving, updating, and deleting contracts.
     """
 
-    def __init__(self, db):
+    def __init__(self, db: Database) -> None:
         self.db = db
         self.collection = self.db.retail_contracts
         self._ensure_indexes()
@@ -60,9 +65,9 @@ class ContractService:
 
         except Exception as e:
             # 索引创建失败不应该阻止服务启动，记录错误即可
-            print(f"创建合同索引时出错: {str(e)}")
+            logger.warning(f"创建合同索引时出错: {str(e)}")
 
-    def create_contract(self, contract_data: dict, operator: str) -> dict:
+    def create(self, contract_data: dict, operator: str) -> dict:
         """
         创建新合同
 
@@ -131,7 +136,7 @@ class ContractService:
         created_contract = self.collection.find_one({"_id": result.inserted_id})
         return self._convert_to_dict_with_status(created_contract)
 
-    def get_contract_by_id(self, contract_id: str) -> dict:
+    def get_by_id(self, contract_id: str) -> dict:
         """
         根据ID获取合同详情
 
@@ -154,7 +159,7 @@ class ContractService:
 
         return self._convert_to_dict_with_status(contract)
 
-    def list_contracts(self, filters: dict, page: int = 1, page_size: int = 20) -> dict:
+    def list(self, filters: dict, page: int = 1, page_size: int = 20) -> dict:
         """
         获取合同列表
 
@@ -241,7 +246,7 @@ class ContractService:
             "items": items
         }
 
-    def update_contract(self, contract_id: str, contract_data: dict, operator: str) -> dict:
+    def update(self, contract_id: str, contract_data: dict, operator: str) -> dict:
         """
         更新合同（仅待生效状态）
 
@@ -340,7 +345,7 @@ class ContractService:
         updated_contract = self.collection.find_one({"_id": ObjectId(contract_id)})
         return self._convert_to_dict_with_status(updated_contract)
 
-    def delete_contract(self, contract_id: str) -> None:
+    def delete(self, contract_id: str) -> None:
         """
         删除合同（仅待生效状态）
 

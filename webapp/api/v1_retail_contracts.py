@@ -22,7 +22,7 @@ async def create_contract(
     """创建新合同"""
     service = ContractService(DATABASE)
     try:
-        result = service.create_contract(
+        result = service.create(
             contract_data=contract.model_dump(exclude_unset=True),
             operator=current_user.username
         )
@@ -67,7 +67,7 @@ async def list_contracts(
     - page_size: 每页数量
     """
     service = ContractService(DATABASE)
-    result = service.list_contracts(
+    result = service.list(
         filters={
             "contract_name": contract_name,
             "package_name": package_name,
@@ -278,7 +278,7 @@ async def get_contract(
     """获取合同详情"""
     service = ContractService(DATABASE)
     try:
-        result = service.get_contract_by_id(contract_id)
+        result = service.get_by_id(contract_id)
         return result
     except ValueError as e:
         raise HTTPException(
@@ -296,7 +296,7 @@ async def update_contract(
     """更新合同（仅待生效状态）"""
     service = ContractService(DATABASE)
     try:
-        result = service.update_contract(
+        result = service.update(
             contract_id=contract_id,
             contract_data=contract.model_dump(exclude_unset=True),
             operator=current_user.username
@@ -329,7 +329,7 @@ async def delete_contract(
     """删除合同（仅待生效状态）"""
     service = ContractService(DATABASE)
     try:
-        service.delete_contract(contract_id)
+        service.delete(contract_id)
         return None  # 204 No Content
     except ValueError as e:
         error_msg = str(e)

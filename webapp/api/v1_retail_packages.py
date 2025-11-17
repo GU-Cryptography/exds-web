@@ -1,12 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Body
-from typing import Optional
+from typing import Any, Dict, Optional
 
-from webapp.models.retail_package import RetailPackage, PackageListResponse
+from fastapi import APIRouter, Body, Depends, HTTPException, status
+
+from webapp.models.retail_package import PackageListResponse, RetailPackage
 from webapp.services.package_service import PackageService
 from webapp.services.pricing_engine import PricingEngine
 from webapp.tools.mongo import DATABASE
-# Corrected import path for the user dependency
-from webapp.tools.security import get_current_active_user, User
+from webapp.tools.security import User, get_current_active_user
 
 router = APIRouter(prefix="/retail-packages", tags=["Retail Packages"])
 
@@ -19,7 +19,7 @@ async def create_package(
     """创建新的零售套餐"""
     service = PackageService(DATABASE)
     try:
-        result = service.create_package(
+        result = service.create(
             package_data=package.dict(exclude_unset=True),
             status="draft" if save_as_draft else "active",
             operator=current_user.username

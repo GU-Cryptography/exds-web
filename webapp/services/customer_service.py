@@ -1,9 +1,16 @@
-from bson import ObjectId
-from pymongo.errors import DuplicateKeyError
-from typing import Optional, List, Dict, Any
-from webapp.tools.mongo import DATABASE
-from webapp.models.customer import Customer, CustomerCreate, CustomerUpdate, CustomerListItem
+import logging
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from bson import ObjectId
+from pymongo.database import Database
+from pymongo.errors import DuplicateKeyError
+
+from webapp.models.customer import Customer, CustomerCreate, CustomerUpdate, CustomerListItem
+from webapp.tools.mongo import DATABASE
+
+
+logger = logging.getLogger(__name__)
 
 
 class CustomerService:
@@ -12,12 +19,12 @@ class CustomerService:
     Handles business logic for creating, retrieving, updating, and deleting customers.
     """
 
-    def __init__(self, db):
+    def __init__(self, db: Database) -> None:
         self.db = db
         self.collection = self.db.customers
         self._ensure_indexes()
 
-    def _ensure_indexes(self):
+    def _ensure_indexes(self) -> None:
         """确保数据库索引存在"""
         try:
             # 要创建的索引列表
@@ -49,11 +56,11 @@ class CustomerService:
                 if options['name'] not in existing_indexes:
                     self.collection.create_index(keys, **options)
 
-        except Exception as e:
+        except Exception as exc:  # pragma: no cover - best effort
             # 索引创建失败不应该阻止服务启动，记录错误即可
-            print(f"创建客户索引时出错: {str(e)}")
+            logger.warning("创建客户索引时出错: %s", exc)
 
-    def create_customer(self, customer_data: dict, operator: str) -> dict:
+    def create(self, customer_data: Dict[str, Any], operator: str) -> Dict[str, Any]:
         """
         创建新客户
 
@@ -103,7 +110,7 @@ class CustomerService:
         created_customer = self.collection.find_one({"_id": result.inserted_id})
         return self._convert_to_dict(created_customer)
 
-    def get_customer_by_id(self, customer_id: str) -> dict:
+    def get_by_id(self, customer_id: str) -> Dict[str, Any]:
         """
         根据ID获取客户详情
 
@@ -126,7 +133,7 @@ class CustomerService:
 
         return self._convert_to_dict(customer)
 
-    def list_customers(self, filters: dict, page: int = 1, page_size: int = 20) -> dict:
+    def list(self, filters: Dict[str, Optional[str]], page: int = 1, page_size: int = 20) -> Dict[str, Any]:
         """
         获取客户列表
 
@@ -237,7 +244,7 @@ class CustomerService:
             "items": items
         }
 
-    def update_customer(self, customer_id: str, customer_data: dict, operator: str) -> dict:
+    def update(self, customer_id: str, customer_data: Dict[str, Any], operator: str) -> Dict[str, Any]:
         """
         更新客户信息
 
@@ -310,7 +317,7 @@ class CustomerService:
         updated_customer = self.collection.find_one({"_id": ObjectId(customer_id)})
         return self._convert_to_dict(updated_customer)
 
-    def delete_customer(self, customer_id: str) -> None:
+    def delete(self, customer_id: str) -> None:
         """
         删除客户（物理删除，仅限意向客户）
 
@@ -539,7 +546,7 @@ class CustomerService:
         target_account["metering_points"].append(metering_point_data)
 
         # 更新客户信息
-        result = self.update_customer(
+        result = self.update(
             customer_id=customer_id,
             customer_data={"utility_accounts": accounts},
             operator=operator
@@ -600,7 +607,7 @@ class CustomerService:
             raise ValueError(f"计量点ID '{metering_point_id}' 不存在")
 
         # 更新客户信息
-        result = self.update_customer(
+        result = self.update(
             customer_id=customer_id,
             customer_data={"utility_accounts": accounts},
             operator=operator
@@ -659,7 +666,7 @@ class CustomerService:
                 break
 
         # 更新客户信息
-        result = self.update_customer(
+        result = self.update(
             customer_id=customer_id,
             customer_data={"utility_accounts": accounts},
             operator=operator

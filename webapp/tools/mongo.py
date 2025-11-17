@@ -36,7 +36,7 @@ def get_config(section, option, default_value=None):
             # 抛出异常以触发默认值设置
             raise FileNotFoundError("Config file not found.")
     except (configparser.NoSectionError, configparser.NoOptionError, FileNotFoundError) as e:
-        print(f'配置项 [{section}].{option} 不存在或文件未找到, 将使用并设置默认值。原因: {e}')
+        logger.warning(f'配置项 [{section}].{option} 不存在或文件未找到, 将使用并设置默认值。原因: {e}')
         # 如果提供了默认值，则调用 set_config 将其写入文件
         return default_value
 
