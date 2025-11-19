@@ -118,6 +118,53 @@ npm test --prefix frontend
 
 ## 关键开发规范
 
+### 0. 移动端面包屑标题（强制要求）
+
+**重要原则**：所有页面**必须**在移动端（`md` 以下断点）显示面包屑标题，桌面端不显示：
+- **桌面端**：页面标题已显示在 Tab 页签中，无需额外标题
+- **移动端**：没有 Tab 页签导航，**必须**显示面包屑标题以告知用户当前位置
+
+**标准实现**：
+```tsx
+import { Typography, useTheme, useMediaQuery, Box } from '@mui/material';
+
+export const PageName: React.FC = () => {
+  const theme = useTheme();
+  const isTablet = useMediaQuery(theme.breakpoints.down('md'));
+
+  return (
+    <Box sx={{ width: '100%' }}>
+      {/* 移动端面包屑标题 */}
+      {isTablet && (
+        <Typography
+          variant="subtitle1"
+          sx={{
+            mb: 2,
+            fontWeight: 'bold',
+            color: 'text.primary'
+          }}
+        >
+          一级菜单 / 二级菜单
+        </Typography>
+      )}
+
+      {/* 页面内容 */}
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        {/* 主内容区域 */}
+      </Paper>
+    </Box>
+  );
+};
+```
+
+**关键要点**：
+- ✅ 使用 `useMediaQuery(theme.breakpoints.down('md'))` 判断移动端
+- ✅ 面包屑标题使用 `variant="subtitle1"`（16px）
+- ✅ 字体粗细：`fontWeight: 'bold'`
+- ✅ 颜色：`color: 'text.primary'`（黑色）
+- ✅ 标题格式：`一级菜单 / 二级菜单`（与侧边栏菜单一致）
+- ✅ 页面主内容区域**不要**再添加 `<Typography variant="h4">` 标题
+
 ### 1. Material-UI Grid 组件语法（v7 版本）
 
 **极其重要**：本项目使用 Material-UI v7，其 `Grid` 组件 API 与 v5 **不兼容**。

@@ -65,6 +65,7 @@ const RetailContractPage: React.FC = () => {
   // 响应式设计
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isTablet = useMediaQuery(theme.breakpoints.down('md'));
 
   // 使用 matchPath 解析当前路由状态
   const createMatch = matchPath('/customer/retail-contracts/create', location.pathname);
@@ -641,6 +642,19 @@ const RetailContractPage: React.FC = () => {
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
       <Box sx={{ width: '100%' }}>
+        {/* 移动端面包屑标题 */}
+        {isTablet && (
+          <Typography
+            variant="subtitle1"
+            sx={{
+              mb: 2,
+              fontWeight: 'bold',
+              color: 'text.primary'
+            }}
+          >
+            客户管理 / 零售合同管理
+          </Typography>
+        )}
 
         {/* 查询区域 */}
         <Paper variant="outlined" sx={{ mb: 2 }}>

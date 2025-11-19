@@ -246,6 +246,7 @@ const ChartComponent = React.memo<ChartComponentProps>(({
 export const ForecastBaseDataPage: React.FC = () => {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+    const isTablet = useMediaQuery(theme.breakpoints.down('md'));
 
     // 日期状态
     const [selectedDate, setSelectedDate] = useState<Date | null>(addDays(new Date(), -1));
@@ -610,6 +611,20 @@ export const ForecastBaseDataPage: React.FC = () => {
     return (
         <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
             <Box sx={{ width: '100%' }}>
+                {/* 移动端面包屑标题 */}
+                {isTablet && (
+                    <Typography
+                        variant="subtitle1"
+                        sx={{
+                            mb: 2,
+                            fontWeight: 'bold',
+                            color: 'text.primary'
+                        }}
+                    >
+                        价格预测 / 预测基础数据
+                    </Typography>
+                )}
+
                 {/* 日期选择器 */}
                 <Paper
                     variant="outlined"

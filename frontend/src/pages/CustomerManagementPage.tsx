@@ -57,6 +57,7 @@ export const CustomerManagementPage: React.FC = () => {
     // 响应式设计
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+    const isTablet = useMediaQuery(theme.breakpoints.down('md'));
 
     // 使用 matchPath 解析当前路由状态
     const createMatch = matchPath('/customer/profiles/create', location.pathname);
@@ -789,6 +790,19 @@ export const CustomerManagementPage: React.FC = () => {
 
     return (
         <Box sx={{ width: '100%' }}>
+            {/* 移动端面包屑标题 */}
+            {isTablet && (
+                <Typography
+                    variant="subtitle1"
+                    sx={{
+                        mb: 2,
+                        fontWeight: 'bold',
+                        color: 'text.primary'
+                    }}
+                >
+                    客户管理 / 客户档案管理
+                </Typography>
+            )}
 
             {/* 查询筛选区域 */}
             <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 }, mb: 2 }}>

@@ -10,7 +10,8 @@ import {
     Button,
     useMediaQuery,
     Theme,
-    IconButton
+    IconButton,
+    useTheme
 } from '@mui/material';
 import { SvgIconProps } from '@mui/material/SvgIcon';
 import apiClient from '../api/client';
@@ -113,7 +114,9 @@ const GridAgencyPricePage: React.FC = () => {
         onNext: handleNextMonth,
     });
 
+    const theme = useTheme();
     const isMobile = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
+    const isTablet = useMediaQuery(theme.breakpoints.down('md'));
 
     const handleViewPdf = async (id: string | number) => {
         try {
@@ -409,6 +412,20 @@ const GridAgencyPricePage: React.FC = () => {
 
     return (
         <Box sx={{ width: '100%' }}>
+            {/* 移动端面包屑标题 */}
+            {isTablet && (
+                <Typography
+                    variant="subtitle1"
+                    sx={{
+                        mb: 2,
+                        fontWeight: 'bold',
+                        color: 'text.primary'
+                    }}
+                >
+                    基础数据 / 国网代购电价格
+                </Typography>
+            )}
+
             {renderContent()}
         </Box>
     );

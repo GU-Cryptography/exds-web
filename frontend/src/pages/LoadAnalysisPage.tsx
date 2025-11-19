@@ -6,6 +6,8 @@ import {
     Tabs,
     Tab,
     Paper,
+    useTheme,
+    useMediaQuery,
 } from '@mui/material';
 import { ConsumptionTrendTab } from '../components/ConsumptionTrendTab';
 import { MonthlyLoadCurveAnalysisTab } from '../components/MonthlyLoadCurveAnalysisTab';
@@ -39,6 +41,8 @@ function TabPanel(props: TabPanelProps) {
 
 export const LoadAnalysisPage: React.FC = () => {
     const [overallActiveTab, setOverallActiveTab] = useState(0);
+    const theme = useTheme();
+    const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
     const handleOverallTabChange = (event: React.SyntheticEvent, newValue: number) => {
         setOverallActiveTab(newValue);
@@ -46,6 +50,20 @@ export const LoadAnalysisPage: React.FC = () => {
 
     return (
         <Box sx={{ width: '100%' }}>
+            {/* 移动端面包屑标题 */}
+            {isMobile && (
+                <Typography
+                    variant="subtitle1"
+                    sx={{
+                        mb: 2,
+                        fontWeight: 'bold',
+                        color: 'text.primary'
+                    }}
+                >
+                    负荷预测 / 总体负荷分析
+                </Typography>
+            )}
+
             {/* 主内容卡片 */}
             <Paper variant="outlined" sx={{ borderColor: 'divider' }}>
                 <Tabs value={overallActiveTab} onChange={handleOverallTabChange} aria-label="overall load analysis tabs">

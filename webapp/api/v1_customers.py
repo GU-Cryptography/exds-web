@@ -19,7 +19,7 @@ async def create_customer(
     """创建新客户"""
     service = CustomerService(DATABASE)
     try:
-        result = service.create_customer(
+        result = service.create(
             customer_data=customer.model_dump(exclude_unset=True),
             operator=current_user.username
         )
@@ -52,7 +52,7 @@ async def list_customers(
 ):
     """获取客户列表"""
     service = CustomerService(DATABASE)
-    result = service.list_customers(
+    result = service.list(
         filters={
             "keyword": keyword,
             "user_type": user_type,
@@ -75,7 +75,7 @@ async def get_customer(
     """获取客户详情"""
     service = CustomerService(DATABASE)
     try:
-        result = service.get_customer_by_id(customer_id)
+        result = service.get_by_id(customer_id)
         return result
     except ValueError as e:
         raise HTTPException(
@@ -93,7 +93,7 @@ async def update_customer(
     """更新客户信息"""
     service = CustomerService(DATABASE)
     try:
-        result = service.update_customer(
+        result = service.update(
             customer_id=customer_id,
             customer_data=customer.model_dump(exclude_unset=True),
             operator=current_user.username
@@ -126,7 +126,7 @@ async def delete_customer(
     """删除客户（软删除）"""
     service = CustomerService(DATABASE)
     try:
-        service.delete_customer(customer_id)
+        service.delete(customer_id)
         return None
     except ValueError as e:
         raise HTTPException(

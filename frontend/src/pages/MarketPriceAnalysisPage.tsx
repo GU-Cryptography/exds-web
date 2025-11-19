@@ -40,6 +40,7 @@ export const MarketPriceAnalysisPage: React.FC = () => {
     const [tabIndex, setTabIndex] = useState(0);
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+    const isTablet = useMediaQuery(theme.breakpoints.down('md'));
 
     const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
         setTabIndex(newValue);
@@ -55,6 +56,20 @@ export const MarketPriceAnalysisPage: React.FC = () => {
 
     return (
         <Box sx={{ width: '100%' }}>
+            {/* 移动端面包屑标题 */}
+            {isTablet && (
+                <Typography
+                    variant="subtitle1"
+                    sx={{
+                        mb: 2,
+                        fontWeight: 'bold',
+                        color: 'text.primary'
+                    }}
+                >
+                    价格分析 / 现货价格分析
+                </Typography>
+            )}
+
             <Paper variant="outlined" sx={{ borderColor: 'divider' }}>
                 <Tabs
                     value={tabIndex}
