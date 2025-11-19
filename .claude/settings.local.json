@@ -55,7 +55,8 @@
       "Bash(dir:*)",
       "Bash(.venv/Scripts/python.exe:*)",
       "Bash(mkdir:*)",
-      "Bash(cmd //c \"taskkill /F /PID 16052\")"
+      "Bash(cmd //c \"taskkill /F /PID 16052\")",
+      "Bash(\"docs/spec/后端开发规范_new.md\")"
     ],
     "deny": [],
     "ask": []
