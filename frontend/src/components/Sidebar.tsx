@@ -9,7 +9,7 @@ import {
     Box,
     Collapse
 } from '@mui/material';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
     DashboardOutlined as DashboardIcon,
     PeopleOutlined as PeopleIcon,
@@ -89,6 +89,7 @@ const menuItems: MenuItem[] = [
         icon: <PriceChangeIcon />,
         subItems: [
             { text: '现货价格分析', path: '/price-analysis/spot-market', icon: <AnalyticsOutlined /> },
+            { text: '现货趋势分析', path: '/price-analysis/spot-trend', icon: <TimelineIcon /> },
             { text: '中长期价格分析', path: '/price-analysis/mid-long-term', icon: <TrendingUpOutlined /> },
             { text: '价格对比分析', path: '/price-analysis/comparison', icon: <BarChartOutlined /> },
         ],

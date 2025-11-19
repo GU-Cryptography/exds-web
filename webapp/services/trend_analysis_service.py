@@ -43,11 +43,27 @@ class TrendAnalysisService:
                     ([('datetime', 1)], {'name': 'idx_datetime'}),
                     ([('date_str', 1)], {'name': 'idx_date_str'}), # 辅助字段
                 ]
-                existing_indexes = {idx.get('name') for idx in col.list_indexes()}
+                
+                # 获取现有索引信息
+                existing_indexes = list(col.list_indexes())
+                existing_names = {idx.get('name') for idx in existing_indexes}
+                # 将 SON 对象转换为 tuple 以便比较: (('datetime', 1),)
+                existing_keys = {tuple(idx.get('key').items()) for idx in existing_indexes}
+
                 for keys, options in indexes:
-                    if options['name'] not in existing_indexes:
-                        col.create_index(keys, **options)
-                        logger.info(f"创建索引: {options['name']} on {col.name}")
+                    key_tuple = tuple(keys)
+                    
+                    # 1. 如果键已经存在索引（无论名字叫什么），则跳过，避免 IndexOptionsConflict
+                    if key_tuple in existing_keys:
+                        continue
+                        
+                    # 2. 如果名字不存在，则尝试创建
+                    if options['name'] not in existing_names:
+                        try:
+                            col.create_index(keys, **options)
+                            logger.info(f"创建索引: {options['name']} on {col.name}")
+                        except Exception as e:
+                            logger.warning(f"创建索引 {options['name']} 失败: {str(e)}")
         except Exception as e:
             logger.warning(f"创建索引时出错: {str(e)}")
 
