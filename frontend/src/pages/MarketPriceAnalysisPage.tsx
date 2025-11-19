@@ -1,6 +1,10 @@
 
 import React, { useState } from 'react';
-import { Box, Tabs, Tab, Typography, Paper } from '@mui/material';
+import { Box, Tabs, Tab, Typography, Paper, useMediaQuery, useTheme } from '@mui/material';
+import DashboardIcon from '@mui/icons-material/Dashboard';
+import TodayIcon from '@mui/icons-material/Today';
+import TimelineIcon from '@mui/icons-material/Timeline';
+import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import { MarketDashboardTab } from '../components/MarketDashboardTab';
 import { DayAheadAnalysisTab } from '../components/DayAheadAnalysisTab'; // 导入新组件
 import { RealTimeAnalysisTab } from '../components/RealTimeAnalysisTab'; // 导入新组件
@@ -34,10 +38,20 @@ function TabPanel(props: TabPanelProps) {
 
 export const MarketPriceAnalysisPage: React.FC = () => {
     const [tabIndex, setTabIndex] = useState(0);
+    const theme = useTheme();
+    const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
     const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
         setTabIndex(newValue);
     };
+
+    // Tab 配置：图标 + 完整标题 + 移动端简化标题
+    const tabsConfig = [
+        { icon: <DashboardIcon />, label: '现货价格总览', mobileLabel: '总览' },
+        { icon: <TodayIcon />, label: '日前现货分析', mobileLabel: '日前' },
+        { icon: <TimelineIcon />, label: '实时现货复盘', mobileLabel: '实时' },
+        { icon: <CompareArrowsIcon />, label: '价差归因分析', mobileLabel: '价差' },
+    ];
 
     return (
         <Box sx={{ width: '100%' }}>
@@ -54,20 +68,24 @@ export const MarketPriceAnalysisPage: React.FC = () => {
                             '&.Mui-disabled': { opacity: 0.3 }
                         },
                         '& .MuiTab-root': {
-                            minWidth: { xs: '45%', sm: 120 }, // 移动端每个Tab占45%宽度，确保只显示2个
-                            maxWidth: { xs: '45%', sm: 'none' }, // 移动端限制最大宽度
-                            fontSize: { xs: '0.875rem', sm: '0.9375rem' },
-                            px: { xs: 1, sm: 2 } // 移动端减少内边距
+                            minWidth: { xs: 70, sm: 120 }, // 移动端缩小最小宽度以容纳4个Tab
+                            maxWidth: { xs: 'none', sm: 'none' },
+                            fontSize: { xs: '0.75rem', sm: '0.9375rem' },
+                            px: { xs: 0.5, sm: 2 }, // 移动端进一步减少内边距
+                            minHeight: { xs: 64, sm: 48 }, // 移动端增加高度以容纳图标+文字
                         }
                     }}
                 >
-                    <Tab label="现货价格总览" id="analysis-tab-0" aria-controls="analysis-tabpanel-0" />
-                    <Tab label="日前现货分析" id="analysis-tab-2" aria-controls="analysis-tabpanel-1" />
-                    <Tab label="实时现货复盘" id="analysis-tab-3" aria-controls="analysis-tabpanel-2" />
-                    <Tab label="价差归因分析" id="analysis-tab-4" aria-controls="analysis-tabpanel-3" />
-                    {/* <Tab label="时段价格曲线" id="analysis-tab-5" aria-controls="analysis-tabpanel-4" />
-                    <Tab label="现货价格曲线" id="analysis-tab-1" aria-controls="analysis-tabpanel-5" /> */}
-
+                    {tabsConfig.map((tab, index) => (
+                        <Tab
+                            key={index}
+                            icon={tab.icon}
+                            iconPosition="top"
+                            label={isMobile ? tab.mobileLabel : tab.label}
+                            id={`analysis-tab-${index}`}
+                            aria-controls={`analysis-tabpanel-${index}`}
+                        />
+                    ))}
                 </Tabs>
             </Paper>
             <TabPanel value={tabIndex} index={0}>
