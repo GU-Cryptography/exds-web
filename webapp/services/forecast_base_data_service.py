@@ -35,12 +35,12 @@ DATA_ITEM_CONFIG: Dict[int, Dict[str, Any]] = {
     8: {"name": "短期风电预测", "collection": "daily_release", "field": "wind_forecast", "filter": {}},
     9: {"name": "非市场化机组出力预测", "collection": "daily_release", "field": "nonmarket_unit_forecast", "filter": {}},
     10: {"name": "联络线总计划", "collection": "daily_release", "field": "tieline_plan", "filter": {}},
-    # 实时发力（real_time_generation / real_time_tieline）
-    11: {"name": "实际全网总出力", "collection": "real_time_generation", "field": "total_generation", "filter": {}},
+    # 实时发力（real_time_generation / actual_operation）
+    11: {"name": "实际系统负荷", "collection": "actual_operation", "field": "system_load", "filter": {}},
     12: {"name": "实际风电出力", "collection": "real_time_generation", "field": "wind_generation", "filter": {}},
     13: {"name": "实际光电出力", "collection": "real_time_generation", "field": "solar_generation", "filter": {}},
     14: {"name": "实际水电(含抽蓄)出力", "collection": "real_time_generation", "field": "hydro_with_pumped_total_generation", "filter": {}},
-    15: {"name": "联络线总计划值", "collection": "real_time_tieline", "field": "total_tieline_plan", "filter": {}},
+    15: {"name": "联络线潮流", "collection": "actual_operation", "field": "tieline_flow", "filter": {}},
 }
 
 
@@ -59,7 +59,7 @@ class ForecastBaseDataService:
         - 捕获 OperationFailure，避免因既有索引选项冲突引发异常
         """
         try:
-            for coll_name in {"weekly_forecast", "daily_release", "real_time_generation", "real_time_tieline"}:
+            for coll_name in {"weekly_forecast", "daily_release", "real_time_generation", "actual_operation"}:
                 collection = self.db[coll_name]
                 has_datetime_index = False
                 for idx in collection.list_indexes():

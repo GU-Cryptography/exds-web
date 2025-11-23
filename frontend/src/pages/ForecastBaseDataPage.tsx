@@ -84,11 +84,11 @@ const DATA_ITEMS_CONFIG = {
         { id: 10, name: '联络线总计划', shortName: '日联络' },
     ],
     realtime: [
-        { id: 11, name: '实际全网总出力', shortName: '实全网', desktopName: '实际全网总出力' },
+        { id: 11, name: '实际系统负荷', shortName: '实负荷', desktopName: '实际系统负荷' },
         { id: 12, name: '实际风电出力', shortName: '实风电', desktopName: '实际风电出力' },
         { id: 13, name: '实际光伏出力', shortName: '实光伏', desktopName: '实际光伏出力' },
         { id: 14, name: '实际水电(含抽蓄)出力', shortName: '实水电', desktopName: '实际水电(含抽蓄)出力' },
-        { id: 15, name: '联络线总计划', shortName: '实联络', desktopName: '联络线总计划' },
+        { id: 15, name: '联络线潮流', shortName: '实联络', desktopName: '联络线潮流' },
     ],
 };
 
