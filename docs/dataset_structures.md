@@ -82,10 +82,11 @@
 - `(date_str: 1, time_str: 1)`: 普通复合索引，用于按日期和时间点查询。
 
 ---
+---
 
-## 4. `real_time_tieline` - 实时联络线总计划
+## 4. `actual_operation` - 实际运行数据
 
-该集合存储实时的联络线总计划数据。
+该集合存储电网的实际运行数据，包括系统负荷、联络线潮流、正负备用等关键运行指标。
 
 - **数据来源**: `rpa.pipelines.spot_price`
 - **更新频率**: 每日
@@ -97,7 +98,11 @@
 | `datetime` | ISODate | **[主键]** 数据点对应的精确日期和时间。 |
 | `date_str` | String | 日期字符串，格式 `YYYY-MM-DD`。 |
 | `time_str` | String | 时间点字符串，格式 `HH:MM`。 |
-| `total_tieline_plan` | Number | 联络线总计划值 (MW)，精度4位小数。 |
+| `positive_reserve` | Number | 正负荷备用 (MW)，精度4位小数。 |
+| `negative_reserve` | Number | 负负荷备用 (MW)，精度4位小数。 |
+| `system_load` | Number | 系统负荷 (MW)，精度4位小数。 |
+| `tieline_flow` | Number | 联络线通道潮流 (MW)，精度4位小数。 |
+
 
 ### 4.2. 索引
 
@@ -108,8 +113,11 @@
 
 - **数据粒度**: 15分钟，每天96个数据点。
 - **数据范围**: 下载到前一天（T-1），与实时现货价格、实时发电出力保持一致。
-- **下载路径**: `现货信息 > 省内现货 > 实时出清结果 > 实时联络线总计划_*`
-- **文件格式**: Excel文件（.xls），包含序号、日期、时刻点、数值四列。
+- **业务意义**:
+  - `positive_reserve` 和 `negative_reserve`: 系统正负备用容量，用于应对负荷波动和紧急情况。
+  - `system_load`: 电网实际系统负荷，反映全网用电需求。
+  - `tieline_flow`: 省间联络线的实际潮流值。
+
 
 ---
 
@@ -185,3 +193,34 @@
 - **索引**: 同 `real_time_spot_price`。
 
 ---
+
+## 6. `fuel_futures_data` - 燃料期货数据
+
+该集合存储燃料期货（动力煤、焦煤、原油）的日频价格数据，用于辅助电力成本预测。
+
+- **数据来源**: `pipelines/download_fuel_futures.py`
+- **更新频率**: 每日
+- **数据粒度**: 日频
+
+### 6.1. 字段说明
+
+| 字段名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `date` | ISODate | **[主键]** 数据对应的日期（00:00:00）。 |
+| `thermal_coal` | Object | 动力煤 (ZC0) 数据对象。 |
+| `thermal_coal.close` | Number | 收盘价。 |
+| `thermal_coal.open` | Number | 开盘价。 |
+| `thermal_coal.high` | Number | 最高价。 |
+| `thermal_coal.low` | Number | 最低价。 |
+| `thermal_coal.volume` | Number | 成交量。 |
+| `thermal_coal.open_interest` | Number | 持仓量。 |
+| `thermal_coal.is_valid` | Boolean | 数据有效性标志 (基于持仓量判定)。 |
+| `coking_coal` | Object | 焦煤 (JM0) 数据对象，结构同上。 |
+| `crude_oil` | Object | 原油 (SC0) 数据对象，结构同上。 |
+| `created_at` | ISODate | 记录创建时间。 |
+| `updated_at` | ISODate | 记录更新时间。 |
+
+### 6.2. 索引
+
+- `(date: 1)`: 唯一索引，确保每天只有一条记录。
+
