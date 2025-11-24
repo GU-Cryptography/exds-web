@@ -32,6 +32,9 @@ export const SpreadAnalysisTab: React.FC = () => {
         price_distribution: []
     });
 
+    const [priceSpreadDomain, setPriceSpreadDomain] = useState<[number, number] | undefined>(undefined);
+    const [deviationDomain, setDeviationDomain] = useState<[number, number] | undefined>(undefined);
+
     const chart1Ref = useRef<HTMLDivElement>(null);
     const chart2Ref = useRef<HTMLDivElement>(null);
     const chart3Ref = useRef<HTMLDivElement>(null);
@@ -73,6 +76,34 @@ export const SpreadAnalysisTab: React.FC = () => {
     useEffect(() => {
         fetchData(selectedDate);
     }, [selectedDate]);
+
+    useEffect(() => {
+        if (analysisData.time_series.length > 0) {
+            let maxPriceSpreadAbs = 0;
+            let maxDeviationAbs = 0;
+
+            analysisData.time_series.forEach(entry => {
+                if (entry.price_spread !== null && entry.price_spread !== undefined) {
+                    maxPriceSpreadAbs = Math.max(maxPriceSpreadAbs, Math.abs(entry.price_spread));
+                }
+                // total_volume_deviation is '竞价空间偏差'
+                if (entry.total_volume_deviation !== null && entry.total_volume_deviation !== undefined) {
+                    maxDeviationAbs = Math.max(maxDeviationAbs, Math.abs(entry.total_volume_deviation));
+                }
+            });
+
+            // Set a minimum domain extent to avoid axis collapsing if all values are zero
+            const priceSpreadExtent = Math.max(maxPriceSpreadAbs * 1.1, 10); // Ensure at least +/-10
+            setPriceSpreadDomain([-priceSpreadExtent, priceSpreadExtent]);
+
+            const deviationExtent = Math.max(maxDeviationAbs * 1.1, 10); // Ensure at least +/-10
+            setDeviationDomain([-deviationExtent, deviationExtent]);
+
+        } else {
+            setPriceSpreadDomain(undefined);
+            setDeviationDomain(undefined);
+        }
+    }, [analysisData.time_series]);
 
     const renderTableCell = (value: number | null) => {
         if (value === null || value === undefined) return <TableCell align="right">N/A</TableCell>;
@@ -158,12 +189,12 @@ export const SpreadAnalysisTab: React.FC = () => {
                                         label={{ value: '价差区间 (元/MWh)', position: 'insideBottom', offset: -5 }}
                                         angle={-45}
                                         textAnchor="end"
-                                        tick={{ fontSize: 10 }}
+                                        tick={false}
                                     />
                                     <YAxis
                                         label={{ value: '时段数量', angle: -90, position: 'insideLeft' }}
-                                        tick={{ fontSize: 10 }}
                                         allowDecimals={false}
+                                        tick={false}
                                     />
                                     <Tooltip content={({ active, payload }) => {
                                         if (active && payload && payload.length) {
@@ -180,7 +211,7 @@ export const SpreadAnalysisTab: React.FC = () => {
                                     <ReferenceLine x={0} stroke="#000" />
                                     <Bar dataKey="count" name="时段数量">
                                         {analysisData.price_distribution.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={entry.range_min >= 0 ? '#4caf50' : '#f44336'} />
+                                            <Cell key={`cell-${index}`} fill={entry.range_min >= 0 ? '#f44336' : '#4caf50'} />
                                         ))}
                                     </Bar>
                                 </ComposedChart>
@@ -192,10 +223,11 @@ export const SpreadAnalysisTab: React.FC = () => {
                             <ComposedChart data={analysisData.time_series}>
                                 <CartesianGrid strokeDasharray="3 3" />
                                 <XAxis dataKey="time_str" interval={11} tick={{ fontSize: 12 }} />
-                                <YAxis yAxisId="left" label={{ value: '价差(元/MWh)', angle: -90, position: 'insideLeft' }} tick={{ fontSize: 12 }} />
-                                <YAxis yAxisId="right" orientation="right" label={{ value: '偏差(MW)', angle: -90, position: 'insideRight' }} tick={{ fontSize: 12 }} />
+                                <YAxis yAxisId="left" label={{ value: '价差(元/MWh)', angle: -90, position: 'insideLeft' }} tick={{ fontSize: 12 }} domain={priceSpreadDomain} />
+                                <YAxis yAxisId="right" orientation="right" label={{ value: '偏差(MW)', angle: -90, position: 'insideRight' }} tick={{ fontSize: 12 }} domain={deviationDomain} />
                                 <Tooltip content={<CustomTooltip unitMap={{ price_spread: '元/MWh' }} unit="MW" />} />
                                 <Legend onClick={handleLegendClick} />
+                                <ReferenceLine y={0} stroke="#000" yAxisId="left" />
                                 <ReferenceLine y={0} stroke="#000" yAxisId="right" />
                                 <Bar yAxisId="left" dataKey="price_spread" name="价格偏差" barSize={20}>
                                     {analysisData.time_series.map((entry, index) => (
