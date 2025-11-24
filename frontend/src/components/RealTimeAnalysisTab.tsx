@@ -28,6 +28,7 @@ export const RealTimeAnalysisTab: React.FC = () => {
     const [selectedDate, setSelectedDate] = useState<Date | null>(addDays(new Date(), -2));
     const [loading, setLoading] = useState(false);
     const [chartData, setChartData] = useState<any[]>([]);
+    const [correlation, setCorrelation] = useState<number | null>(null);
 
     // 为每个图表创建独立的 ref
     const priceVolumeChartRef = useRef<HTMLDivElement>(null);
@@ -37,9 +38,14 @@ export const RealTimeAnalysisTab: React.FC = () => {
 
     const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
 
+    // 构建标题（包含相关性）
+    const priceSpaceTitle = correlation !== null
+        ? `${dateStr} 实时价格与市场竞价空间（相关性:${correlation}%）`
+        : `${dateStr} 实时价格与市场竞价空间`;
+
     // 全屏Hooks
     const { isFullscreen: isFs1, FullscreenEnterButton: FSEnter1, FullscreenExitButton: FSExit1, FullscreenTitle: FSTitle1, NavigationButtons: FSNav1 } = useChartFullscreen({
-        chartRef: priceVolumeChartRef, title: `${dateStr} 现货价格与负荷`, onPrevious: () => handleShiftDate(-1), onNext: () => handleShiftDate(1),
+        chartRef: priceVolumeChartRef, title: priceSpaceTitle, onPrevious: () => handleShiftDate(-1), onNext: () => handleShiftDate(1),
     });
     const { isFullscreen: isFs2, FullscreenEnterButton: FSEnter2, FullscreenExitButton: FSExit2, FullscreenTitle: FSTitle2, NavigationButtons: FSNav2 } = useChartFullscreen({
         chartRef: supplyStackChartRef, title: `${dateStr} 现货供给堆栈`, onPrevious: () => handleShiftDate(-1), onNext: () => handleShiftDate(1),
@@ -59,12 +65,23 @@ export const RealTimeAnalysisTab: React.FC = () => {
         const formattedDate = format(date, 'yyyy-MM-dd');
         apiClient.get(`/api/v1/market-analysis/real-time?date=${formattedDate}`)
             .then(response => {
-                const processedData = processApiData(response.data);
-                setChartData(processedData);
+                // 后端返回的数据结构：{ data: [...], metadata: { correlation_space: ..., correlation_thermal: ... } }
+                const responseData = response.data;
+                if (responseData.data) {
+                    const processedData = processApiData(responseData.data);
+                    setChartData(processedData);
+                    setCorrelation(responseData.metadata?.correlation || null);
+                } else {
+                    // 向后兼容：如果后端返回的是数组
+                    const processedData = processApiData(responseData);
+                    setChartData(processedData);
+                    setCorrelation(null);
+                }
             })
             .catch(error => {
                 console.error('Error fetching real-time analysis data:', error);
                 setChartData([]);
+                setCorrelation(null);
             })
             .finally(() => setLoading(false));
     };
@@ -114,17 +131,21 @@ export const RealTimeAnalysisTab: React.FC = () => {
                     <IconButton onClick={() => handleShiftDate(1)}><ArrowRightIcon /></IconButton>
                 </Paper>
 
-                {renderChartContainer(priceVolumeChartRef, isFs1, '实时价格与负荷', FSEnter1(), FSExit1(), FSTitle1(), FSNav1(),
+                {renderChartContainer(priceVolumeChartRef, isFs1,
+                    correlation !== null
+                        ? `实时价格与市场竞价空间（相关性:${correlation}%）`
+                        : '实时价格与市场竞价空间',
+                    FSEnter1(), FSExit1(), FSTitle1(), FSNav1(),
                     <ComposedChart data={chartData}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="time_str" interval={11} tick={{ fontSize: 12 }} />
                         <YAxis yAxisId="left" label={{ value: '价格 (元/MWh)', angle: -90, position: 'insideLeft' }} tick={{ fontSize: 12 }} />
-                        <YAxis yAxisId="right" orientation="right" label={{ value: '电量 (MWh)', angle: -90, position: 'insideRight' }} tick={{ fontSize: 12 }} />
-                        <Tooltip content={<CustomTooltip unitMap={{ avg_clearing_price: '元/MWh', total_clearing_power: 'MWh' }} />} />
+                        <YAxis yAxisId="right" orientation="right" label={{ value: '功率 (MW)', angle: -90, position: 'insideRight' }} tick={{ fontSize: 12 }} />
+                        <Tooltip content={<CustomTooltip unitMap={{ avg_clearing_price: '元/MWh', market_bidding_space: 'MW' }} />} />
                         <Legend />
                         {TouPeriodAreas}
                         <Line yAxisId="left" type="monotone" dataKey="avg_clearing_price" stroke="#f44336" name="实时价格" dot={false} />
-                        <Area yAxisId="right" type="monotone" dataKey="total_clearing_power" fill="#ff9800" stroke="#ff9800" name="实时总电量" />
+                        <Area yAxisId="right" type="monotone" dataKey="market_bidding_space" fill="#ff9800" stroke="#ff9800" name="市场竞价空间" fillOpacity={0.3} />
                     </ComposedChart>
                 )}
 

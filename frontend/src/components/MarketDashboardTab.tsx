@@ -353,7 +353,7 @@ const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onPreviou
     );
 };
 
-// 电量曲线图组件
+// 市场竞价空间曲线图组件
 const VolumeChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onPrevious: () => void; onNext: () => void }> = ({ data, dateStr, onPrevious, onNext }) => {
     const chartRef = useRef<HTMLDivElement>(null);
 
@@ -367,7 +367,7 @@ const VolumeChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onPrevio
     // 全屏功能
     const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, NavigationButtons } = useChartFullscreen({
         chartRef,
-        title: `${dateStr} 负荷曲线`,
+        title: `${dateStr} 市场竞价空间`,
         onPrevious,
         onNext
     });
@@ -376,7 +376,7 @@ const VolumeChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onPrevio
         <Paper variant="outlined" sx={{ mt: 1 }}>
             <Box sx={{ p: { xs: 1, sm: 2 } }}>
                 <Typography variant="h6" gutterBottom>
-                    负荷曲线
+                    市场竞价空间
                 </Typography>
                 <Box
                     ref={chartRef}
@@ -412,20 +412,20 @@ const VolumeChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onPrevio
                             <YAxis
                                 domain={[Math.floor(minVolume * 0.9), Math.ceil(maxVolume * 1.1)]}
                                 label={{
-                                    value: '电量 (MWh)',
+                                    value: '功率 (MW)',
                                     angle: -90,
                                     position: 'insideLeft'
                                 }}
                                 tick={{ fontSize: 12 }}
                             />
-                            <Tooltip content={<CustomTooltipContent unit="MWh" />} />
+                            <Tooltip content={<CustomTooltipContent unit="MW" />} />
                             <Legend />
                             <Line
                                 type="monotone"
                                 dataKey="volume_rt"
                                 stroke="#ff9800"
                                 strokeWidth={2}
-                                name="实时电量"
+                                name="实时竞价空间"
                                 dot={false}
                             />
                             <Line
@@ -434,7 +434,7 @@ const VolumeChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onPrevio
                                 stroke="#4caf50"
                                 strokeWidth={2}
                                 strokeDasharray="5 5"
-                                name="日前电量"
+                                name="日前竞价空间"
                                 dot={false}
                             />
                         </LineChart>
