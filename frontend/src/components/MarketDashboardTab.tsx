@@ -264,7 +264,7 @@ const CustomTooltipContent: React.FC<any> = ({ active, payload, label, unit }) =
 
 
 // 价格曲线图组件
-const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onPrevious: () => void; onNext: () => void }> = ({ data, dateStr, onPrevious, onNext }) => {
+const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string }> = ({ data, dateStr }) => {
     const chartRef = useRef<HTMLDivElement>(null);
 
     // 计算Y轴范围
@@ -274,12 +274,10 @@ const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onPreviou
 
     const { TouPeriodAreas } = useTouPeriodBackground(data);
 
-    // 全屏功能
-    const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, NavigationButtons } = useChartFullscreen({
+    // 全屏功能(移除导航按钮)
+    const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle } = useChartFullscreen({
         chartRef,
-        title: `${dateStr} 价格曲线`,
-        onPrevious,
-        onNext
+        title: `${dateStr} 价格曲线`
     });
 
     return (
@@ -306,7 +304,6 @@ const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onPreviou
                     <FullscreenEnterButton />
                     <FullscreenExitButton />
                     <FullscreenTitle />
-                    <NavigationButtons />
 
                     <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
@@ -354,7 +351,7 @@ const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onPreviou
 };
 
 // 市场竞价空间曲线图组件
-const VolumeChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onPrevious: () => void; onNext: () => void }> = ({ data, dateStr, onPrevious, onNext }) => {
+const VolumeChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string }> = ({ data, dateStr }) => {
     const chartRef = useRef<HTMLDivElement>(null);
 
     // 计算Y轴范围
@@ -364,12 +361,10 @@ const VolumeChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onPrevio
 
     const { TouPeriodAreas } = useTouPeriodBackground(data);
 
-    // 全屏功能
-    const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, NavigationButtons } = useChartFullscreen({
+    // 全屏功能(移除导航按钮)
+    const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle } = useChartFullscreen({
         chartRef,
-        title: `${dateStr} 市场竞价空间`,
-        onPrevious,
-        onNext
+        title: `${dateStr} 市场竞价空间`
     });
 
     return (
@@ -398,7 +393,6 @@ const VolumeChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onPrevio
                     <FullscreenEnterButton />
                     <FullscreenExitButton />
                     <FullscreenTitle />
-                    <NavigationButtons />
 
                     <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
@@ -516,23 +510,37 @@ const PeriodSummaryTable: React.FC<{ data: PeriodSummary[] }> = ({ data }) => (
     </TableContainer>
 );
 
+// Props接口
+interface MarketDashboardTabProps {
+    selectedDate: Date | null;
+}
+
 // 主组件
-export const MarketDashboardTab: React.FC = () => {
+export const MarketDashboardTab: React.FC<MarketDashboardTabProps> = ({ selectedDate }) => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [data, setData] = useState<DashboardData | null>(null);
-    // 默认日期为当日的前二日
-    const [selectedDate, setSelectedDate] = useState<Date | null>(addDays(new Date(), -2));
+    // 数据缓存
+    const [cachedDate, setCachedDate] = useState<string | null>(null);
+    const [cachedData, setCachedData] = useState<DashboardData | null>(null);
 
-    // 加载数据
+    // 加载数据(带缓存)
     useEffect(() => {
         if (!selectedDate) return;
 
         const fetchData = async () => {
+            const dateStr = format(selectedDate, 'yyyy-MM-dd');
+
+            // 检查缓存
+            if (cachedDate === dateStr && cachedData) {
+                console.log('使用缓存数据:', dateStr);
+                setData(cachedData);
+                return;
+            }
+
             setLoading(true);
             setError(null);
             try {
-                const dateStr = format(selectedDate, 'yyyy-MM-dd');
                 const response = await apiClient.get('/api/v1/market-analysis/dashboard', {
                     params: { date_str: dateStr }
                 });
@@ -544,13 +552,15 @@ export const MarketDashboardTab: React.FC = () => {
                     if (firstPoint.time_str !== '00:15') {
                         console.warn(`数据起点不正确: ${firstPoint.time_str}，应为 00:15`);
                     }
-                    // 验证数据点数量（一天96个15分钟间隔）
                     if (timeSeriesData.length !== 96) {
                         console.warn(`数据点数量不正确: ${timeSeriesData.length}，应为 96`);
                     }
                 }
 
                 setData(response.data);
+                // 更新缓存
+                setCachedDate(dateStr);
+                setCachedData(response.data);
             } catch (err: any) {
                 if (typeof err.response?.data?.detail === 'string') {
                     setError(err.response.data.detail);
@@ -567,112 +577,73 @@ export const MarketDashboardTab: React.FC = () => {
         };
 
         fetchData();
-    }, [selectedDate]);
-
-    // 日期导航
-    const handlePreviousDay = () => {
-        if (!selectedDate) return;
-        const newDate = new Date(selectedDate);
-        newDate.setDate(newDate.getDate() - 1);
-        setSelectedDate(newDate);
-    };
-
-    const handleNextDay = () => {
-        if (!selectedDate) return;
-        const newDate = new Date(selectedDate);
-        newDate.setDate(newDate.getDate() + 1);
-        setSelectedDate(newDate);
-    };
+    }, [selectedDate, cachedDate, cachedData]);
 
     return (
-        <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
-            <Box>
-                {/* 日期选择器 + 导航器 */}
-                <Paper variant="outlined" sx={{ p: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <IconButton onClick={handlePreviousDay} disabled={loading}>
-                        <ArrowLeftIcon />
-                    </IconButton>
+        <Box>
 
-                    <DatePicker
-                        label="选择日期"
-                        value={selectedDate}
-                        onChange={(newDate) => setSelectedDate(newDate)}
-                        disabled={loading}
-                        slotProps={{
-                            textField: {
-                                sx: { width: { xs: '150px', sm: '200px' } }
-                            }
-                        }}
-                    />
+            {/* 首次加载显示完整的 loading */}
+            {loading && !data ? (
+                <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+                    <CircularProgress />
+                </Box>
+            ) : error ? (
+                <Alert severity="error" sx={{ mt: 2 }}>
+                    {error}
+                </Alert>
+            ) : data ? (
+                <Box sx={{ position: 'relative' }}>
+                    {/* 数据加载时的覆盖层 */}
+                    {loading && (
+                        <Box
+                            sx={{
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                backgroundColor: 'rgba(255, 255, 255, 0.7)',
+                                zIndex: 1000
+                            }}
+                        >
+                            <CircularProgress />
+                        </Box>
+                    )}
 
-                    <IconButton onClick={handleNextDay} disabled={loading}>
-                        <ArrowRightIcon />
-                    </IconButton>
-                </Paper>
-
-                {/* 首次加载显示完整的 loading */}
-                {loading && !data ? (
-                    <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-                        <CircularProgress />
-                    </Box>
-                ) : error ? (
-                    <Alert severity="error" sx={{ mt: 2 }}>
-                        {error}
-                    </Alert>
-                ) : data ? (
-                    <Box sx={{ position: 'relative' }}>
-                        {/* 数据加载时的覆盖层 */}
-                        {loading && (
-                            <Box
-                                sx={{
-                                    position: 'absolute',
-                                    top: 0,
-                                    left: 0,
-                                    right: 0,
-                                    bottom: 0,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    backgroundColor: 'rgba(255, 255, 255, 0.7)',
-                                    zIndex: 1000
-                                }}
-                            >
-                                <CircularProgress />
-                            </Box>
-                        )}
-
-                        <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mt: 2 }}>
-                            {/* 财务指标大卡片 - 桌面端左侧，移动端全宽 */}
-                            <Grid size={{ xs: 12, md: 6 }}>
-                                <FinancialKPIsPanel kpis={data.financial_kpis} />
-                            </Grid>
-
-                            {/* 风险指标大卡片 - 桌面端右侧，移动端全宽 */}
-                            <Grid size={{ xs: 12, md: 6 }}>
-                                <RiskKPIsPanel kpis={data.risk_kpis} />
-                            </Grid>
-
-                            {/* 价格曲线图 */}
-                            <Grid size={{ xs: 12 }}>
-                                <PriceChart data={data.time_series} dateStr={selectedDate ? format(selectedDate, 'yyyy-MM-dd') : ''} onPrevious={handlePreviousDay} onNext={handleNextDay} />
-                            </Grid>
-
-                            {/* 电量曲线图 */}
-                            <Grid size={{ xs: 12 }}>
-                                <VolumeChart data={data.time_series} dateStr={selectedDate ? format(selectedDate, 'yyyy-MM-dd') : ''} onPrevious={handlePreviousDay} onNext={handleNextDay} />
-                            </Grid>
-
-                            {/* 时段汇总表格 */}
-                            <Grid size={{ xs: 12 }}>
-                                <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold', mt: 2 }}>
-                                    时段财务速览
-                                </Typography>
-                                <PeriodSummaryTable data={data.period_summary} />
-                            </Grid>
+                    <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mt: 2 }}>
+                        {/* 财务指标大卡片 - 桌面端左侧，移动端全宽 */}
+                        <Grid size={{ xs: 12, md: 6 }}>
+                            <FinancialKPIsPanel kpis={data.financial_kpis} />
                         </Grid>
-                    </Box>
-                ) : null}
-            </Box>
-        </LocalizationProvider>
+
+                        {/* 风险指标大卡片 - 桌面端右侧，移动端全宽 */}
+                        <Grid size={{ xs: 12, md: 6 }}>
+                            <RiskKPIsPanel kpis={data.risk_kpis} />
+                        </Grid>
+
+                        {/* 价格曲线图 */}
+                        <Grid size={{ xs: 12 }}>
+                            <PriceChart data={data.time_series} dateStr={selectedDate ? format(selectedDate, 'yyyy-MM-dd') : ''} />
+                        </Grid>
+
+                        {/* 电量曲线图 */}
+                        <Grid size={{ xs: 12 }}>
+                            <VolumeChart data={data.time_series} dateStr={selectedDate ? format(selectedDate, 'yyyy-MM-dd') : ''} />
+                        </Grid>
+
+                        {/* 时段汇总表格 */}
+                        <Grid size={{ xs: 12 }}>
+                            <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold', mt: 2 }}>
+                                时段财务速览
+                            </Typography>
+                            <PeriodSummaryTable data={data.period_summary} />
+                        </Grid>
+                    </Grid>
+                </Box>
+            ) : null}
+        </Box>
     );
 };
