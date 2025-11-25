@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
     Box, CircularProgress, Typography, Paper, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
     FormControl, FormLabel, RadioGroup, FormControlLabel, Radio
@@ -40,7 +40,7 @@ const CustomTooltipContent: React.FC<any> = ({ active, payload, label, unit }) =
 };
 
 // 数据维度曲线图组件（支持多维度切换和鼠标同步）
-const DataDimensionChart: React.FC<{
+const DataDimensionChart = React.memo<{
     data: any[];
     deviationType: string;
     dateStr: string;
@@ -51,13 +51,13 @@ const DataDimensionChart: React.FC<{
     chartRef: React.RefObject<HTMLDivElement | null>;
     syncedIndex: number | null;
     onMouseMove: (index: number | null) => void;
-}> = ({ data, deviationType, dateStr, isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, chartRef, syncedIndex, onMouseMove }) => {
+}>(({ data, deviationType, dateStr, isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, chartRef, syncedIndex, onMouseMove }) => {
 
     // 获取偏差类型的显示名称
     const deviationLabel = deviationTypeOptions.find(opt => opt.value === deviationType)?.label || '数据';
 
-    // 根据选择的偏差类型，确定显示的数据字段
-    const getDataKeys = () => {
+    // 使用 useMemo 缓存数据字段配置，避免每次渲染都创建新对象
+    const dataKeys = useMemo(() => {
         switch (deviationType) {
             case 'total_volume_deviation':
                 return { rtKey: 'volume_rt', daKey: 'volume_da', rtLabel: '实时竞价空间', daLabel: '日前竞价空间', unit: 'MW' };
@@ -72,27 +72,30 @@ const DataDimensionChart: React.FC<{
             default:
                 return { rtKey: 'volume_rt', daKey: 'volume_da', rtLabel: '实时数据', daLabel: '日前数据', unit: 'MW' };
         }
-    };
+    }, [deviationType]);
 
-    const { rtKey, daKey, rtLabel, daLabel, unit } = getDataKeys();
+    const { rtKey, daKey, rtLabel, daLabel, unit } = dataKeys;
 
-    // 计算Y轴范围
-    const values = data.flatMap(d => [d[rtKey], d[daKey]].filter(v => v !== null && v !== undefined));
-    const minValue = values.length > 0 ? Math.min(...values) : 0;
-    const maxValue = values.length > 0 ? Math.max(...values) : 0;
+    // 使用 useMemo 缓存 Y 轴范围计算，只在 data 或 dataKeys 变化时重新计算
+    const yAxisDomain = useMemo(() => {
+        const values = data.flatMap(d => [d[rtKey], d[daKey]].filter(v => v !== null && v !== undefined));
+        const minValue = values.length > 0 ? Math.min(...values) : 0;
+        const maxValue = values.length > 0 ? Math.max(...values) : 0;
+        return [Math.floor(minValue * 0.9), Math.ceil(maxValue * 1.1)];
+    }, [data, rtKey, daKey]);
 
     const { TouPeriodAreas } = useTouPeriodBackground(data);
 
-    // 自定义鼠标移动处理
-    const handleMouseMove = (state: any) => {
+    // 使用 useCallback 缓存鼠标事件处理函数，避免每次渲染都创建新函数
+    const handleMouseMove = useCallback((state: any) => {
         if (state && state.isTooltipActive && state.activeTooltipIndex !== undefined) {
             onMouseMove(state.activeTooltipIndex);
         }
-    };
+    }, [onMouseMove]);
 
-    const handleMouseLeave = () => {
+    const handleMouseLeave = useCallback(() => {
         onMouseMove(null);
-    };
+    }, [onMouseMove]);
 
     return (
         <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
@@ -140,7 +143,7 @@ const DataDimensionChart: React.FC<{
                                 interval={11}
                             />
                             <YAxis
-                                domain={[Math.floor(minValue * 0.9), Math.ceil(maxValue * 1.1)]}
+                                domain={yAxisDomain}
                                 label={{
                                     value: `${unit}`,
                                     angle: -90,
@@ -185,7 +188,17 @@ const DataDimensionChart: React.FC<{
             </Box>
         </Paper>
     );
-};
+}, (prevProps, nextProps) => {
+    // 自定义比较函数：只在关键 props 变化时才重新渲染
+    // syncedIndex 变化时仍然需要重新渲染以更新参考线
+    return (
+        prevProps.data === nextProps.data &&
+        prevProps.deviationType === nextProps.deviationType &&
+        prevProps.dateStr === nextProps.dateStr &&
+        prevProps.isFullscreen === nextProps.isFullscreen &&
+        prevProps.syncedIndex === nextProps.syncedIndex
+    );
+});
 
 interface SpreadAnalysisTabProps {
     selectedDate: Date | null;
@@ -221,20 +234,23 @@ export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDa
     const { isFullscreen: isFs3, FullscreenEnterButton: FSEnter3, FullscreenExitButton: FSExit3, FullscreenTitle: FSTitle3, NavigationButtons: FSNav3 } = useChartFullscreen({ chartRef: chart3Ref, title: `核心偏差归因 (${dateStr})` });
     const { isFullscreen: isFs4, FullscreenEnterButton: FSEnter4, FullscreenExitButton: FSExit4, FullscreenTitle: FSTitle4 } = useChartFullscreen({ chartRef: chart4Ref, title: `${deviationTypeOptions.find(opt => opt.value === selectedDeviationType)?.label} (${dateStr})` });
 
-    const fetchData = (date: Date | null) => {
-        if (!date) return;
+    useEffect(() => {
+        if (!selectedDate) return;
 
-        const formattedDate = format(date, 'yyyy-MM-dd');
+        const formattedDate = format(selectedDate, 'yyyy-MM-dd');
 
         // 检查缓存
         if (cachedDate === formattedDate && cachedData) {
+            console.log('使用缓存的价差归因数据:', formattedDate, '数据点数量:', cachedData.time_series?.length);
             setAnalysisData(cachedData);
             return;
         }
 
+        console.log('加载价差归因数据:', formattedDate);
         setLoading(true);
         apiClient.get(`/api/v1/market-analysis/spread-attribution?date=${formattedDate}`)
             .then(response => {
+                console.log('价差归因数据加载成功:', formattedDate, '数据点数量:', response.data.time_series?.length);
                 setAnalysisData(response.data);
                 // 更新缓存
                 setCachedDate(formattedDate);
@@ -245,11 +261,7 @@ export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDa
                 setAnalysisData({ time_series: [], systematic_bias: [], price_distribution: [] });
             })
             .finally(() => setLoading(false));
-    };
-
-    useEffect(() => {
-        fetchData(selectedDate);
-    }, [selectedDate]);
+    }, [selectedDate]); // 移除 cachedDate 和 cachedData 依赖，避免无限循环
 
     // 获取市场数据
     useEffect(() => {
@@ -260,14 +272,17 @@ export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDa
 
             // 检查缓存
             if (cachedMarketDate === formattedDate && cachedMarketData) {
+                console.log('使用缓存的市场数据:', formattedDate, '数据点数量:', cachedMarketData?.length);
                 setMarketData(cachedMarketData);
                 return;
             }
 
+            console.log('加载市场数据:', formattedDate);
             try {
                 const response = await apiClient.get('/api/v1/market-analysis/dashboard', {
                     params: { date_str: formattedDate }
                 });
+                console.log('市场数据加载成功:', formattedDate, '数据点数量:', response.data.time_series?.length);
                 setMarketData(response.data.time_series || []);
                 // 更新缓存
                 setCachedMarketDate(formattedDate);
@@ -279,7 +294,7 @@ export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDa
         };
 
         fetchMarketData();
-    }, [selectedDate, cachedMarketDate, cachedMarketData]);
+    }, [selectedDate]); // 移除 cachedMarketDate 和 cachedMarketData 依赖，避免无限循环
 
     useEffect(() => {
         if (analysisData.time_series.length > 0) {
