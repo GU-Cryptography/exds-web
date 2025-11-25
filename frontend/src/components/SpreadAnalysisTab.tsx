@@ -147,6 +147,7 @@ const DataDimensionChart: React.FC<{
                                     position: 'insideLeft'
                                 }}
                                 tick={{ fontSize: 12 }}
+                                tickFormatter={(value) => value.toFixed(0)}
                             />
                             <Tooltip content={<CustomTooltipContent unit={unit} />} />
                             <Legend />
@@ -386,8 +387,21 @@ export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDa
                             >
                                 <CartesianGrid strokeDasharray="3 3" />
                                 <XAxis dataKey="time_str" interval={11} tick={{ fontSize: 12 }} />
-                                <YAxis yAxisId="left" label={{ value: '价差(元/MWh)', angle: -90, position: 'insideLeft' }} tick={{ fontSize: 12 }} domain={priceSpreadDomain} />
-                                <YAxis yAxisId="right" orientation="right" label={{ value: '偏差(MW)', angle: -90, position: 'insideRight' }} tick={{ fontSize: 12 }} domain={deviationDomain} />
+                                <YAxis
+                                    yAxisId="left"
+                                    label={{ value: '价差(元/MWh)', angle: -90, position: 'insideLeft' }}
+                                    tick={{ fontSize: 12 }}
+                                    domain={priceSpreadDomain}
+                                    tickFormatter={(value) => value.toFixed(1)}
+                                />
+                                <YAxis
+                                    yAxisId="right"
+                                    orientation="right"
+                                    label={{ value: '偏差(MW)', angle: -90, position: 'insideRight' }}
+                                    tick={{ fontSize: 12 }}
+                                    domain={deviationDomain}
+                                    tickFormatter={(value) => value.toFixed(0)}
+                                />
                                 <Tooltip content={<CustomTooltip unitMap={{ price_spread: '元/MWh' }} unit="MW" />} />
                                 <Legend />
                                 <ReferenceLine y={0} stroke="#000" yAxisId="left" />

@@ -1146,7 +1146,16 @@ def get_spread_attribution_analysis(date: str = Query(..., description="查询�
                 "system_load_deviation": system_load_deviation,
                 "renewable_deviation": renewable_deviation,
                 "nonmarket_unit_deviation": nonmarket_unit_deviation,
-                "tieline_deviation": tieline_deviation
+                "tieline_deviation": tieline_deviation,
+                # 添加日前和实时的原始数据用于前端曲线对比
+                "system_load_da": load_forecast,
+                "system_load_rt": system_load,
+                "renewable_da": wind_forecast + pv_forecast,
+                "renewable_rt": wind_rt + solar_rt,
+                "nonmarket_unit_da": nonmarket_forecast,
+                "nonmarket_unit_rt": nonmarket_unit_rt,
+                "tieline_da": tieline_plan,
+                "tieline_rt": tieline_flow
             }
             time_series.append(point_data)
 
