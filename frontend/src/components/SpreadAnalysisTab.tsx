@@ -144,11 +144,11 @@ export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDa
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
                     <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <Box component="span" sx={{ bgcolor: 'rgba(255,255,255,0.2)', px: 1, py: 0.5, borderRadius: 1, fontWeight: 'bold' }}>价差含义</Box>
-                        绿色表示日前价格高于实时价格(正价差)
+                        绿色表示日前价格高于实时价格(负价差)
                     </Typography>
                     <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <Box component="span" sx={{ bgcolor: 'rgba(255,255,255,0.2)', px: 1, py: 0.5, borderRadius: 1, fontWeight: 'bold' }}>售电侧策略</Box>
-                        正价差意味着实时市场价格偏低,建议多报日前,锁定高价收益
+                        负价差意味着实时市场价格偏低,建议少报日前,赚取价差收益
                     </Typography>
                 </Box>
             </Paper>

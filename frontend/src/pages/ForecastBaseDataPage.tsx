@@ -24,7 +24,8 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { zhCN } from 'date-fns/locale';
 import ArrowLeftIcon from '@mui/icons-material/ArrowLeft';
 import ArrowRightIcon from '@mui/icons-material/ArrowRight';
-import { addDays, format, differenceInDays } from 'date-fns';
+import { addDays, format, differenceInDays, isWeekend } from 'date-fns';
+
 import {
     ResponsiveContainer,
     LineChart,
@@ -67,28 +68,35 @@ interface DataAvailabilityResponse {
     availability_matrix: DataAvailabilityCell[][];
 }
 
+interface AccuracyResult {
+    key: string;
+    name: string;
+    value: string;
+    sortKey: string; // format: yyyyMMdd_{order}
+}
+
 // ============ 数据项配置 ============
 const DATA_ITEMS_CONFIG = {
     weekly: [
-        { id: 1, name: '次周系统负荷预测', shortName: '周负荷' },
-        { id: 3, name: '次周风电预测', shortName: '周风电' },
-        { id: 2, name: '次周光伏预测', shortName: '周光伏' },
-        { id: 4, name: '次周水电(含抽蓄)预测', shortName: '周水电' },
-        { id: 5, name: '次周联络线可用容量', shortName: '周联络' },
+        { id: 1, name: '次周系统负荷预测', shortName: '周负荷', unifiedName: '系统负荷' },
+        { id: 3, name: '次周风电预测', shortName: '周风电', unifiedName: '风电出力' },
+        { id: 2, name: '次周光伏预测', shortName: '周光伏', unifiedName: '光伏出力' },
+        { id: 4, name: '次周水电(含抽蓄)预测', shortName: '周水电', unifiedName: '水电抽蓄' },
+        { id: 5, name: '次周联络线可用容量', shortName: '周联络', unifiedName: '联络线' },
     ],
     daily: [
-        { id: 6, name: '短期系统负荷预测', shortName: '日负荷', desktopName: '短期系统负荷预测' },
-        { id: 8, name: '短期风电预测', shortName: '日风电' },
-        { id: 7, name: '短期光伏预测', shortName: '日光伏' },
-        { id: 9, name: '非市场化机组预测', shortName: '日非市', desktopName: '非市场化机组预测' },
-        { id: 10, name: '联络线总计划', shortName: '日联络' },
+        { id: 6, name: '短期系统负荷预测', shortName: '日负荷', desktopName: '短期系统负荷预测', unifiedName: '系统负荷' },
+        { id: 8, name: '短期风电预测', shortName: '日风电', unifiedName: '风电出力' },
+        { id: 7, name: '短期光伏预测', shortName: '日光伏', unifiedName: '光伏出力' },
+        { id: 9, name: '非市场化机组预测', shortName: '日水电', desktopName: '非市场化机组预测', unifiedName: '水电抽蓄' },
+        { id: 10, name: '联络线总计划', shortName: '日联络', unifiedName: '联络线' },
     ],
     realtime: [
-        { id: 11, name: '实际系统负荷', shortName: '实负荷', desktopName: '实际系统负荷' },
-        { id: 12, name: '实际风电出力', shortName: '实风电', desktopName: '实际风电出力' },
-        { id: 13, name: '实际光伏出力', shortName: '实光伏', desktopName: '实际光伏出力' },
-        { id: 14, name: '实际水电(含抽蓄)出力', shortName: '实水电', desktopName: '实际水电(含抽蓄)出力' },
-        { id: 15, name: '联络线潮流', shortName: '实联络', desktopName: '联络线潮流' },
+        { id: 11, name: '实际系统负荷', shortName: '实负荷', desktopName: '实际系统负荷', unifiedName: '系统负荷' },
+        { id: 12, name: '实际风电出力', shortName: '实风电', desktopName: '实际风电出力', unifiedName: '风电出力' },
+        { id: 13, name: '实际光伏出力', shortName: '实光伏', desktopName: '实际光伏出力', unifiedName: '光伏出力' },
+        { id: 14, name: '实际水电(含抽蓄)出力', shortName: '实水电', desktopName: '实际水电(含抽蓄)出力', unifiedName: '水电抽蓄' },
+        { id: 15, name: '联络线潮流', shortName: '实联络', desktopName: '联络线潮流', unifiedName: '联络线' },
     ],
 };
 
@@ -267,10 +275,11 @@ export const ForecastBaseDataPage: React.FC = () => {
     // 使用相对偏移量作为key（如 "1_-7" 表示数据项1的D-7）
     const [selectedItems, setSelectedItems] = useState<Record<string, boolean>>({});
     const [curvesData, setCurvesData] = useState<CurveData[]>([]);
+    const [accuracyResults, setAccuracyResults] = useState<AccuracyResult[]>([]);
 
     // 图表引用
     const chartRef = useRef<HTMLDivElement>(null);
-    
+
     const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
 
     // 全屏 Hook
@@ -398,6 +407,7 @@ export const ForecastBaseDataPage: React.FC = () => {
 
     const handleClearSelection = () => {
         setSelectedItems({});
+        setAccuracyResults([]); // Clear accuracy results when selection is cleared
     };
 
     const handleDataTypeChange = (_: React.SyntheticEvent, newValue: number) => {
@@ -427,10 +437,112 @@ export const ForecastBaseDataPage: React.FC = () => {
         const item = allItems.find((i) => i.id === dataItemId);
         if (!item) return `数据项${dataItemId}`;
 
-        // 移动端使用shortName，桌面端优先使用desktopName（如果有），否则使用name
+        // 移动端使用shortName，桌面端优先使用unifiedName
         if (isMobile) return item.shortName;
-        return (item as any).desktopName || item.name;
+        return (item as any).unifiedName || item.name;
     };
+
+    const getUnifiedName = (dataItemId: number): string => {
+        const allItems = [
+            ...DATA_ITEMS_CONFIG.weekly,
+            ...DATA_ITEMS_CONFIG.daily,
+            ...DATA_ITEMS_CONFIG.realtime,
+        ];
+        const item = allItems.find((i) => i.id === dataItemId);
+        return (item as any)?.unifiedName || '';
+    };
+
+    const getForecastTypePrefix = (dataItemId: number): string => {
+        if (DATA_ITEMS_CONFIG.weekly.some(i => i.id === dataItemId)) return '周';
+        if (DATA_ITEMS_CONFIG.daily.some(i => i.id === dataItemId)) return '日';
+        return '';
+    };
+
+    // 计算准确率
+    useEffect(() => {
+        if (curvesData.length === 0) return;
+
+        const newResults: AccuracyResult[] = [];
+
+        // 1. 分组曲线数据
+        const actualCurves: CurveData[] = [];
+        const forecastCurves: CurveData[] = [];
+
+        curvesData.forEach(curve => {
+            // 实际数据 ID 11-15
+            if (curve.data_item_id >= 11 && curve.data_item_id <= 15) {
+                actualCurves.push(curve);
+            } else {
+                forecastCurves.push(curve);
+            }
+        });
+
+        // 2. 寻找匹配对并计算准确率
+        actualCurves.forEach(actual => {
+            const actualUnifiedName = getUnifiedName(actual.data_item_id);
+
+            forecastCurves.forEach(forecast => {
+                const forecastUnifiedName = getUnifiedName(forecast.data_item_id);
+
+                // 匹配条件：同一天且统一名称相同
+                if (actual.date === forecast.date && actualUnifiedName === forecastUnifiedName) {
+                    // 计算准确率
+                    let sumDiff = 0;
+                    let sumActual = 0;
+                    let count = 0;
+
+                    // 创建时间映射以加速查找
+                    const actualMap = new Map(actual.data.map(p => [p.time, p.value]));
+
+                    forecast.data.forEach(p => {
+                        if (actualMap.has(p.time)) {
+                            const actualVal = actualMap.get(p.time)!;
+                            sumDiff += Math.abs(p.value - actualVal);
+                            sumActual += Math.abs(actualVal);
+                            count++;
+                        }
+                    });
+
+                    if (count > 0 && sumActual > 0) {
+                        const accuracy = (1 - sumDiff / sumActual) * 100;
+                        const prefix = getForecastTypePrefix(forecast.data_item_id);
+                        const name = `${prefix}${forecastUnifiedName}准确率 (${forecast.date})`;
+                        const key = `${prefix}_${forecastUnifiedName}_${forecast.date}`;
+
+                        newResults.push({
+                            key,
+                            name,
+                            value: `${accuracy.toFixed(2)}%`,
+                            sortKey: `${forecast.date.replace(/-/g, '')}_${prefix === '日' ? '1' : '2'}_${forecast.data_item_id}`
+                        });
+                    }
+                }
+            });
+        });
+
+        // 3. 合并结果 (保留旧结果，更新新结果)
+        if (newResults.length > 0) {
+            setAccuracyResults(prev => {
+                const prevMap = new Map(prev.map(r => [r.key, r]));
+                // 如果需要"最新勾选的在最后"，对于已存在的结果，可以先删除再添加，或者保持原位
+                // 这里我们保持原位，只追加新的。如果用户希望重新勾选的跳到最后，需要调整逻辑。
+                // 鉴于用户反馈是"按日期排序导致最后勾选的不在最后"，取消排序即可满足"新产生的在最后"。
+                newResults.forEach(r => {
+                    if (!prevMap.has(r.key)) {
+                        prevMap.set(r.key, r);
+                    } else {
+                        // 如果已存在，更新值但保持位置（Map特性）
+                        // 如果想让它跳到最后，可以: prevMap.delete(r.key); prevMap.set(r.key, r);
+                        // 但考虑到"持久化"特性，保持原位可能更符合直觉，除非用户明确说"重新勾选要置顶/置底"
+                        // 用户原话："只是按日期排序，最后勾选的不是在最后" -> 说明用户期望的是"操作顺序"。
+                        // 既然结果是持久化的，那么"最后勾选"通常指"新产生的"。
+                        prevMap.set(r.key, r);
+                    }
+                });
+                return Array.from(prevMap.values());
+            });
+        }
+    }, [curvesData]);
 
     const getSelectedCount = (): number => {
         return Object.values(selectedItems).filter(Boolean).length;
@@ -479,7 +591,12 @@ export const ForecastBaseDataPage: React.FC = () => {
                             fontSize: { xs: '0.75rem', sm: '0.875rem' },
                             px: { xs: 0.5, sm: 2 },
                             py: { xs: 0.5, sm: 1 },
+                            borderRight: '1px solid rgba(224, 224, 224, 1)',
                         },
+                        '& .MuiTableCell-head': {
+                            backgroundColor: 'background.paper',
+                            fontWeight: 'bold',
+                        }
                     }}
                 >
                     <TableHead>
@@ -488,129 +605,114 @@ export const ForecastBaseDataPage: React.FC = () => {
                                 sx={{
                                     position: 'sticky',
                                     left: 0,
-                                    backgroundColor: 'action.hover',
-                                    zIndex: 1,
-                                    fontWeight: 'bold',
-                                    width: { xs: 'auto', sm: 180 },
-                                    minWidth: { xs: 80, sm: 180 },
+                                    zIndex: 2,
+                                    minWidth: { xs: 100, sm: 150 },
+                                    borderRight: '2px solid rgba(224, 224, 224, 1) !important',
                                 }}
                             >
-                                数据类型
+                                数据项
                             </TableCell>
                             {dateRange.map((date) => {
+                                const isWk = isWeekend(new Date(date));
                                 const offset = getDateOffset(selectedDate, date);
-                                const isCurrentDay = offset === 0;
+                                const isBaseDate = offset === 0;
+                                const relativeDate = formatRelativeDate(offset);
+
+                                let bgColor = 'background.paper';
+                                if (isBaseDate) bgColor = 'rgba(25, 118, 210, 0.12)'; // Light blue for D-day
+                                else if (isWk) bgColor = 'action.hover'; // Gray for weekend
+
                                 return (
                                     <TableCell
                                         key={date}
                                         align="center"
                                         sx={{
-                                            fontWeight: 'bold',
                                             minWidth: { xs: 60, sm: 80 },
-                                            backgroundColor: isCurrentDay
-                                                ? 'rgba(25, 118, 210, 0.08)'  // 更浅的蓝色
-                                                : 'action.hover',
+                                            backgroundColor: bgColor,
+                                            color: isWk ? 'error.main' : 'text.primary',
                                         }}
                                     >
-                                        <Box>
-                                            <Typography variant="caption" display="block" sx={{ fontWeight: 'bold' }}>
-                                                {formatRelativeDate(offset)}
-                                            </Typography>
-                                            <Typography variant="caption" display="block" color="text.secondary">
-                                                {date.substring(5)}
-                                            </Typography>
-                                        </Box>
+                                        <Box sx={{ fontWeight: 'bold' }}>{relativeDate}</Box>
+                                        <Box>{date.substring(5)}</Box>
                                     </TableCell>
                                 );
                             })}
                         </TableRow>
                     </TableHead>
                     <TableBody>
-                        {currentItems.map((item) => {
-                            // 找到该数据项在矩阵中的行
-                            const rowData = availabilityData.availability_matrix[item.id - 1];
+                        {currentItems.map((item) => (
+                            <TableRow key={item.id} hover>
+                                <TableCell
+                                    sx={{
+                                        position: 'sticky',
+                                        left: 0,
+                                        backgroundColor: 'background.paper',
+                                        zIndex: 1,
+                                        fontWeight: 'bold',
+                                        fontSize: '0.9rem',
+                                        color: 'primary.main',
+                                        borderRight: '2px solid rgba(224, 224, 224, 1) !important',
+                                    }}
+                                >
+                                    {getDataItemName(item.id)}
+                                </TableCell>
+                                {dateRange.map((date) => {
+                                    const offset = getDateOffset(selectedDate, date);
+                                    const key = `${item.id}_${offset}`;
+                                    const isSelected = !!selectedItems[key];
 
-                            return (
-                                <TableRow key={item.id}>
-                                    <TableCell
-                                        sx={{
-                                            position: 'sticky',
-                                            left: 0,
-                                            backgroundColor: 'action.hover',
-                                            zIndex: 1,
-                                            fontWeight: 'bold',
-                                            width: { xs: 'auto', sm: 180 },
-                                            minWidth: { xs: 80, sm: 180 },
-                                        }}
-                                    >
-                                        {isMobile ? item.shortName : ((item as any).desktopName || item.name)}
-                                    </TableCell>
-                                    {rowData.map((cell) => {
-                                        const offset = getDateOffset(selectedDate, cell.date);
-                                        const key = `${cell.data_item_id}_${offset}`;
-                                        const isSelected = selectedItems[key] || false;
-                                        const isCurrentDay = offset === 0;
+                                    // Find availability
+                                    const cell = availabilityData.availability_matrix
+                                        .find(row => row[0]?.data_item_id === item.id)
+                                        ?.find(c => c.date === date);
 
-                                        return (
-                                            <TableCell
-                                                key={cell.date}
-                                                align="center"
-                                                sx={{
-                                                    backgroundColor: isSelected
-                                                        ? 'action.selected'
-                                                        : isCurrentDay
-                                                        ? 'rgba(25, 118, 210, 0.08)'  // 更浅的蓝色
-                                                        : 'inherit',
-                                                    cursor: cell.is_available
-                                                        ? 'pointer'
-                                                        : 'default',
-                                                    height: 48, // 固定高度，确保一致性
-                                                }}
-                                                onClick={() => {
-                                                    if (cell.is_available) {
-                                                        handleCheckboxToggle(
-                                                            cell.data_item_id,
-                                                            offset
-                                                        );
-                                                    }
-                                                }}
-                                            >
-                                                {cell.is_available ? (
-                                                    <Checkbox
-                                                        size="small"
-                                                        checked={isSelected}
-                                                        onChange={() =>
-                                                            handleCheckboxToggle(
-                                                                cell.data_item_id,
-                                                                offset
-                                                            )
-                                                        }
-                                                        onClick={(e) => e.stopPropagation()}
-                                                    />
-                                                ) : (
-                                                    <Typography
-                                                        variant="caption"
-                                                        color="text.disabled"
-                                                    >
-                                                        —
-                                                    </Typography>
-                                                )}
-                                            </TableCell>
-                                        );
-                                    })}
-                                </TableRow>
-                            );
-                        })}
+                                    const isAvailable = cell?.is_available;
+                                    const isWk = isWeekend(new Date(date));
+                                    const isBaseDate = offset === 0;
+
+                                    let bgColor = 'inherit';
+                                    if (isSelected) bgColor = 'primary.light';
+                                    else if (isBaseDate) bgColor = 'rgba(25, 118, 210, 0.08)';
+                                    else if (isWk) bgColor = 'action.hover';
+
+                                    return (
+                                        <TableCell
+                                            key={date}
+                                            align="center"
+                                            padding="none"
+                                            sx={{
+                                                backgroundColor: bgColor,
+                                                cursor: isAvailable ? 'pointer' : 'default',
+                                                '&:hover': {
+                                                    backgroundColor: isAvailable ? (isSelected ? 'primary.main' : 'action.selected') : undefined
+                                                }
+                                            }}
+                                            onClick={() => isAvailable && handleCheckboxToggle(item.id, offset)}
+                                        >
+                                            {isAvailable ? (
+                                                <Checkbox
+                                                    checked={isSelected}
+                                                    size="small"
+                                                    color="primary"
+                                                    sx={{ p: 0 }}
+                                                />
+                                            ) : (
+                                                <Typography variant="caption" color="text.disabled">—</Typography>
+                                            )}
+                                        </TableCell>
+                                    );
+                                })}
+                            </TableRow>
+                        ))}
                     </TableBody>
                 </Table>
             </TableContainer>
         );
     };
 
-    // ============ 主渲染 ============
     return (
         <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
-            <Box sx={{ width: '100%' }}>
+            <Box sx={{ width: '100%', p: { xs: 1, sm: 2 } }}>
                 {/* 移动端面包屑标题 */}
                 {isTablet && (
                     <Typography
@@ -663,6 +765,7 @@ export const ForecastBaseDataPage: React.FC = () => {
                             size="small"
                             onClick={handleClearSelection}
                             disabled={getSelectedCount() === 0}
+                            sx={{ ml: 'auto' }}
                         >
                             清空选择
                         </Button>
@@ -750,22 +853,69 @@ export const ForecastBaseDataPage: React.FC = () => {
                         {renderAvailabilityTable()}
 
                         {/* 图例说明 */}
-                        <Box sx={{ mt: 1, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                            <Typography variant="caption" color="text.secondary">
-                                ☑ 已选中
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                                ☐ 可选择
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                                — 无数据
-                            </Typography>
+                        <Box sx={{ mt: 1, display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+                            <Box display="flex" alignItems="center" gap={0.5}>
+                                <Checkbox size="small" checked color="primary" sx={{ p: 0 }} />
+                                <Typography variant="caption" color="text.secondary">已选中</Typography>
+                            </Box>
+                            <Box display="flex" alignItems="center" gap={0.5}>
+                                <Checkbox size="small" checked={false} sx={{ p: 0 }} />
+                                <Typography variant="caption" color="text.secondary">可选择</Typography>
+                            </Box>
+                            <Box display="flex" alignItems="center" gap={0.5}>
+                                <Typography variant="caption" color="text.disabled">—</Typography>
+                                <Typography variant="caption" color="text.secondary">无数据</Typography>
+                            </Box>
+                            <Box display="flex" alignItems="center" gap={0.5}>
+                                <Box sx={{ width: 16, height: 16, bgcolor: 'action.hover', border: '1px solid', borderColor: 'divider' }} />
+                                <Typography variant="caption" color="text.secondary">周末</Typography>
+                            </Box>
                         </Box>
 
                         {/* 已选数量 */}
                         <Typography variant="body2" sx={{ mt: 1 }}>
                             已选择 {getSelectedCount()} 项数据
                         </Typography>
+
+                        {/* 准确率显示区域 */}
+                        {accuracyResults.length > 0 && (
+                            <Paper
+                                variant="outlined"
+                                sx={{
+                                    mt: 2,
+                                    p: 1.5,
+                                    display: 'flex',
+                                    flexWrap: 'wrap',
+                                    gap: 2,
+                                    backgroundColor: 'rgba(25, 118, 210, 0.04)',
+                                    borderColor: 'rgba(25, 118, 210, 0.2)'
+                                }}
+                            >
+                                {accuracyResults.map((result) => (
+                                    <Box
+                                        key={result.key}
+                                        sx={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: 1,
+                                            border: '1px solid',
+                                            borderColor: 'divider',
+                                            borderRadius: 1,
+                                            px: 1,
+                                            py: 0.5,
+                                            backgroundColor: 'background.paper'
+                                        }}
+                                    >
+                                        <Typography variant="body2" color="text.secondary">
+                                            {result.name}:
+                                        </Typography>
+                                        <Typography variant="body2" fontWeight="bold" color="primary">
+                                            {result.value}
+                                        </Typography>
+                                    </Box>
+                                ))}
+                            </Paper>
+                        )}
 
                         {/* 96点曲线图 */}
                         <ChartComponent
