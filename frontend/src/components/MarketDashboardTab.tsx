@@ -657,76 +657,144 @@ const PriceDistributionChart: React.FC<{ data: any[]; dateStr: string }> = ({ da
     );
 };
 
-// 时段汇总表格组件
-const PeriodSummaryTable: React.FC<{ data: PeriodSummary[] }> = ({ data }) => (
-    <TableContainer component={Paper} elevation={2} sx={{ overflowX: 'auto' }}>
-        <Table
-            sx={{
-                '& .MuiTableCell-root': {
-                    fontSize: { xs: '0.75rem', sm: '0.875rem' },
-                    px: { xs: 0.5, sm: 2 },
-                }
-            }}
-        >
-            <TableHead>
-                <TableRow>
-                    <TableCell sx={{ fontWeight: 'bold' }}>时段</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>
-                        日前VWAP
-                        <br />
-                        (元/MWh)
-                    </TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>
-                        现货VWAP
-                        <br />
-                        (元/MWh)
-                    </TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>
-                        加权价差
-                        <br />
-                        (元/MWh)
-                    </TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>
-                        平均电量
-                        <br />
-                        (MWh)
-                    </TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>新能源占比</TableCell>
-                </TableRow>
-            </TableHead>
-            <TableBody>
-                {data.map((row) => (
-                    <TableRow key={row.period_name} hover>
-                        <TableCell component="th" scope="row" sx={{ fontWeight: 'medium' }}>
-                            {row.period_name}
+// 时段价格分析数据接口
+interface PeriodPriceAnalysis {
+    period_name: string;
+    avg_price_da: number | null;
+    avg_price_rt: number | null;
+    avg_spread: number | null;
+    positive_spread_ratio: number | null; // 正差率
+    suggestion: string; // 建议操作
+}
+
+// 时段价格分析表格组件
+const PeriodPriceAnalysisTable: React.FC<{
+    periodSummary: PeriodSummary[];
+    timeSeries: TimeSeriesPoint[]
+}> = ({ periodSummary, timeSeries }) => {
+    // 调试:输出数据结构
+    // console.log('=== 时段价格分析调试 ===');
+    // console.log('periodSummary:', periodSummary);
+    // console.log('timeSeries示例(前3条):', timeSeries.slice(0, 3));
+    // console.log('所有不同的period_type值:', [...new Set(timeSeries.map(p => p.period_type))]);
+
+    // 计算每个时段的正差率和建议操作
+    const analysisData: PeriodPriceAnalysis[] = periodSummary.map(period => {
+        // 筛选出属于当前时段的所有时间点
+        const periodPoints = timeSeries.filter(point => point.period_type === period.period_name);
+
+        // 计算正差率:实时价格 > 日前价格的时段数 / 总时段数
+        // 只统计同时有实时价格和日前价格的时段
+        const validPoints = periodPoints.filter(point =>
+            point.price_rt !== null && point.price_da !== null
+        );
+        const totalCount = validPoints.length;
+        const positiveSpreads = validPoints.filter(point =>
+            point.price_rt! > point.price_da!
+        );
+        const positiveSpreadRatio = totalCount > 0 ? (positiveSpreads.length / totalCount) * 100 : null;
+
+        // 平均价差
+        const avgSpread = period.vwap_spread;
+
+        // 建议操作逻辑
+        let suggestion = '观望';
+        if (positiveSpreadRatio !== null && avgSpread !== null) {
+            if (positiveSpreadRatio > 70 && avgSpread > 50) {
+                suggestion = '做多';
+            } else if (positiveSpreadRatio < 30 && avgSpread < -50) {
+                suggestion = '做空';
+            }
+        }
+
+        return {
+            period_name: period.period_name,
+            avg_price_da: period.vwap_da,
+            avg_price_rt: period.vwap_rt,
+            avg_spread: avgSpread,
+            positive_spread_ratio: positiveSpreadRatio,
+            suggestion
+        };
+    });
+
+    return (
+        <TableContainer component={Paper} elevation={2} sx={{ overflowX: 'auto' }}>
+            <Table
+                sx={{
+                    '& .MuiTableCell-root': {
+                        fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                        px: { xs: 0.5, sm: 2 },
+                    }
+                }}
+            >
+                <TableHead>
+                    <TableRow>
+                        <TableCell sx={{ fontWeight: 'bold' }}>时段</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                            日前均价
+                            <br />
+                            (元/MWh)
                         </TableCell>
-                        <TableCell align="right">
-                            {row.vwap_da !== null ? row.vwap_da.toFixed(2) : 'N/A'}
+                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                            实时均价
+                            <br />
+                            (元/MWh)
                         </TableCell>
-                        <TableCell align="right">
-                            {row.vwap_rt !== null ? row.vwap_rt.toFixed(2) : 'N/A'}
+                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                            价差
+                            <br />
+                            (元/MWh)
                         </TableCell>
-                        <TableCell
-                            align="right"
-                            sx={{
-                                color: row.vwap_spread && row.vwap_spread > 0 ? 'error.main' : 'success.main',
-                                fontWeight: 'bold'
-                            }}
-                        >
-                            {row.vwap_spread !== null ? row.vwap_spread.toFixed(2) : 'N/A'}
+                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                            正差率
+                            <br />
+                            (%)
                         </TableCell>
-                        <TableCell align="right">
-                            {row.avg_volume_rt !== null ? row.avg_volume_rt.toFixed(2) : 'N/A'}
-                        </TableCell>
-                        <TableCell align="right">
-                            {row.renewable_ratio !== null ? `${(row.renewable_ratio * 100).toFixed(1)}%` : 'N/A'}
-                        </TableCell>
+                        <TableCell align="center" sx={{ fontWeight: 'bold' }}>建议操作</TableCell>
                     </TableRow>
-                ))}
-            </TableBody>
-        </Table>
-    </TableContainer>
-);
+                </TableHead>
+                <TableBody>
+                    {analysisData.map((row) => (
+                        <TableRow key={row.period_name} hover>
+                            <TableCell component="th" scope="row" sx={{ fontWeight: 'medium' }}>
+                                {row.period_name}
+                            </TableCell>
+                            <TableCell align="right">
+                                {row.avg_price_da !== null ? row.avg_price_da.toFixed(2) : 'N/A'}
+                            </TableCell>
+                            <TableCell align="right">
+                                {row.avg_price_rt !== null ? row.avg_price_rt.toFixed(2) : 'N/A'}
+                            </TableCell>
+                            <TableCell
+                                align="right"
+                                sx={{
+                                    color: row.avg_spread && row.avg_spread > 0 ? 'error.main' : 'success.main',
+                                    fontWeight: 'bold'
+                                }}
+                            >
+                                {row.avg_spread !== null ? row.avg_spread.toFixed(2) : 'N/A'}
+                            </TableCell>
+                            <TableCell align="right">
+                                {row.positive_spread_ratio !== null ? row.positive_spread_ratio.toFixed(1) : 'N/A'}
+                            </TableCell>
+                            <TableCell
+                                align="center"
+                                sx={{
+                                    fontWeight: 'bold',
+                                    color: row.suggestion === '做多' ? 'error.main' :
+                                        row.suggestion === '做空' ? 'success.main' :
+                                            'text.secondary'
+                                }}
+                            >
+                                {row.suggestion}
+                            </TableCell>
+                        </TableRow>
+                    ))}
+                </TableBody>
+            </Table>
+        </TableContainer>
+    );
+};
 
 // Props接口
 interface MarketDashboardTabProps {
@@ -891,12 +959,15 @@ export const MarketDashboardTab: React.FC<MarketDashboardTabProps> = ({ selected
                             <PriceDistributionChart data={spreadData.price_distribution} dateStr={selectedDate ? format(selectedDate, 'yyyy-MM-dd') : ''} />
                         </Grid>
 
-                        {/* 时段汇总表格 */}
+                        {/* 时段价格分析表格 */}
                         <Grid size={{ xs: 12 }}>
                             <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold', mt: 2 }}>
-                                时段财务速览
+                                时段价格分析
                             </Typography>
-                            <PeriodSummaryTable data={data.period_summary} />
+                            <PeriodPriceAnalysisTable
+                                periodSummary={data.period_summary}
+                                timeSeries={data.time_series}
+                            />
                         </Grid>
                     </Grid>
                 </Box>
