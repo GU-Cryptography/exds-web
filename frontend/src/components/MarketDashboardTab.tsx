@@ -77,6 +77,78 @@ interface DashboardData {
     period_summary: PeriodSummary[];
 }
 
+// 市场价格描述面板组件
+const MarketPriceSummaryPanel: React.FC<{
+    financial_kpis: FinancialKPIs;
+    risk_kpis: RiskKPIs;
+    time_series: TimeSeriesPoint[]
+}> = ({ financial_kpis, risk_kpis, time_series }) => {
+    // 计算价格范围
+    const rtPrices = time_series.filter(d => d.price_rt !== null).map(d => d.price_rt!);
+    const daPrices = time_series.filter(d => d.price_da !== null).map(d => d.price_da!);
+    const minRtPrice = rtPrices.length > 0 ? Math.min(...rtPrices) : 0;
+    const maxRtPrice = rtPrices.length > 0 ? Math.max(...rtPrices) : 0;
+    const minDaPrice = daPrices.length > 0 ? Math.min(...daPrices) : 0;
+    const maxDaPrice = daPrices.length > 0 ? Math.max(...daPrices) : 0;
+
+    // 计算价差统计
+    const spreads = time_series.filter(d => d.spread !== null).map(d => d.spread!);
+    const negativeSpreads = spreads.filter(s => s < 0);
+    const negativeSpreadsRatio = spreads.length > 0 ? (negativeSpreads.length / spreads.length) * 100 : 0;
+
+    // 计算价差超过±100的时段占比
+    const extremeSpreads = spreads.filter(s => Math.abs(s) > 100);
+    const extremeSpreadsRatio = spreads.length > 0 ? (extremeSpreads.length / spreads.length) * 100 : 0;
+
+    // 计算价差率（平均价差/平均价格）
+    const spreadRate = financial_kpis.vwap_rt !== null && financial_kpis.vwap_rt !== 0
+        ? ((financial_kpis.vwap_spread || 0) / financial_kpis.vwap_rt) * 100
+        : 0;
+
+    return (
+        <Paper
+            variant="outlined"
+            sx={{
+                p: 2,
+                mb: 2,
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: 'white',
+                borderRadius: 2,
+                boxShadow: '0 4px 20px rgba(102, 126, 234, 0.3)'
+            }}
+        >
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                {/* 第一行：日前和实时价格信息 */}
+                <Typography variant="body2" sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, flexWrap: 'wrap' }}>
+                    <Box component="span" sx={{ bgcolor: 'rgba(255,255,255,0.2)', px: 1, py: 0.5, borderRadius: 1, fontWeight: 'bold', flexShrink: 0 }}>
+                        市场价格
+                    </Box>
+                    <Box component="span">
+                        日前均价 {financial_kpis.vwap_da?.toFixed(2) || 'N/A'} 元/MWh (范围: {minDaPrice.toFixed(2)}~{maxDaPrice.toFixed(2)})，
+                        实时均价 {financial_kpis.vwap_rt?.toFixed(2) || 'N/A'} 元/MWh (范围: {minRtPrice.toFixed(2)}~{maxRtPrice.toFixed(2)})
+                    </Box>
+                </Typography>
+
+                {/* 第二行：价差信息和策略建议 */}
+                <Typography variant="body2" sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, flexWrap: 'wrap' }}>
+                    <Box component="span" sx={{ bgcolor: 'rgba(255,255,255,0.2)', px: 1, py: 0.5, borderRadius: 1, fontWeight: 'bold', flexShrink: 0 }}>
+                        价差分析
+                    </Box>
+                    <Box component="span">
+                        均值价差 {financial_kpis.vwap_spread?.toFixed(2) || 'N/A'} 元/MWh (价差率 {spreadRate.toFixed(1)}%)，
+                        负价差占比 {negativeSpreadsRatio.toFixed(1)}%，
+                        最大正价差 {risk_kpis.max_positive_spread?.value.toFixed(2) || 'N/A'} 元/MWh ({risk_kpis.max_positive_spread?.time_str || 'N/A'})，
+                        最大负价差 {risk_kpis.max_negative_spread?.value.toFixed(2) || 'N/A'} 元/MWh ({risk_kpis.max_negative_spread?.time_str || 'N/A'})，
+                        极端价差(±100)占比 {extremeSpreadsRatio.toFixed(1)}%
+                        {spreadRate < 0 && ' - 建议多报实时市场'}
+                        {spreadRate > 0 && ' - 建议多报日前市场'}
+                    </Box>
+                </Typography>
+            </Box>
+        </Paper>
+    );
+};
+
 // 财务指标大卡片组件
 const FinancialKPIsPanel: React.FC<{ kpis: FinancialKPIs }> = ({ kpis }) => (
     <Paper elevation={2} sx={{ p: 2, height: '100%' }}>
@@ -491,7 +563,7 @@ const PriceSpreadChart: React.FC<{ data: any[]; dateStr: string }> = ({ data, da
                                 <Tooltip content={<CustomTooltip unit="元/MWh" />} />
                                 <ReferenceLine y={0} stroke="#000" />
                                 <Bar dataKey="price_spread" name="价格偏差">
-                                    {data.map((entry, index) => (
+                                    {(data || []).map((entry, index) => (
                                         <Cell key={`cell-${index}`} fill={entry.price_spread > 0 ? '#f44336' : '#4caf50'} />
                                     ))}
                                 </Bar>
@@ -572,7 +644,7 @@ const PriceDistributionChart: React.FC<{ data: any[]; dateStr: string }> = ({ da
                                 }} />
                                 <ReferenceLine x={0} stroke="#000" />
                                 <Bar dataKey="count" name="时段数量">
-                                    {data.map((entry, index) => (
+                                    {(data || []).map((entry, index) => (
                                         <Cell key={`cell-${index}`} fill={entry.range_min >= 0 ? '#f44336' : '#4caf50'} />
                                     ))}
                                 </Bar>
@@ -798,17 +870,14 @@ export const MarketDashboardTab: React.FC<MarketDashboardTabProps> = ({ selected
                         </Box>
                     )}
 
+                    {/* 市场价格描述面板 */}
+                    <MarketPriceSummaryPanel
+                        financial_kpis={data.financial_kpis}
+                        risk_kpis={data.risk_kpis}
+                        time_series={data.time_series}
+                    />
+
                     <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mt: 2 }}>
-                        {/* 财务指标大卡片 - 桌面端左侧，移动端全宽 */}
-                        <Grid size={{ xs: 12, md: 6 }}>
-                            <FinancialKPIsPanel kpis={data.financial_kpis} />
-                        </Grid>
-
-                        {/* 风险指标大卡片 - 桌面端右侧，移动端全宽 */}
-                        <Grid size={{ xs: 12, md: 6 }}>
-                            <RiskKPIsPanel kpis={data.risk_kpis} />
-                        </Grid>
-
                         {/* 价格曲线图 */}
                         <Grid size={{ xs: 12 }}>
                             <PriceChart data={data.time_series} dateStr={selectedDate ? format(selectedDate, 'yyyy-MM-dd') : ''} />

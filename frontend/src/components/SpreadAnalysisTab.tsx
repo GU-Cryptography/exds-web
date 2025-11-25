@@ -306,7 +306,7 @@ export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDa
                             <Tooltip content={<CustomTooltip unit="元/MWh" />} />
                             <ReferenceLine y={0} stroke="#000" />
                             <Bar dataKey="price_spread" name="价格偏差">
-                                {analysisData.time_series.map((entry, index) => (
+                                {(analysisData.time_series || []).map((entry, index) => (
                                     <Cell key={`cell-${index}`} fill={entry.price_spread > 0 ? '#f44336' : '#4caf50'} />
                                 ))}
                             </Bar>
@@ -344,7 +344,7 @@ export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDa
                                 }} />
                                 <ReferenceLine x={0} stroke="#000" />
                                 <Bar dataKey="count" name="时段数量">
-                                    {analysisData.price_distribution.map((entry, index) => (
+                                    {(analysisData.price_distribution || []).map((entry, index) => (
                                         <Cell key={`cell-${index}`} fill={entry.range_min >= 0 ? '#f44336' : '#4caf50'} />
                                     ))}
                                 </Bar>
@@ -407,7 +407,7 @@ export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDa
                                         <ReferenceLine y={0} stroke="#000" yAxisId="left" />
                                         <ReferenceLine y={0} stroke="#000" yAxisId="right" />
                                         <Bar yAxisId="left" dataKey="price_spread" name="价格偏差" barSize={20}>
-                                            {analysisData.time_series.map((entry, index) => (
+                                            {(analysisData.time_series || []).map((entry, index) => (
                                                 <Cell key={`cell-${index}`} fill={entry.price_spread > 0 ? 'rgba(244, 67, 54, 0.5)' : 'rgba(76, 175, 80, 0.5)'} />
                                             ))}
                                         </Bar>
