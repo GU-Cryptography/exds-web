@@ -3,11 +3,12 @@ import {
     Box, CircularProgress, Typography, Paper, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
     FormControl, FormLabel, RadioGroup, FormControlLabel, Radio
 } from '@mui/material';
-import { ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Bar, ReferenceLine, Cell } from 'recharts';
+import { ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Bar, ReferenceLine, Cell, LineChart } from 'recharts';
 import apiClient from '../api/client';
 import { format } from 'date-fns';
 import { CustomTooltip } from './CustomTooltip';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
+import { useTouPeriodBackground } from '../hooks/useTouPeriodBackground';
 
 // 偏差类型配置
 const deviationTypeOptions = [
@@ -17,6 +18,113 @@ const deviationTypeOptions = [
     { value: 'nonmarket_unit_deviation', label: '非市场化机组偏差' },
     { value: 'tieline_deviation', label: '联络线偏差' }
 ];
+
+// Custom Tooltip 内容组件
+const CustomTooltipContent: React.FC<any> = ({ active, payload, label, unit }) => {
+    if (active && payload && payload.length) {
+        const periodType = payload[0].payload.period_type;
+        return (
+            <Paper sx={{ p: 1.5, backgroundColor: 'rgba(255, 255, 255, 0.95)', border: '1px solid #ccc', borderRadius: '4px' }}>
+                <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
+                    {periodType ? `时间: ${label} (${periodType})` : `时间: ${label}`}
+                </Typography>
+                {payload.map((pld: any) => (
+                    <Typography key={pld.dataKey} variant="body2" sx={{ color: pld.color }}>
+                        {`${pld.name}: ${Number(pld.value).toFixed(2)} ${unit}`}
+                    </Typography>
+                ))}
+            </Paper>
+        );
+    }
+    return null;
+};
+
+// 市场竞价空间曲线图组件
+const VolumeChart: React.FC<{ data: any[]; dateStr: string; isFullscreen: boolean; FullscreenEnterButton: any; FullscreenExitButton: any; FullscreenTitle: any; chartRef: React.RefObject<HTMLDivElement | null> }> =
+    ({ data, dateStr, isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, chartRef }) => {
+
+    // 计算Y轴范围
+    const volumes = data.flatMap(d => [d.volume_rt, d.volume_da].filter(v => v !== null && v !== undefined));
+    const minVolume = volumes.length > 0 ? Math.min(...volumes) : 0;
+    const maxVolume = volumes.length > 0 ? Math.max(...volumes) : 0;
+
+    const { TouPeriodAreas } = useTouPeriodBackground(data);
+
+    return (
+        <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+            <Typography variant="h6" gutterBottom>
+                市场竞价空间
+            </Typography>
+            <Box
+                ref={chartRef}
+                sx={{
+                    height: { xs: 350, sm: 400 },
+                    position: 'relative',
+                    backgroundColor: isFullscreen ? 'background.paper' : 'transparent',
+                    p: isFullscreen ? 2 : 0,
+                    ...(isFullscreen && {
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        width: '100vw',
+                        height: '100vh',
+                        zIndex: 1400
+                    })
+                }}
+            >
+                <FullscreenEnterButton />
+                <FullscreenExitButton />
+                <FullscreenTitle />
+
+                {!data || data.length === 0 ? (
+                    <Box sx={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+                        <Typography>无数据</Typography>
+                    </Box>
+                ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                            {TouPeriodAreas}
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis
+                                dataKey="time_str"
+                                tick={{ fontSize: 12 }}
+                                interval={11}
+                            />
+                            <YAxis
+                                domain={[Math.floor(minVolume * 0.9), Math.ceil(maxVolume * 1.1)]}
+                                label={{
+                                    value: '功率 (MW)',
+                                    angle: -90,
+                                    position: 'insideLeft'
+                                }}
+                                tick={{ fontSize: 12 }}
+                            />
+                            <Tooltip content={<CustomTooltipContent unit="MW" />} />
+                            <Legend />
+                            <Line
+                                type="monotone"
+                                dataKey="volume_rt"
+                                stroke="#ff9800"
+                                strokeWidth={2}
+                                name="实时竞价空间"
+                                dot={false}
+                            />
+                            <Line
+                                type="monotone"
+                                dataKey="volume_da"
+                                stroke="#4caf50"
+                                strokeWidth={2}
+                                strokeDasharray="5 5"
+                                name="日前竞价空间"
+                                dot={false}
+                            />
+                        </LineChart>
+                    </ResponsiveContainer>
+                )}
+            </Box>
+        </Paper>
+    );
+};
 
 interface SpreadAnalysisTabProps {
     selectedDate: Date | null;
@@ -30,10 +138,13 @@ export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDa
         systematic_bias: [],
         price_distribution: []
     });
+    const [marketData, setMarketData] = useState<any[]>([]);
 
     // 数据缓存
     const [cachedDate, setCachedDate] = useState<string | null>(null);
     const [cachedData, setCachedData] = useState<{ time_series: any[], systematic_bias: any[], price_distribution: any[] } | null>(null);
+    const [cachedMarketDate, setCachedMarketDate] = useState<string | null>(null);
+    const [cachedMarketData, setCachedMarketData] = useState<any[] | null>(null);
 
     const [priceSpreadDomain, setPriceSpreadDomain] = useState<[number, number] | undefined>(undefined);
     const [deviationDomain, setDeviationDomain] = useState<[number, number] | undefined>(undefined);
@@ -41,12 +152,14 @@ export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDa
     const chart1Ref = useRef<HTMLDivElement>(null);
     const chart2Ref = useRef<HTMLDivElement>(null);
     const chart3Ref = useRef<HTMLDivElement>(null);
+    const chart4Ref = useRef<HTMLDivElement>(null);
 
     const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
 
     const { isFullscreen: isFs1, FullscreenEnterButton: FSEnter1, FullscreenExitButton: FSExit1, FullscreenTitle: FSTitle1, NavigationButtons: FSNav1 } = useChartFullscreen({ chartRef: chart1Ref, title: `价格偏差主图 (${dateStr})` });
     const { isFullscreen: isFs2, FullscreenEnterButton: FSEnter2, FullscreenExitButton: FSExit2, FullscreenTitle: FSTitle2, NavigationButtons: FSNav2 } = useChartFullscreen({ chartRef: chart2Ref, title: `价差分布直方图 (${dateStr})` });
     const { isFullscreen: isFs3, FullscreenEnterButton: FSEnter3, FullscreenExitButton: FSExit3, FullscreenTitle: FSTitle3, NavigationButtons: FSNav3 } = useChartFullscreen({ chartRef: chart3Ref, title: `核心偏差归因 (${dateStr})` });
+    const { isFullscreen: isFs4, FullscreenEnterButton: FSEnter4, FullscreenExitButton: FSExit4, FullscreenTitle: FSTitle4 } = useChartFullscreen({ chartRef: chart4Ref, title: `市场竞价空间 (${dateStr})` });
 
     const fetchData = (date: Date | null) => {
         if (!date) return;
@@ -77,6 +190,36 @@ export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDa
     useEffect(() => {
         fetchData(selectedDate);
     }, [selectedDate]);
+
+    // 获取市场数据
+    useEffect(() => {
+        if (!selectedDate) return;
+
+        const fetchMarketData = async () => {
+            const formattedDate = format(selectedDate, 'yyyy-MM-dd');
+
+            // 检查缓存
+            if (cachedMarketDate === formattedDate && cachedMarketData) {
+                setMarketData(cachedMarketData);
+                return;
+            }
+
+            try {
+                const response = await apiClient.get('/api/v1/market-analysis/dashboard', {
+                    params: { date_str: formattedDate }
+                });
+                setMarketData(response.data.time_series || []);
+                // 更新缓存
+                setCachedMarketDate(formattedDate);
+                setCachedMarketData(response.data.time_series || []);
+            } catch (err) {
+                console.error('Error fetching market data:', err);
+                setMarketData([]);
+            }
+        };
+
+        fetchMarketData();
+    }, [selectedDate, cachedMarketDate, cachedMarketData]);
 
     useEffect(() => {
         if (analysisData.time_series.length > 0) {
@@ -281,6 +424,19 @@ export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDa
                             )}
                         </Box>
                     </Paper>
+                </Grid>
+
+                {/* 市场竞价空间图表 */}
+                <Grid size={{ xs: 12 }}>
+                    <VolumeChart
+                        data={marketData}
+                        dateStr={dateStr}
+                        isFullscreen={isFs4}
+                        FullscreenEnterButton={FSEnter4}
+                        FullscreenExitButton={FSExit4}
+                        FullscreenTitle={FSTitle4}
+                        chartRef={chart4Ref}
+                    />
                 </Grid>
             </Grid>
 
