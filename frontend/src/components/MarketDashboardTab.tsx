@@ -6,7 +6,6 @@ import {
     Typography,
     CircularProgress,
     Alert,
-    IconButton,
     Table,
     TableBody,
     TableCell,
@@ -14,14 +13,8 @@ import {
     TableHead,
     TableRow
 } from '@mui/material';
-import ArrowLeftIcon from '@mui/icons-material/ArrowLeft';
-import ArrowRightIcon from '@mui/icons-material/ArrowRight';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceDot } from 'recharts';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { addDays, format } from 'date-fns';
-import { zhCN } from 'date-fns/locale';
+import { format } from 'date-fns';
 import apiClient from '../api/client';
 import { useTouPeriodBackground } from '../hooks/useTouPeriodBackground';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
@@ -272,6 +265,24 @@ const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string }> = ({ da
     const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
     const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
 
+    // 计算实时价格的最大最小值点
+    const rtPrices = data.filter(d => d.price_rt !== null);
+    const maxRtPoint = rtPrices.length > 0
+        ? rtPrices.reduce((prev, curr) => (curr.price_rt! > prev.price_rt! ? curr : prev))
+        : null;
+    const minRtPoint = rtPrices.length > 0
+        ? rtPrices.reduce((prev, curr) => (curr.price_rt! < prev.price_rt! ? curr : prev))
+        : null;
+
+    // 计算日前价格的最大最小值点
+    const daPrices = data.filter(d => d.price_da !== null);
+    const maxDaPoint = daPrices.length > 0
+        ? daPrices.reduce((prev, curr) => (curr.price_da! > prev.price_da! ? curr : prev))
+        : null;
+    const minDaPoint = daPrices.length > 0
+        ? daPrices.reduce((prev, curr) => (curr.price_da! < prev.price_da! ? curr : prev))
+        : null;
+
     const { TouPeriodAreas } = useTouPeriodBackground(data);
 
     // 全屏功能(移除导航按钮)
@@ -342,6 +353,82 @@ const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string }> = ({ da
                                 name="日前价格"
                                 dot={false}
                             />
+
+                            {/* 实时价格最大值标注 */}
+                            {maxRtPoint && (
+                                <ReferenceDot
+                                    x={maxRtPoint.time_str}
+                                    y={maxRtPoint.price_rt!}
+                                    r={6}
+                                    fill="#f44336"
+                                    stroke="#fff"
+                                    strokeWidth={2}
+                                    label={{
+                                        value: maxRtPoint.price_rt!.toFixed(2),
+                                        position: 'top',
+                                        fill: '#f44336',
+                                        fontSize: 12,
+                                        fontWeight: 'bold'
+                                    }}
+                                />
+                            )}
+
+                            {/* 实时价格最小值标注 */}
+                            {minRtPoint && (
+                                <ReferenceDot
+                                    x={minRtPoint.time_str}
+                                    y={minRtPoint.price_rt!}
+                                    r={6}
+                                    fill="#f44336"
+                                    stroke="#fff"
+                                    strokeWidth={2}
+                                    label={{
+                                        value: minRtPoint.price_rt!.toFixed(2),
+                                        position: 'bottom',
+                                        fill: '#f44336',
+                                        fontSize: 12,
+                                        fontWeight: 'bold'
+                                    }}
+                                />
+                            )}
+
+                            {/* 日前价格最大值标注 */}
+                            {maxDaPoint && (
+                                <ReferenceDot
+                                    x={maxDaPoint.time_str}
+                                    y={maxDaPoint.price_da!}
+                                    r={6}
+                                    fill="#2196f3"
+                                    stroke="#fff"
+                                    strokeWidth={2}
+                                    label={{
+                                        value: maxDaPoint.price_da!.toFixed(2),
+                                        position: 'top',
+                                        fill: '#2196f3',
+                                        fontSize: 12,
+                                        fontWeight: 'bold'
+                                    }}
+                                />
+                            )}
+
+                            {/* 日前价格最小值标注 */}
+                            {minDaPoint && (
+                                <ReferenceDot
+                                    x={minDaPoint.time_str}
+                                    y={minDaPoint.price_da!}
+                                    r={6}
+                                    fill="#2196f3"
+                                    stroke="#fff"
+                                    strokeWidth={2}
+                                    label={{
+                                        value: minDaPoint.price_da!.toFixed(2),
+                                        position: 'bottom',
+                                        fill: '#2196f3',
+                                        fontSize: 12,
+                                        fontWeight: 'bold'
+                                    }}
+                                />
+                            )}
                         </LineChart>
                     </ResponsiveContainer>
                 </Box>
