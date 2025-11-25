@@ -424,7 +424,7 @@ export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDa
 
             {/* 数据维度曲线对比图表（联动显示） */}
             <DataDimensionChart
-                data={marketData}
+                data={selectedDeviationType === 'total_volume_deviation' ? marketData : analysisData.time_series}
                 deviationType={selectedDeviationType}
                 dateStr={dateStr}
                 isFullscreen={isFs4}

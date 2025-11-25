@@ -44,7 +44,7 @@ function TabPanel(props: TabPanelProps) {
 
 export const MarketPriceAnalysisPage: React.FC = () => {
     const [tabIndex, setTabIndex] = useState(0);
-    const [selectedDate, setSelectedDate] = useState<Date | null>(addDays(new Date(), -2));
+    const [selectedDate, setSelectedDate] = useState<Date | null>(addDays(new Date(), -1));
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
