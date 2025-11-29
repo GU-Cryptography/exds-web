@@ -253,7 +253,7 @@ const GridAgencyPricePage: React.FC = () => {
                                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                                     <PriceCheckIcon sx={{ fontSize: 50, color: 'success.main', mr: 2 }} />
                                     <Typography variant="h4" component="div" fontWeight="bold">
-                                        {currentData.purchase_price.toFixed(6)}
+                                        {currentData.purchase_price != null ? currentData.purchase_price.toFixed(6) : '-'}
                                     </Typography>
                                 </Box>
                             </Box>
@@ -262,11 +262,11 @@ const GridAgencyPricePage: React.FC = () => {
                             <Divider sx={{ my: 1.5 }} />
                             <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                                 <Typography variant="body1">其中: 平均上网电价</Typography>
-                                <Typography variant="body1" fontWeight="bold">{currentData.avg_on_grid_price.toFixed(6)}</Typography>
+                                <Typography variant="body1" fontWeight="bold">{currentData.avg_on_grid_price != null ? currentData.avg_on_grid_price.toFixed(6) : '-'}</Typography>
                             </Box>
                             <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
                                 <Typography variant="body1">历史偏差折价</Typography>
-                                <Typography variant="body1" fontWeight="bold">{currentData.historical_deviation_discount.toFixed(6)}</Typography>
+                                <Typography variant="body1" fontWeight="bold">{currentData.historical_deviation_discount != null ? currentData.historical_deviation_discount.toFixed(6) : '-'}</Typography>
                             </Box>
                         </Paper>
                     </Grid>
@@ -277,14 +277,14 @@ const GridAgencyPricePage: React.FC = () => {
                             <Grid size={{ xs: 12 }} sx={{ flex: 1 }}>
                                 <StatCard
                                     title="代理购电规模"
-                                    value={`${currentData.purchase_scale_kwh.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 万kWh`}
+                                    value={currentData.purchase_scale_kwh != null ? `${currentData.purchase_scale_kwh.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 万kWh` : '-'}
                                     icon={<ElectricMeterIcon />}
                                 />
                             </Grid>
                             <Grid size={{ xs: 12 }} sx={{ flex: 1 }}>
                                 <StatCard
                                     title="上网环节线損"
-                                    value={`${currentData.network_loss_price.toFixed(6)} 元/kWh`}
+                                    value={currentData.network_loss_price != null ? `${currentData.network_loss_price.toFixed(6)} 元/kWh` : '-'}
                                     icon={<LanIcon />}
                                     color="warning.main"
                                 />
@@ -297,14 +297,14 @@ const GridAgencyPricePage: React.FC = () => {
                         <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }} elevation={2}>
                             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <Typography variant="h6">系统运行费及构成</Typography>
-                                <Typography variant="h5" fontWeight="bold">{currentData.system_op_cost_discount.toFixed(6)}</Typography>
+                                <Typography variant="h5" fontWeight="bold">{currentData.system_op_cost_discount != null ? currentData.system_op_cost_discount.toFixed(6) : '-'}</Typography>
                             </Box>
                             <Divider sx={{ my: 1 }} />
                             <Box sx={{ flexGrow: 1 }}>
                                 {systemOpsBreakdown.map((item, index) => (
                                     <Box key={index} sx={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', my: 0.5 }}>
                                         <Typography variant="body2" color="text.secondary">{item[0]}</Typography>
-                                        <Typography variant="body2" color="text.secondary" fontWeight="medium">{typeof item[1] === 'number' ? item[1].toFixed(6) : item[1]}</Typography>
+                                        <Typography variant="body2" color="text.secondary" fontWeight="medium">{typeof item[1] === 'number' && item[1] != null ? item[1].toFixed(6) : (item[1] ?? '-')}</Typography>
                                     </Box>
                                 ))}
                             </Box>
