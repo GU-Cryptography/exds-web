@@ -127,6 +127,7 @@ interface ChartComponentProps {
     FullscreenTitle: React.ComponentType;
     NavigationButtons: React.ComponentType;
     getDataItemName: (dataItemId: number) => string;
+    getForecastTypePrefix: (dataItemId: number) => string;
 }
 
 const ChartComponent = React.memo<ChartComponentProps>(({
@@ -141,6 +142,7 @@ const ChartComponent = React.memo<ChartComponentProps>(({
     FullscreenTitle,
     NavigationButtons,
     getDataItemName,
+    getForecastTypePrefix,
 }) => {
     return (
         <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 }, mt: 2 }}>
@@ -217,9 +219,11 @@ const ChartComponent = React.memo<ChartComponentProps>(({
                                 formatter={(value: number, name: string) => {
                                     const idx = parseInt(name.split('_')[1], 10);
                                     const curve = curvesData[idx];
-                                    const curveName = curve
-                                        ? `${getDataItemName(curve.data_item_id)}(${curve.date.substring(5)})`
-                                        : name;
+                                    if (!curve) return [`${value.toFixed(2)} MW`, name];
+
+                                    const prefix = getForecastTypePrefix(curve.data_item_id);
+                                    const displayName = getDataItemName(curve.data_item_id);
+                                    const curveName = `${prefix}${displayName}(${curve.date.substring(5)})`;
                                     return [`${value.toFixed(2)} MW`, curveName];
                                 }}
                             />
@@ -228,7 +232,9 @@ const ChartComponent = React.memo<ChartComponentProps>(({
                                     const idx = parseInt(value.split('_')[1], 10);
                                     const curve = curvesData[idx];
                                     if (curve) {
-                                        return `${getDataItemName(curve.data_item_id)}(${curve.date.substring(5)})`;
+                                        const prefix = getForecastTypePrefix(curve.data_item_id);
+                                        const displayName = getDataItemName(curve.data_item_id);
+                                        return `${prefix}${displayName}(${curve.date.substring(5)})`;
                                     }
                                     return value;
                                 }}
@@ -455,6 +461,7 @@ export const ForecastBaseDataPage: React.FC = () => {
     const getForecastTypePrefix = (dataItemId: number): string => {
         if (DATA_ITEMS_CONFIG.weekly.some(i => i.id === dataItemId)) return '周';
         if (DATA_ITEMS_CONFIG.daily.some(i => i.id === dataItemId)) return '日';
+        if (DATA_ITEMS_CONFIG.realtime.some(i => i.id === dataItemId)) return '实';
         return '';
     };
 
@@ -466,78 +473,119 @@ export const ForecastBaseDataPage: React.FC = () => {
 
         // 1. 分组曲线数据
         const actualCurves: CurveData[] = [];
-        const forecastCurves: CurveData[] = [];
+        const weeklyForecastCurves: CurveData[] = [];
+        const dailyForecastCurves: CurveData[] = [];
 
         curvesData.forEach(curve => {
             // 实际数据 ID 11-15
             if (curve.data_item_id >= 11 && curve.data_item_id <= 15) {
                 actualCurves.push(curve);
-            } else {
-                forecastCurves.push(curve);
+            }
+            // 周预测 ID 1-5
+            else if (curve.data_item_id >= 1 && curve.data_item_id <= 5) {
+                weeklyForecastCurves.push(curve);
+            }
+            // 日预测 ID 6-10
+            else if (curve.data_item_id >= 6 && curve.data_item_id <= 10) {
+                dailyForecastCurves.push(curve);
             }
         });
 
-        // 2. 寻找匹配对并计算准确率
+        // 辅助函数：计算两条曲线的准确率
+        const calculateAccuracy = (curve1: CurveData, curve2: CurveData): number | null => {
+            let sumDiff = 0;
+            let sumBase = 0;
+            let count = 0;
+
+            // 创建时间映射以加速查找
+            const map1 = new Map(curve1.data.map(p => [p.time, p.value]));
+
+            curve2.data.forEach(p => {
+                if (map1.has(p.time)) {
+                    const val1 = map1.get(p.time)!;
+                    sumDiff += Math.abs(p.value - val1);
+                    sumBase += Math.abs(val1);
+                    count++;
+                }
+            });
+
+            if (count > 0 && sumBase > 0) {
+                return (1 - sumDiff / sumBase) * 100;
+            }
+            return null;
+        };
+
+        // 2. 计算预测 vs 实际的准确率
         actualCurves.forEach(actual => {
             const actualUnifiedName = getUnifiedName(actual.data_item_id);
 
-            forecastCurves.forEach(forecast => {
+            // 周预测 vs 实际
+            weeklyForecastCurves.forEach(forecast => {
                 const forecastUnifiedName = getUnifiedName(forecast.data_item_id);
-
-                // 匹配条件：同一天且统一名称相同
                 if (actual.date === forecast.date && actualUnifiedName === forecastUnifiedName) {
-                    // 计算准确率
-                    let sumDiff = 0;
-                    let sumActual = 0;
-                    let count = 0;
-
-                    // 创建时间映射以加速查找
-                    const actualMap = new Map(actual.data.map(p => [p.time, p.value]));
-
-                    forecast.data.forEach(p => {
-                        if (actualMap.has(p.time)) {
-                            const actualVal = actualMap.get(p.time)!;
-                            sumDiff += Math.abs(p.value - actualVal);
-                            sumActual += Math.abs(actualVal);
-                            count++;
-                        }
-                    });
-
-                    if (count > 0 && sumActual > 0) {
-                        const accuracy = (1 - sumDiff / sumActual) * 100;
-                        const prefix = getForecastTypePrefix(forecast.data_item_id);
-                        const name = `${prefix}${forecastUnifiedName}准确率 (${forecast.date})`;
-                        const key = `${prefix}_${forecastUnifiedName}_${forecast.date}`;
-
+                    const accuracy = calculateAccuracy(actual, forecast);
+                    if (accuracy !== null) {
+                        const name = `周${forecastUnifiedName}准确率 (${forecast.date})`;
+                        const key = `周_${forecastUnifiedName}_${forecast.date}`;
                         newResults.push({
                             key,
                             name,
                             value: `${accuracy.toFixed(2)}%`,
-                            sortKey: `${forecast.date.replace(/-/g, '')}_${prefix === '日' ? '1' : '2'}_${forecast.data_item_id}`
+                            sortKey: `${forecast.date.replace(/-/g, '')}_2_${forecast.data_item_id}`
+                        });
+                    }
+                }
+            });
+
+            // 日预测 vs 实际
+            dailyForecastCurves.forEach(forecast => {
+                const forecastUnifiedName = getUnifiedName(forecast.data_item_id);
+                if (actual.date === forecast.date && actualUnifiedName === forecastUnifiedName) {
+                    const accuracy = calculateAccuracy(actual, forecast);
+                    if (accuracy !== null) {
+                        const name = `日${forecastUnifiedName}准确率 (${forecast.date})`;
+                        const key = `日_${forecastUnifiedName}_${forecast.date}`;
+                        newResults.push({
+                            key,
+                            name,
+                            value: `${accuracy.toFixed(2)}%`,
+                            sortKey: `${forecast.date.replace(/-/g, '')}_1_${forecast.data_item_id}`
                         });
                     }
                 }
             });
         });
 
-        // 3. 合并结果 (保留旧结果，更新新结果)
+        // 3. 计算周预测 vs 日预测的准确率
+        weeklyForecastCurves.forEach(weeklyForecast => {
+            const weeklyUnifiedName = getUnifiedName(weeklyForecast.data_item_id);
+
+            dailyForecastCurves.forEach(dailyForecast => {
+                const dailyUnifiedName = getUnifiedName(dailyForecast.data_item_id);
+
+                // 匹配条件：同一天且统一名称相同
+                if (weeklyForecast.date === dailyForecast.date && weeklyUnifiedName === dailyUnifiedName) {
+                    const accuracy = calculateAccuracy(dailyForecast, weeklyForecast);
+                    if (accuracy !== null) {
+                        const name = `周日${weeklyUnifiedName}准确率 (${weeklyForecast.date})`;
+                        const key = `周日_${weeklyUnifiedName}_${weeklyForecast.date}`;
+                        newResults.push({
+                            key,
+                            name,
+                            value: `${accuracy.toFixed(2)}%`,
+                            sortKey: `${weeklyForecast.date.replace(/-/g, '')}_3_${weeklyForecast.data_item_id}`
+                        });
+                    }
+                }
+            });
+        });
+
+        // 4. 合并结果 (保留旧结果，更新新结果)
         if (newResults.length > 0) {
             setAccuracyResults(prev => {
                 const prevMap = new Map(prev.map(r => [r.key, r]));
-                // 如果需要"最新勾选的在最后"，对于已存在的结果，可以先删除再添加，或者保持原位
-                // 这里我们保持原位，只追加新的。如果用户希望重新勾选的跳到最后，需要调整逻辑。
-                // 鉴于用户反馈是"按日期排序导致最后勾选的不在最后"，取消排序即可满足"新产生的在最后"。
                 newResults.forEach(r => {
-                    if (!prevMap.has(r.key)) {
-                        prevMap.set(r.key, r);
-                    } else {
-                        // 如果已存在，更新值但保持位置（Map特性）
-                        // 如果想让它跳到最后，可以: prevMap.delete(r.key); prevMap.set(r.key, r);
-                        // 但考虑到"持久化"特性，保持原位可能更符合直觉，除非用户明确说"重新勾选要置顶/置底"
-                        // 用户原话："只是按日期排序，最后勾选的不是在最后" -> 说明用户期望的是"操作顺序"。
-                        // 既然结果是持久化的，那么"最后勾选"通常指"新产生的"。
-                        prevMap.set(r.key, r);
-                    }
+                    prevMap.set(r.key, r);
                 });
                 return Array.from(prevMap.values());
             });
@@ -930,6 +978,7 @@ export const ForecastBaseDataPage: React.FC = () => {
                             FullscreenTitle={FullscreenTitle}
                             NavigationButtons={NavigationButtons}
                             getDataItemName={getDataItemName}
+                            getForecastTypePrefix={getForecastTypePrefix}
                         />
                     </Box>
                 ) : null}
