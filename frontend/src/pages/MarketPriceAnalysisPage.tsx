@@ -80,7 +80,7 @@ export const MarketPriceAnalysisPage: React.FC = () => {
                             color: 'text.primary'
                         }}
                     >
-                        价格分析 / 现货价格分析
+                        价格分析 / 现货日内分析
                     </Typography>
                 )}
 

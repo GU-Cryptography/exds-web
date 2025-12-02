@@ -88,7 +88,7 @@ const menuItems: MenuItem[] = [
         text: '价格分析',
         icon: <PriceChangeIcon />,
         subItems: [
-            { text: '现货价格分析', path: '/price-analysis/spot-market', icon: <AnalyticsOutlined /> },
+            { text: '现货日内分析', path: '/price-analysis/spot-market', icon: <AnalyticsOutlined /> },
             { text: '现货趋势分析', path: '/price-analysis/spot-trend', icon: <TimelineIcon /> },
             { text: '中长期价格分析', path: '/price-analysis/mid-long-term', icon: <TrendingUpOutlined /> },
             { text: '价格对比分析', path: '/price-analysis/comparison', icon: <BarChartOutlined /> },

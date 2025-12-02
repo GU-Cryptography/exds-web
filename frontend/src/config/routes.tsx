@@ -33,7 +33,7 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/load-forecast/long-term', title: '中长期负荷预测', component: PlaceholderPage },
 
     // 价格分析
-    { path: '/price-analysis/spot-market', title: '现货价格分析', component: MarketPriceAnalysisPage },
+    { path: '/price-analysis/spot-market', title: '现货日内分析', component: MarketPriceAnalysisPage },
     { path: '/price-analysis/spot-trend', title: '现货趋势分析', component: SpotTrendAnalysisPage },
     { path: '/price-analysis/mid-long-term', title: '中长期价格分析', component: PlaceholderPage },
     { path: '/price-analysis/comparison', title: '价格对比分析', component: PlaceholderPage },
