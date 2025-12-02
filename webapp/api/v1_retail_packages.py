@@ -47,7 +47,7 @@ async def update_package(
     """更新套餐"""
     service = PackageService(DATABASE)
     try:
-        result = service.update_package(
+        result = service.update(
             package_id=package_id,
             package_data=package.dict(exclude_unset=True),
             operator=current_user.username
@@ -103,7 +103,7 @@ async def list_packages(
 ):
     """获取套餐列表"""
     service = PackageService(DATABASE)
-    result = service.list_packages(
+    result = service.list(
         filters={
             "keyword": keyword,
             "package_type": package_type,
@@ -178,7 +178,7 @@ async def get_package(
     """获取套餐详情"""
     service = PackageService(DATABASE)
     try:
-        result = service.get_package_by_id(package_id)
+        result = service.get_by_id(package_id)
         return result
     except ValueError as e:
         raise HTTPException(
@@ -194,7 +194,7 @@ async def delete_package(
     """删除套餐（仅草稿状态）"""
     service = PackageService(DATABASE)
     try:
-        service.delete_package(package_id)
+        service.delete(package_id)
         return None  # 204 No Content
     except ValueError as e:
         error_msg = str(e)

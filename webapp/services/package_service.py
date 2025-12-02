@@ -135,8 +135,8 @@ class PackageService:
 
             # Use the list item model for lighter payload
             list_item = RetailPackageListItem(**list_item_data)
-            # 使用 by_alias=False 确保输出 id 而不是 _id
-            item_dict = list_item.dict(by_alias=False)
+            # 使用 model_dump(by_alias=False) 确保输出 id 而不是 _id
+            item_dict = list_item.model_dump(by_alias=False)
             # 添加合同数虚拟字段
             item_dict["contract_count"] = contract_count
             items.append(item_dict)
