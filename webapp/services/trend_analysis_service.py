@@ -6,6 +6,7 @@ from collections import defaultdict
 
 from pymongo.database import Database
 from pymongo import ASCENDING
+from webapp.services.tou_service import get_tou_rule_by_date
 
 # 导入模型 (虽然 Service 层主要返回 Dict，但类型提示可以使用)
 # from webapp.models.trend_analysis import ... 
@@ -467,35 +468,11 @@ class TrendAnalysisService:
 
     # ========== 私有辅助方法 ==========
 
-    def _get_tou_rules(self, query_date: datetime) -> Dict[str, str]:
-        """获取分时电价规则 (复用 v1.py 中的逻辑，但为了解耦，这里重新实现或封装)"""
-        # 简单实现：读取数据库
-        month = query_date.month
-        rules = list(self.tou_collection.find({"months": month}))
-        
-        time_to_period_map = {}
-        # 初始化默认值
-        for i in range(96):
-            time_obj = datetime(2000, 1, 1) + timedelta(minutes=15 * i)
-            time_to_period_map[time_obj.strftime("%H:%M")] = "平段"
-            
-        # 应用规则
-        priority = ["高峰", "低谷", "尖峰", "深谷"]
-        sorted_rules = sorted(rules, key=lambda r: priority.index(r['period_type']) if r['period_type'] in priority else -1)
+        def _get_tou_rules(self, query_date: datetime) -> Dict[str, str]:
 
-        for rule in sorted_rules:
-            start = datetime.strptime(rule['start_time'], '%H:%M').time()
-            end_time_str = rule['end_time']
-            for time_str in time_to_period_map:
-                current_time = datetime.strptime(time_str, '%H:%M').time()
-                if end_time_str == '24:00':
-                    if current_time >= start:
-                        time_to_period_map[time_str] = rule['period_type']
-                else:
-                    end = datetime.strptime(end_time_str, '%H:%M').time()
-                    if start <= current_time < end:
-                        time_to_period_map[time_str] = rule['period_type']
-        return time_to_period_map
+            """获取分时电价规则 (Base + Patch 模式) - 代理至公共服务"""
+
+            return get_tou_rule_by_date(query_date, collection=self.tou_collection)
 
     def _format_time_point(self, point: Dict[str, Any], query_date: datetime) -> Dict[str, Any]:
         """

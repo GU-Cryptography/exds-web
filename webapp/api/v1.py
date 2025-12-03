@@ -17,6 +17,7 @@ from webapp.api import v1_trend_analysis
 from webapp.services.package_service import PackageService
 from webapp.services.pricing_engine import PricingEngine
 from webapp.services.pricing_model_service import pricing_model_service
+from webapp.services.tou_service import get_tou_rule_by_date
 
 # 创建一个API路由器
 router = APIRouter(prefix="/api/v1", tags=["v1"])
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 USER_COLLECTION = DATABASE['user_load_data']
 DA_PRICE_COLLECTION = DATABASE['day_ahead_spot_price']
 RT_PRICE_COLLECTION = DATABASE['real_time_spot_price']
-TOU_RULES_COLLECTION = DATABASE['tou_rules']
+# TOU_RULES_COLLECTION = DATABASE['tou_rules'] # 已移至 tou_service
 PRICE_SGCC_COLLECTION = DATABASE['price_sgcc']
 
 
@@ -118,31 +119,11 @@ def get_available_months():
 
 
 def get_tou_rule_for_date(date: datetime) -> Dict[str, str]:
-    month = date.month
-    query = {"months": month}
-    rules = list(TOU_RULES_COLLECTION.find(query))
-    
-    time_to_period_map = {}
-    for i in range(96):
-        time_obj = datetime(2000, 1, 1) + timedelta(minutes=15 * i)
-        time_to_period_map[time_obj.strftime("%H:%M")] = "平段"
-
-    priority = ["高峰", "低谷", "尖峰", "深谷"]
-    sorted_rules = sorted(rules, key=lambda r: priority.index(r['period_type']) if r['period_type'] in priority else -1)
-
-    for rule in sorted_rules:
-        start = datetime.strptime(rule['start_time'], '%H:%M').time()
-        end_time_str = rule['end_time']
-        for time_str in time_to_period_map:
-            current_time = datetime.strptime(time_str, '%H:%M').time()
-            if end_time_str == '24:00':
-                if current_time >= start:
-                    time_to_period_map[time_str] = rule['period_type']
-            else:
-                end = datetime.strptime(end_time_str, '%H:%M').time()
-                if start <= current_time < end:
-                    time_to_period_map[time_str] = rule['period_type']
-    return time_to_period_map
+    """
+    获取指定日期的分时电价规则 (Base + Patch 模式)
+    (Delegate to tou_service)
+    """
+    return get_tou_rule_by_date(date)
 
 @router.get("/price_comparison", summary="获取指定单日的日前与实时价格对比数据")
 def get_price_comparison(date: str = Query(..., description="查询日期, 格式 YYYY-MM-DD")):
