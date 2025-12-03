@@ -8,6 +8,7 @@ import { CustomerManagementPage } from '../pages/CustomerManagementPage';
 import RetailContractPage from '../pages/RetailContractPage';
 import { ForecastBaseDataPage } from '../pages/ForecastBaseDataPage';
 import { SpotTrendAnalysisPage } from '../pages/SpotTrendAnalysisPage';
+import TouRulesPage from '../pages/TouRulesPage';
 
 // 路由配置接口
 export interface RouteConfig {
@@ -61,8 +62,8 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/settlement/profit-analysis', title: '经营利润分析', component: PlaceholderPage },
 
     // 基础数据
-    { path: '/basic-data/grid-price', title: '国网代购电价格', component: GridAgencyPricePage },
-    { path: '/basic-data/tou-definition', title: '分时电价划分', component: PlaceholderPage },
+    { path: '/basic-data/grid-price', title: '国网代理购电', component: GridAgencyPricePage },
+    { path: '/basic-data/tou-definition', title: '时段电价分布', component: TouRulesPage },
     { path: '/basic-data/retail-packages', title: '零售套餐管理', component: RetailPackagePage },
     { path: '/basic-data/load-validation', title: '负荷数据校验', component: PlaceholderPage },
 

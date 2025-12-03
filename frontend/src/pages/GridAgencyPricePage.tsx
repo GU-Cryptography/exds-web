@@ -19,16 +19,16 @@ import PriceCheckIcon from '@mui/icons-material/PriceCheck';
 import ElectricMeterIcon from '@mui/icons-material/ElectricMeter';
 import LanIcon from '@mui/icons-material/Lan';
 import { DataGrid, GridColDef, GridRenderCellParams, GridPaginationModel } from '@mui/x-data-grid';
-import { 
-    ComposedChart, 
-    Line, 
-    Bar, 
-    XAxis, 
-    YAxis, 
-    CartesianGrid, 
-    Tooltip, 
-    Legend, 
-    ResponsiveContainer 
+import {
+    ComposedChart,
+    Line,
+    Bar,
+    XAxis,
+    YAxis,
+    CartesianGrid,
+    Tooltip,
+    Legend,
+    ResponsiveContainer
 } from 'recharts';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
 import { MobileDataCard } from '../components/MobileDataCard';
@@ -90,7 +90,7 @@ const GridAgencyPricePage: React.FC = () => {
     // General state
     const [loading, setLoading] = useState<boolean>(true);
     const [error, setError] = useState<string | null>(null);
-    
+
     const chartRef = useRef<HTMLDivElement>(null);
 
     const handlePreviousMonth = () => {
@@ -199,7 +199,7 @@ const GridAgencyPricePage: React.FC = () => {
                         pageSize: paginationModel.pageSize,
                     },
                 });
-                
+
                 const { total, pageData, chartData } = response.data;
 
                 setGridData(pageData);
@@ -350,14 +350,14 @@ const GridAgencyPricePage: React.FC = () => {
     const renderTable = () => {
         return (
             <Paper sx={{ p: 2, mt: 3, width: '100%' }}>
-                 <Typography variant="h6" gutterBottom>历史数据详情</Typography>
+                <Typography variant="h6" gutterBottom>历史数据详情</Typography>
                 {isMobile ? (
                     <Box sx={{ mt: 2 }}>
                         {gridData.map((row) => (
-                            <MobileDataCard 
-                                key={row._id} 
-                                data={row} 
-                                onViewPdf={() => handleViewPdf(row._id)} 
+                            <MobileDataCard
+                                key={row._id}
+                                data={row}
+                                onViewPdf={() => handleViewPdf(row._id)}
                             />
                         ))}
                     </Box>
@@ -398,7 +398,7 @@ const GridAgencyPricePage: React.FC = () => {
                 <Grid size={{ xs: 12 }}>
                     {renderCards(latestData)}
                 </Grid>
-                
+
                 <Grid size={{ xs: 12 }}>
                     {chartData.length > 0 && renderChart(chartData)}
                 </Grid>
@@ -422,7 +422,7 @@ const GridAgencyPricePage: React.FC = () => {
                         color: 'text.primary'
                     }}
                 >
-                    基础数据 / 国网代购电价格
+                    基础数据 / 国网代理购电
                 </Typography>
             )}
 

@@ -17,7 +17,7 @@ from webapp.api import v1_trend_analysis
 from webapp.services.package_service import PackageService
 from webapp.services.pricing_engine import PricingEngine
 from webapp.services.pricing_model_service import pricing_model_service
-from webapp.services.tou_service import get_tou_rule_by_date
+from webapp.services.tou_service import get_tou_rule_by_date, get_tou_versions, get_tou_summary
 
 # 创建一个API路由器
 router = APIRouter(prefix="/api/v1", tags=["v1"])
@@ -124,6 +124,31 @@ def get_tou_rule_for_date(date: datetime) -> Dict[str, str]:
     (Delegate to tou_service)
     """
     return get_tou_rule_by_date(date)
+
+@router.get("/tou-rules/versions", summary="获取所有可用的分时电价版本")
+def get_tou_rule_versions():
+    """
+    获取所有可用的分时电价版本日期列表
+    """
+    try:
+        return get_tou_versions()
+    except Exception as e:
+        logger.error(f"Error in get_tou_rule_versions: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取分时电价版本失败: {str(e)}")
+
+@router.get("/tou-rules/summary", summary="获取指定版本的分时电价规则摘要")
+def get_tou_rule_summary(version: str = Query(..., description="版本日期, 格式 YYYY-MM-DD")):
+    """
+    获取指定版本的分时电价规则摘要，包含全年各月的分时定义
+    """
+    try:
+        version_date = datetime.strptime(version, "%Y-%m-%d")
+        return get_tou_summary(version_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="日期格式无效，请使用 YYYY-MM-DD 格式")
+    except Exception as e:
+        logger.error(f"Error in get_tou_rule_summary: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取分时电价规则摘要失败: {str(e)}")
 
 @router.get("/price_comparison", summary="获取指定单日的日前与实时价格对比数据")
 def get_price_comparison(date: str = Query(..., description="查询日期, 格式 YYYY-MM-DD")):

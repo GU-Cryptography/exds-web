@@ -136,8 +136,8 @@ const menuItems: MenuItem[] = [
         text: '基础数据',
         icon: <AssessmentIcon />,
         subItems: [
-            { text: '国网代购电价格', path: '/basic-data/grid-price', icon: <PriceChangeIcon /> },
-            { text: '分时电价划分', path: '/basic-data/tou-definition', icon: <StyleOutlined /> },
+            { text: '国网代理购电', path: '/basic-data/grid-price', icon: <PriceChangeIcon /> },
+            { text: '时段电价分布', path: '/basic-data/tou-definition', icon: <StyleOutlined /> },
             { text: '零售套餐管理', path: '/basic-data/retail-packages', icon: <StyleOutlined /> },
             { text: '负荷数据校验', path: '/basic-data/load-validation', icon: <VerifiedUserOutlined /> },
         ],
