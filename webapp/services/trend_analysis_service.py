@@ -468,11 +468,11 @@ class TrendAnalysisService:
 
     # ========== 私有辅助方法 ==========
 
-        def _get_tou_rules(self, query_date: datetime) -> Dict[str, str]:
+    def _get_tou_rules(self, query_date: datetime) -> Dict[str, str]:
 
-            """获取分时电价规则 (Base + Patch 模式) - 代理至公共服务"""
+        """获取分时电价规则 (Base + Patch 模式) - 代理至公共服务"""
 
-            return get_tou_rule_by_date(query_date, collection=self.tou_collection)
+        return get_tou_rule_by_date(query_date, collection=self.tou_collection)
 
     def _format_time_point(self, point: Dict[str, Any], query_date: datetime) -> Dict[str, Any]:
         """
