@@ -82,7 +82,8 @@ class TrendAnalysisService:
             Dict 包含 daily_trends 和 period_trends
         """
         # 1. 获取基础数据
-        query = {"datetime": {"$gte": start_date, "$lt": end_date}}
+        # 规范要求：查询区间必须使用左开右闭 (start, end]，以正确包含第96个点(24:00)并排除前一天的最后一个点
+        query = {"datetime": {"$gt": start_date, "$lte": end_date}}
         da_docs = list(self.da_collection.find(query))
         rt_docs = list(self.rt_collection.find(query))
         
@@ -99,45 +100,93 @@ class TrendAnalysisService:
             "vol": 0, "cost": 0
         })) # date -> period_type -> {vol, cost}
 
+        # 用于计算全量价差: (date_str, time_str) -> {da, rt}
+        detailed_prices = defaultdict(lambda: {"da": None, "rt": None})
+
         # 处理日前数据
         for doc in da_docs:
-            date_str = doc.get('date_str')
-            if not date_str: continue
+            dt = doc.get('datetime')
+            if not dt: continue
+            
+            # 规范要求：24:00时刻处理
+            # 业务日的第96个点（24:00）在数据库中存储为次日的 00:00:00
+            # 需要将其归属到前一天的业务日期，并标记为 "24:00"
+            if dt.hour == 0 and dt.minute == 0:
+                business_date = dt.date() - timedelta(days=1)
+                time_key = "24:00"
+            else:
+                business_date = dt.date()
+                time_key = dt.strftime("%H:%M")
+                
+            date_str = business_date.strftime("%Y-%m-%d")
             
             price = doc.get('avg_clearing_price')
             vol = doc.get('total_clearing_power', 0)
-            time_str = doc.get('time_str')
             
             if price is not None:
                 daily_stats[date_str]["da_vol"] += vol
                 daily_stats[date_str]["da_cost"] += price * vol
                 daily_stats[date_str]["da_prices"].append(price)
                 
-                # 分时段统计 (仅统计VWAP，所以需要 cost 和 vol)
-                # 注意：这里简化了，实际上应该区分 DA 和 RT 的分时段趋势，需求文档主要关注"分时段价格趋势"，通常指 RT
-                # 但需求 1.3 说"展示每个时段的日均VWAP趋势"，未明确指明 DA 还是 RT。
-                # 根据上下文 "识别特定时段的成本变化"，通常指 RT。这里我们计算 RT 的分时段。
+                if time_key:
+                    detailed_prices[(date_str, time_key)]["da"] = price
         
         # 处理实时数据
         for doc in rt_docs:
-            date_str = doc.get('date_str')
-            if not date_str: continue
+            dt = doc.get('datetime')
+            if not dt: continue
+            
+            # 规范要求：24:00时刻处理
+            if dt.hour == 0 and dt.minute == 0:
+                business_date = dt.date() - timedelta(days=1)
+                time_key = "24:00"
+            else:
+                business_date = dt.date()
+                time_key = dt.strftime("%H:%M")
+                
+            date_str = business_date.strftime("%Y-%m-%d")
             
             price = doc.get('avg_clearing_price')
             vol = doc.get('total_clearing_power', 0)
-            time_str = doc.get('time_str')
+            time_str = doc.get('time_str') # 保留用于 fallback 查找规则
             
             if price is not None:
                 daily_stats[date_str]["rt_vol"] += vol
                 daily_stats[date_str]["rt_cost"] += price * vol
                 daily_stats[date_str]["rt_prices"].append(price)
                 
+                if time_key:
+                    detailed_prices[(date_str, time_key)]["rt"] = price
+
                 # 分时段统计 (RT)
-                period_type = tou_rules.get(time_str, "平段")
+                # 使用 time_key 查找规则
+                lookup_key = time_key
+                period_type = tou_rules.get(lookup_key, "平段")
+                # 如果 lookup_key 也没找到，尝试去零 (e.g. 00:15 -> 0:15) 再次查找
+                if period_type == "平段" and lookup_key and lookup_key.startswith("0"):
+                     short_key = f"{int(lookup_key.split(':')[0])}:{lookup_key.split(':')[1]}"
+                     period_type = tou_rules.get(short_key, "平段")
+
                 period_stats[date_str][period_type]["vol"] += vol
                 period_stats[date_str][period_type]["cost"] += price * vol
 
-        # 4. 格式化输出
+        # DEBUG LOGGING
+        logger.info(f"TrendAnalysis: Date Range {start_date} - {end_date}")
+        logger.info(f"TrendAnalysis: Found {len(da_docs)} DA docs, {len(rt_docs)} RT docs")
+        logger.info(f"TrendAnalysis: detailed_prices keys count: {len(detailed_prices)}")
+        
+        # 4. 统计每日正负价差时段数
+        daily_spread_counts = defaultdict(lambda: {"pos": 0, "neg": 0})
+        for key, prices in detailed_prices.items():
+            date_s = key[0]
+            if prices["da"] is not None and prices["rt"] is not None:
+                spread = prices["rt"] - prices["da"]
+                if spread > 0:
+                    daily_spread_counts[date_s]["pos"] += 1
+                elif spread < 0:
+                    daily_spread_counts[date_s]["neg"] += 1
+
+        # 5. 格式化输出 daily_trends
         daily_trends = []
         sorted_dates = sorted(daily_stats.keys())
         
@@ -157,6 +206,8 @@ class TrendAnalysisService:
                 "twap_da": round(twap_da, 2) if twap_da is not None else None,
                 "twap_rt": round(twap_rt, 2) if twap_rt is not None else None,
                 "twap_spread": round(twap_rt - twap_da, 2) if (twap_rt is not None and twap_da is not None) else None,
+                "positive_spread_count": daily_spread_counts[date_str]["pos"],
+                "negative_spread_count": daily_spread_counts[date_str]["neg"]
             })
             
         period_trends_output = defaultdict(list)
@@ -169,10 +220,67 @@ class TrendAnalysisService:
                     "period_type": p_type,
                     "vwap": round(vwap, 2) if vwap is not None else None
                 })
+
+        # 计算全量价差
+        all_spreads = []
+        # 按日期和时间排序
+        sorted_keys = sorted(detailed_prices.keys())
+        for key in sorted_keys:
+            prices = detailed_prices[key]
+            if prices["da"] is not None and prices["rt"] is not None:
+                all_spreads.append(round(prices["rt"] - prices["da"], 2))
+
+        # 计算价差统计指标
+        spread_stats = {
+            "avgSpread": 0,
+            "positiveSpreadRatio": 0,
+            "negativeSpreadRatio": 0,
+            "maxSpread": 0,
+            "minSpread": 0
+        }
+        
+        if all_spreads:
+            spread_stats["avgSpread"] = round(statistics.mean(all_spreads), 2)
+            spread_stats["maxSpread"] = max(all_spreads)
+            spread_stats["minSpread"] = min(all_spreads)
+            
+            positive_count = sum(1 for s in all_spreads if s > 0)
+            negative_count = sum(1 for s in all_spreads if s < 0)
+            total_count = len(all_spreads)
+            
+            spread_stats["positiveSpreadRatio"] = round((positive_count / total_count) * 100, 1)
+            spread_stats["negativeSpreadRatio"] = round((negative_count / total_count) * 100, 1)
+
+        # 计算价差分布直方图
+        spread_distribution = []
+        if all_spreads:
+            step = 50
+            min_val = int(spread_stats["minSpread"] // step * step)
+            max_val = int(spread_stats["maxSpread"] // step * step + step) # +step to include max value range
+            
+            # 初始化桶
+            buckets = defaultdict(int)
+            # 预填充所有区间为0，保证连续性
+            for i in range(min_val, max_val, step):
+                label = f"{i}~{i + step}"
+                buckets[label] = 0
                 
+            for s in all_spreads:
+                bucket_start = int(s // step * step)
+                label = f"{bucket_start}~{bucket_start + step}"
+                buckets[label] += 1
+                
+            # 转换为列表并排序 (按区间数值排序)
+            # 解析 label 的起始值进行排序
+            sorted_buckets = sorted(buckets.items(), key=lambda x: int(x[0].split('~')[0]))
+            
+            spread_distribution = [{"range": k, "count": v} for k, v in sorted_buckets]
+
         return {
             "daily_trends": daily_trends,
-            "period_trends": period_trends_output
+            "period_trends": period_trends_output,
+            "spread_stats": spread_stats,
+            "spread_distribution": spread_distribution
         }
 
     def get_weekday_analysis(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:

@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
-import { Box, Tabs, Tab, Typography, Paper, useMediaQuery, useTheme } from '@mui/material';
+import { Box, Tabs, Tab, Typography, Paper, useMediaQuery, useTheme, Button, Stack } from '@mui/material';
+import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { zhCN } from 'date-fns/locale';
+import { subDays, startOfMonth, endOfMonth } from 'date-fns';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import WarningIcon from '@mui/icons-material/Warning';
-import ScatterPlotIcon from '@mui/icons-material/ScatterPlot';
 import { PriceTrendTab } from '../components/trend-analysis/PriceTrendTab';
 
 interface TabPanelProps {
@@ -37,8 +40,37 @@ export const SpotTrendAnalysisPage: React.FC = () => {
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
 
+    // 日期区间状态 - 默认最近30天
+    const [startDate, setStartDate] = useState<Date | null>(subDays(new Date(), 30));
+    const [endDate, setEndDate] = useState<Date | null>(subDays(new Date(), 1));
+
     const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
         setTabIndex(newValue);
+    };
+
+
+    // 快捷按钮处理
+    const handleQuickSelect = (type: 'last30' | 'last60' | 'thisMonth' | 'lastMonth') => {
+        const today = new Date();
+        switch (type) {
+            case 'last30':
+                setStartDate(subDays(today, 30));
+                setEndDate(today);
+                break;
+            case 'last60':
+                setStartDate(subDays(today, 60));
+                setEndDate(today);
+                break;
+            case 'thisMonth':
+                setStartDate(startOfMonth(today));
+                setEndDate(endOfMonth(today));
+                break;
+            case 'lastMonth':
+                const lastMonth = subDays(startOfMonth(today), 1);
+                setStartDate(startOfMonth(lastMonth));
+                setEndDate(endOfMonth(lastMonth));
+                break;
+        }
     };
 
     // Tab 配置
@@ -51,71 +83,167 @@ export const SpotTrendAnalysisPage: React.FC = () => {
     ];
 
     return (
-        <Box sx={{ width: '100%' }}>
-            {/* 移动端面包屑标题 */}
-            {isTablet && (
-                <Typography
-                    variant="subtitle1"
-                    sx={{
-                        mb: 2,
-                        fontWeight: 'bold',
-                        color: 'text.primary'
-                    }}
-                >
-                    价格分析 / 现货趋势分析
-                </Typography>
-            )}
+        <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
+            <Box sx={{ width: '100%' }}>
+                {/* 移动端面包屑标题 */}
+                {isTablet && (
+                    <Typography
+                        variant="subtitle1"
+                        sx={{
+                            mb: 2,
+                            fontWeight: 'bold',
+                            color: 'text.primary'
+                        }}
+                    >
+                        价格分析 / 现货趋势分析
+                    </Typography>
+                )}
 
-            <Paper variant="outlined" sx={{ borderColor: 'divider' }}>
-                <Tabs
-                    value={tabIndex}
-                    onChange={handleTabChange}
-                    aria-label="spot trend analysis tabs"
-                    variant="scrollable"
-                    scrollButtons="auto"
-                    allowScrollButtonsMobile
-                    sx={{
-                        '& .MuiTabs-scrollButtons': {
-                            '&.Mui-disabled': { opacity: 0.3 }
-                        },
-                        '& .MuiTab-root': {
-                            minWidth: { xs: 60, sm: 120 }, // 移动端适中宽度,容纳约5个图标
-                            maxWidth: { xs: 'none', sm: 'none' },
-                            fontSize: { xs: '0.75rem', sm: '0.9375rem' },
-                            px: { xs: 0.5, sm: 2 }, // 移动端保留少量内边距
-                            minHeight: { xs: 60, sm: 48 }, // 移动端高度
-                            py: { xs: 1, sm: 1.5 }
-                        }
-                    }}
-                >
-                    {tabsConfig.map((tab, index) => (
-                        <Tab
-                            key={index}
-                            icon={tab.icon}
-                            iconPosition="top"
-                            label={isMobile ? tab.mobileLabel : tab.label}
-                            id={`trend-tab-${index}`}
-                            aria-controls={`trend-tabpanel-${index}`}
-                        />
-                    ))}
-                </Tabs>
-            </Paper>
+                {/* 日期区间选择器 */}
+                <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+                    <Stack
+                        direction={{ xs: 'column', md: 'row' }}
+                        spacing={{ xs: 1, md: 2 }}
+                        alignItems="center"
+                    >
+                        {/* 日期选择器行 */}
+                        <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', justifyContent: 'center', width: { xs: '100%', md: 'auto' } }}>
+                            <DatePicker
+                                label="开始"
+                                value={startDate}
+                                onChange={(date) => setStartDate(date)}
+                                slotProps={{
+                                    textField: {
+                                        size: "small",
+                                        sx: {
+                                            width: { xs: '105px', sm: '180px' },
+                                            '& .MuiInputBase-input': { fontSize: { xs: '0.8rem', sm: '1rem' }, px: { xs: 1, sm: 1.5 } }
+                                        }
+                                    }
+                                }}
+                            />
+                            <Typography sx={{ px: 0.5, fontSize: '0.875rem' }}>至</Typography>
+                            <DatePicker
+                                label="结束"
+                                value={endDate}
+                                onChange={(date) => setEndDate(date)}
+                                slotProps={{
+                                    textField: {
+                                        size: "small",
+                                        sx: {
+                                            width: { xs: '105px', sm: '180px' },
+                                            '& .MuiInputBase-input': { fontSize: { xs: '0.8rem', sm: '1rem' }, px: { xs: 1, sm: 1.5 } }
+                                        }
+                                    }
+                                }}
+                            />
+                        </Box>
 
-            <TabPanel value={tabIndex} index={0}>
-                <PriceTrendTab />
-            </TabPanel>
-            <TabPanel value={tabIndex} index={1}>
-                <Box sx={{ p: 3, textAlign: 'center' }}>周内特性分析 (开发中)</Box>
-            </TabPanel>
-            <TabPanel value={tabIndex} index={2}>
-                <Box sx={{ p: 3, textAlign: 'center' }}>波动性分析 (开发中)</Box>
-            </TabPanel>
-            <TabPanel value={tabIndex} index={3}>
-                <Box sx={{ p: 3, textAlign: 'center' }}>储能套利分析 (开发中)</Box>
-            </TabPanel>
-            <TabPanel value={tabIndex} index={4}>
-                <Box sx={{ p: 3, textAlign: 'center' }}>价格异常分析 (开发中)</Box>
-            </TabPanel>
-        </Box>
+                        {/* 快捷按钮行 */}
+                        <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center', width: { xs: '100%', md: 'auto' } }}>
+                            <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={() => handleQuickSelect('last30')}
+                                sx={{
+                                    minWidth: { xs: 'auto', sm: '80px' },
+                                    px: { xs: 1, sm: 2 },
+                                    fontSize: { xs: '0.75rem', sm: '0.875rem' }
+                                }}
+                            >
+                                最近30天
+                            </Button>
+                            <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={() => handleQuickSelect('last60')}
+                                sx={{
+                                    minWidth: { xs: 'auto', sm: '80px' },
+                                    px: { xs: 1, sm: 2 },
+                                    fontSize: { xs: '0.75rem', sm: '0.875rem' }
+                                }}
+                            >
+                                最近60天
+                            </Button>
+                            <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={() => handleQuickSelect('thisMonth')}
+                                sx={{
+                                    minWidth: { xs: 'auto', sm: '80px' },
+                                    px: { xs: 1, sm: 2 },
+                                    fontSize: { xs: '0.75rem', sm: '0.875rem' }
+                                }}
+                            >
+                                本月
+                            </Button>
+                            <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={() => handleQuickSelect('lastMonth')}
+                                sx={{
+                                    minWidth: { xs: 'auto', sm: '80px' },
+                                    px: { xs: 1, sm: 2 },
+                                    fontSize: { xs: '0.75rem', sm: '0.875rem' }
+                                }}
+                            >
+                                上月
+                            </Button>
+                        </Box>
+                    </Stack>
+                </Paper>
+
+                <Paper variant="outlined" sx={{ borderColor: 'divider' }}>
+                    <Tabs
+                        value={tabIndex}
+                        onChange={handleTabChange}
+                        aria-label="spot trend analysis tabs"
+                        variant="scrollable"
+                        scrollButtons="auto"
+                        allowScrollButtonsMobile
+                        sx={{
+                            '& .MuiTabs-scrollButtons': {
+                                '&.Mui-disabled': { opacity: 0.3 }
+                            },
+                            '& .MuiTab-root': {
+                                minWidth: { xs: 60, sm: 120 }, // 移动端适中宽度,容纳约5个图标
+                                maxWidth: { xs: 'none', sm: 'none' },
+                                fontSize: { xs: '0.75rem', sm: '0.9375rem' },
+                                px: { xs: 0.5, sm: 2 }, // 移动端保留少量内边距
+                                minHeight: { xs: 60, sm: 48 }, // 移动端高度
+                                py: { xs: 1, sm: 1.5 }
+                            }
+                        }}
+                    >
+                        {tabsConfig.map((tab, index) => (
+                            <Tab
+                                key={index}
+                                icon={tab.icon}
+                                iconPosition="top"
+                                label={isMobile ? tab.mobileLabel : tab.label}
+                                id={`trend-tab-${index}`}
+                                aria-controls={`trend-tabpanel-${index}`}
+                            />
+                        ))}
+                    </Tabs>
+                </Paper>
+
+                <TabPanel value={tabIndex} index={0}>
+                    <PriceTrendTab startDate={startDate} endDate={endDate} />
+                </TabPanel>
+                <TabPanel value={tabIndex} index={1}>
+                    <Box sx={{ p: 3, textAlign: 'center' }}>周内特性分析 (开发中)</Box>
+                </TabPanel>
+                <TabPanel value={tabIndex} index={2}>
+                    <Box sx={{ p: 3, textAlign: 'center' }}>波动性分析 (开发中)</Box>
+                </TabPanel>
+                <TabPanel value={tabIndex} index={3}>
+                    <Box sx={{ p: 3, textAlign: 'center' }}>储能套利分析 (开发中)</Box>
+                </TabPanel>
+                <TabPanel value={tabIndex} index={4}>
+                    <Box sx={{ p: 3, textAlign: 'center' }}>价格异常分析 (开发中)</Box>
+                </TabPanel>
+            </Box>
+        </LocalizationProvider>
     );
 };

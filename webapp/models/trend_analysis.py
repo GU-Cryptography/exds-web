@@ -16,6 +16,8 @@ class PriceTrendData(BaseModel):
     twap_da: Optional[float] = Field(None, description="日前算术平均价")
     twap_rt: Optional[float] = Field(None, description="实时算术平均价")
     twap_spread: Optional[float] = Field(None, description="TWAP价差 (RT-DA)")
+    positive_spread_count: Optional[int] = Field(0, description="正价差时段数")
+    negative_spread_count: Optional[int] = Field(0, description="负价差时段数")
 
 class PeriodTrendData(BaseModel):
     """分时段趋势数据项"""
@@ -23,10 +25,25 @@ class PeriodTrendData(BaseModel):
     period_type: str = Field(..., description="时段类型：尖峰/峰/平/谷/深谷")
     vwap: Optional[float] = Field(None, description="该时段的日均VWAP")
 
+class SpreadStats(BaseModel):
+    """价差统计指标"""
+    avgSpread: float = Field(..., description="平均价差")
+    positiveSpreadRatio: float = Field(..., description="正价差占比")
+    negativeSpreadRatio: float = Field(..., description="负价差占比")
+    maxSpread: float = Field(..., description="最大价差")
+    minSpread: float = Field(..., description="最小价差")
+
+class SpreadDistributionItem(BaseModel):
+    """价差分布直方图项"""
+    range: str = Field(..., description="价差区间")
+    count: int = Field(..., description="频次")
+
 class PriceTrendResponse(BaseModel):
     """价格趋势分析响应"""
     daily_trends: List[PriceTrendData] = Field(..., description="每日价格趋势列表")
     period_trends: Dict[str, List[PeriodTrendData]] = Field(..., description="分时段趋势列表，Key为时段类型")
+    spread_stats: Optional[SpreadStats] = Field(None, description="价差统计指标")
+    spread_distribution: Optional[List[SpreadDistributionItem]] = Field(None, description="价差分布直方图数据")
 
 class BoxPlotStats(BaseModel):
     """箱线图统计数据"""
