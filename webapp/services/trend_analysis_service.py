@@ -574,12 +574,295 @@ class TrendAnalysisService:
             "risk_timeslots": [] # 暂未实现热力图统计
         }
 
+    def get_timeslot_stats(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
+        """
+        需求6: 时段分析 - 将96个数据点聚合为48个时段并计算统计指标
+        
+        Args:
+            start_date: 开始日期 (包含)
+            end_date: 结束日期 (不包含)
+            
+        Returns:
+            Dict 包含 kpis, timeslot_stats, box_plot_data
+        """
+        # 1. 查询数据
+        query = {"datetime": {"$gt": start_date, "$lte": end_date}}
+        da_docs = list(self.da_collection.find(query).sort("datetime", 1))
+        rt_docs = list(self.rt_collection.find(query).sort("datetime", 1))
+        
+        logger.info(f"TimeSlotAnalysis: Found {len(da_docs)} DA docs, {len(rt_docs)} RT docs")
+        
+        # 2. 构建时段映射: (date_str, timeslot) -> {da_prices: [], rt_prices: [], spreads: []}
+        timeslot_data = defaultdict(lambda: {
+            "da_prices": [],
+            "rt_prices": [],
+            "spreads": []
+        })
+        
+        # 辅助函数: 将96点编号映射到48时段
+        def get_timeslot_from_datetime(dt: datetime) -> Tuple[int, str]:
+            # 处理24:00的特殊情况
+            if dt.hour == 0 and dt.minute == 0:
+                return 48, "23:30-24:00"
+            
+            # 计算period编号 (1-96)
+            period = (dt.hour * 60 + dt.minute) // 15
+            if period == 0: period = 96
+            
+            # 计算时段编号 (1-48)
+            timeslot = (period - 1) // 2 + 1
+            
+            # 计算时间标签
+            slot_start_minutes = (timeslot - 1) * 30
+            start_hour = slot_start_minutes // 60
+            start_minute = slot_start_minutes % 60
+            end_minutes = slot_start_minutes + 30
+            end_hour = end_minutes // 60
+            end_minute = end_minutes % 60
+            
+            if end_hour == 24:
+                time_label = f"{start_hour:02d}:{start_minute:02d}-24:00"
+            else:
+                time_label = f"{start_hour:02d}:{start_minute:02d}-{end_hour:02d}:{end_minute:02d}"
+            
+            return timeslot, time_label
+        
+        # 3. 处理日前数据
+        da_map = {}  # (date_str, timeslot) -> price
+        for doc in da_docs:
+            dt = doc.get('datetime')
+            if not dt: continue
+            
+            if dt.hour == 0 and dt.minute == 0:
+                business_date = (dt.date() - timedelta(days=1)).strftime("%Y-%m-%d")
+            else:
+                business_date = dt.date().strftime("%Y-%m-%d")
+            
+            price = doc.get('avg_clearing_price')
+            if price is not None:
+                timeslot, _ = get_timeslot_from_datetime(dt)
+                key = (business_date, timeslot)
+                da_map[key] = price
+                timeslot_data[timeslot]["da_prices"].append(price)
+        
+        # 4. 处理实时数据
+        rt_map = {}  # (date_str, timeslot) -> price
+        for doc in rt_docs:
+            dt = doc.get('datetime')
+            if not dt: continue
+            
+            if dt.hour == 0 and dt.minute == 0:
+                business_date = (dt.date() - timedelta(days=1)).strftime("%Y-%m-%d")
+            else:
+                business_date = dt.date().strftime("%Y-%m-%d")
+            
+            price = doc.get('avg_clearing_price')
+            if price is not None:
+                timeslot, _ = get_timeslot_from_datetime(dt)
+                key = (business_date, timeslot)
+                rt_map[key] = price
+                timeslot_data[timeslot]["rt_prices"].append(price)
+        
+        # 5. 计算价差
+        all_keys = set(da_map.keys()) | set(rt_map.keys())
+        for key in all_keys:
+            da_price = da_map.get(key)
+            rt_price = rt_map.get(key)
+            if da_price is not None and rt_price is not None:
+                spread = rt_price - da_price
+                timeslot = key[1]
+                timeslot_data[timeslot]["spreads"].append(spread)
+        
+        # 6. 计算每个时段的统计指标
+        timeslot_stats_list = []
+        box_plot_data_list = []
+        
+        # 预计算全局最大值用于归一化
+        all_spreads_abs = []
+        all_stds = []
+        temp_stats = {} 
+        
+        for timeslot in range(1, 49):
+            data = timeslot_data[timeslot]
+            spreads = data["spreads"]
+            rt_prices = data["rt_prices"]
+            
+            if not spreads: continue
+                
+            avg_spread = statistics.mean(spreads)
+            std_spread = statistics.stdev(spreads) if len(spreads) > 1 else 0
+            
+            all_spreads_abs.append(abs(avg_spread))
+            all_stds.append(std_spread)
+            
+            temp_stats[timeslot] = {
+                "avg_spread": avg_spread,
+                "std_spread": std_spread,
+                "data": data,
+                "rt_prices": rt_prices,
+                "spreads": spreads
+            }
+            
+        max_abs_spread_global = max(all_spreads_abs) if all_spreads_abs else 1.0
+        max_std_global = max(all_stds) if all_stds else 1.0
+        
+        # 计算风险阈值 (Top 20% 的波动性视为高风险)
+        risk_threshold = 40 
+        if all_stds:
+            sorted_stds = sorted(all_stds)
+            risk_threshold_index = int(len(sorted_stds) * 0.8)
+            risk_threshold = sorted_stds[risk_threshold_index]
+            risk_threshold = max(risk_threshold, 20)
+            
+        for timeslot in range(1, 49):
+            if timeslot not in temp_stats: continue
+                
+            t_stat = temp_stats[timeslot]
+            data = t_stat["data"]
+            rt_prices = t_stat["rt_prices"]
+            spreads = t_stat["spreads"]
+            avg_spread = t_stat["avg_spread"]
+            std_spread = t_stat["std_spread"]
+            
+            # 直接计算时间标签
+            start_minutes = (timeslot - 1) * 30
+            start_h = start_minutes // 60
+            start_m = start_minutes % 60
+            end_minutes = start_minutes + 30
+            end_h = end_minutes // 60
+            end_m = end_minutes % 60
+            
+            if end_h == 24:
+                time_label = f"{start_h:02d}:{start_m:02d}-24:00"
+            else:
+                time_label = f"{start_h:02d}:{start_m:02d}-{end_h:02d}:{end_m:02d}"
+            
+            # 基础统计
+            da_prices = data["da_prices"]
+            avg_price_rt = statistics.mean(rt_prices)
+            avg_price_da = statistics.mean(da_prices) if da_prices else 0
+            std_price_rt = statistics.stdev(rt_prices) if len(rt_prices) > 1 else 0
+            max_price_rt = max(rt_prices)
+            min_price_rt = min(rt_prices)
+            
+            positive_spreads = [s for s in spreads if s > 0]
+            negative_spreads = [s for s in spreads if s < 0]
+            positive_spread_ratio = len(positive_spreads) / len(spreads)
+            negative_spread_ratio = len(negative_spreads) / len(spreads)
+            max_spread = max(spreads)
+            min_spread = min(spreads)
+            sample_size = len(spreads)
+            
+            # 一致性评分
+            consistency_score = max(positive_spread_ratio, negative_spread_ratio)
+            
+            # 推荐指数计算
+            consistency_norm = max(0, (consistency_score - 0.5) * 2)
+            spread_norm = abs(avg_spread) / max_abs_spread_global
+            volatility_norm = std_price_rt / max_std_global
+            
+            rec_score = (0.4 * consistency_norm) + (0.4 * spread_norm) - (0.2 * volatility_norm)
+            rec_score = max(0, min(1, rec_score)) * 100
+            
+            # 信号强度 (1-5)
+            if rec_score >= 80: signal_strength = 5
+            elif rec_score >= 60: signal_strength = 4
+            elif rec_score >= 40: signal_strength = 3
+            elif rec_score >= 20: signal_strength = 2
+            else: signal_strength = 1
+            
+            # 策略判定
+            if consistency_score >= 0.7 and abs(avg_spread) > 10:
+                recommended_strategy = "做多日前" if avg_spread > 0 else "做空日前"
+                confidence = "高"
+            elif abs(avg_spread) > 5 and consistency_score >= 0.6:
+                recommended_strategy = "做多日前" if avg_spread > 0 else "做空日前"
+                confidence = "中"
+            else:
+                recommended_strategy = "观望"
+                confidence = "低" if consistency_score < 0.5 else "中"
+            
+            # 风险等级
+            if std_spread >= risk_threshold:
+                risk_level = "高风险"
+            elif std_spread >= risk_threshold * 0.6:
+                risk_level = "中风险"
+            else:
+                risk_level = "低风险"
+            
+            timeslot_stats_list.append({
+                "timeslot": timeslot,
+                "time_label": time_label,
+                "avg_price_rt": round(avg_price_rt, 2),
+                "avg_price_da": round(avg_price_da, 2),
+                "std_price_rt": round(std_price_rt, 2),
+                "max_price_rt": round(max_price_rt, 2),
+                "min_price_rt": round(min_price_rt, 2),
+                "avg_spread": round(avg_spread, 2),
+                "std_spread": round(std_spread, 2),
+                "positive_spread_ratio": round(positive_spread_ratio, 3),
+                "negative_spread_ratio": round(negative_spread_ratio, 3),
+                "max_spread": round(max_spread, 2),
+                "min_spread": round(min_spread, 2),
+                "consistency_score": round(consistency_score, 3),
+                "recommended_strategy": recommended_strategy,
+                "confidence": confidence,
+                "risk_level": risk_level,
+                "sample_size": sample_size,
+                "recommendation_index": round(rec_score, 1),
+                "signal_strength": signal_strength
+            })
+            
+            # 箱线图数据
+            if spreads and len(spreads) >= 2:
+                sorted_spreads = sorted(spreads)
+                q1 = statistics.quantiles(sorted_spreads, n=4)[0]
+                median = statistics.median(sorted_spreads)
+                q3 = statistics.quantiles(sorted_spreads, n=4)[2]
+                iqr = q3 - q1
+                lower_bound = q1 - 1.5 * iqr
+                upper_bound = q3 + 1.5 * iqr
+                
+                valid_values = [v for v in sorted_spreads if lower_bound <= v <= upper_bound]
+                outliers = [v for v in sorted_spreads if v < lower_bound or v > upper_bound]
+                
+                box_plot_data_list.append({
+                    "timeslot": timeslot,
+                    "time_label": time_label,
+                    "min": round(min(valid_values) if valid_values else min(spreads), 2),
+                    "q1": round(q1, 2),
+                    "median": round(median, 2),
+                    "q3": round(q3, 2),
+                    "max": round(max(valid_values) if valid_values else max(spreads), 2),
+                    "outliers": [round(o, 2) for o in outliers]
+                })
+        
+        # 7. 计算 KPIs
+        high_consistency_list = [t for t in timeslot_stats_list if t["consistency_score"] >= 0.7]
+        high_risk_list = [t for t in timeslot_stats_list if t["risk_level"] == "高风险"]
+        
+        top_consistency = sorted(high_consistency_list, key=lambda x: x["consistency_score"], reverse=True)[:3]
+        top_risk = sorted(high_risk_list, key=lambda x: x["std_spread"], reverse=True)[:3]
+        
+        kpis = {
+            "high_consistency_count": len(high_consistency_list),
+            "avg_consistency": round(statistics.mean([t["consistency_score"] for t in timeslot_stats_list]) if timeslot_stats_list else 0, 3),
+            "recommended_count": len([t for t in timeslot_stats_list if t["recommended_strategy"] != "观望"]),
+            "high_risk_count": len(high_risk_list),
+            "top_consistency_timeslots": [t["time_label"].split("-")[0] for t in top_consistency],
+            "top_risk_timeslots": [t["time_label"].split("-")[0] for t in top_risk]
+        }
+        
+        return {
+            "kpis": kpis,
+            "timeslot_stats": timeslot_stats_list,
+            "box_plot_data": box_plot_data_list
+        }
+
     # ========== 私有辅助方法 ==========
 
     def _get_tou_rules(self, query_date: datetime) -> Dict[str, str]:
-
         """获取分时电价规则 (Base + Patch 模式) - 代理至公共服务"""
-
         return get_tou_rule_by_date(query_date, collection=self.tou_collection)
 
     def _format_time_point(self, point: Dict[str, Any], query_date: datetime) -> Dict[str, Any]:
@@ -598,3 +881,4 @@ class TrendAnalysisService:
             "value": point.get("value"),
             "timestamp": ts.isoformat()
         }
+        

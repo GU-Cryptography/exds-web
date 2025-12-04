@@ -29,5 +29,11 @@ export const trendAnalysisApi = {
     // 5. 价格异常分析
     fetchAnomaly: (params: PriceTrendParams) => {
         return apiClient.get('/api/v1/trend-analysis/anomaly', { params });
+    },
+
+    // 6. 时段统计分析
+    fetchTimeSlotStats: (params: PriceTrendParams) => {
+        return apiClient.get('/api/v1/trend-analysis/timeslot-stats', { params });
     }
 };
+

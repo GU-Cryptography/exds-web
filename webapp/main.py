@@ -76,3 +76,5 @@ app.include_router(v1_forecast_base_data.router, dependencies=[Depends(get_curre
 @app.get("/", tags=["Root"], summary="应用根路径")
 def read_root():
     return {"message": "欢迎使用电力交易辅助分析系统API"}
+
+# Trigger reload 2

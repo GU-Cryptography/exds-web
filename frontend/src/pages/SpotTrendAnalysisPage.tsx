@@ -8,8 +8,8 @@ import TimelineIcon from '@mui/icons-material/Timeline';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
-import WarningIcon from '@mui/icons-material/Warning';
 import { PriceTrendTab } from '../components/trend-analysis/PriceTrendTab';
+import { TimeSlotAnalysisTab } from '../components/trend-analysis/TimeSlotAnalysisTab';
 
 interface TabPanelProps {
     children?: React.ReactNode;
@@ -76,10 +76,9 @@ export const SpotTrendAnalysisPage: React.FC = () => {
     // Tab 配置
     const tabsConfig = [
         { icon: <TimelineIcon />, label: '价格走势', mobileLabel: '走势' },
+        { icon: <ShowChartIcon />, label: '时段分析', mobileLabel: '时段' },
         { icon: <CalendarMonthIcon />, label: '周内特性', mobileLabel: '周内' },
-        { icon: <ShowChartIcon />, label: '波动分析', mobileLabel: '波动' },
         { icon: <CompareArrowsIcon />, label: '储能套利', mobileLabel: '套利' },
-        { icon: <WarningIcon />, label: '异常分析', mobileLabel: '异常' },
     ];
 
     return (
@@ -232,16 +231,13 @@ export const SpotTrendAnalysisPage: React.FC = () => {
                     <PriceTrendTab startDate={startDate} endDate={endDate} />
                 </TabPanel>
                 <TabPanel value={tabIndex} index={1}>
-                    <Box sx={{ p: 3, textAlign: 'center' }}>周内特性分析 (开发中)</Box>
+                    <TimeSlotAnalysisTab startDate={startDate} endDate={endDate} />
                 </TabPanel>
                 <TabPanel value={tabIndex} index={2}>
-                    <Box sx={{ p: 3, textAlign: 'center' }}>波动性分析 (开发中)</Box>
+                    <Box sx={{ p: 3, textAlign: 'center' }}>周内特性分析 (开发中)</Box>
                 </TabPanel>
                 <TabPanel value={tabIndex} index={3}>
                     <Box sx={{ p: 3, textAlign: 'center' }}>储能套利分析 (开发中)</Box>
-                </TabPanel>
-                <TabPanel value={tabIndex} index={4}>
-                    <Box sx={{ p: 3, textAlign: 'center' }}>价格异常分析 (开发中)</Box>
                 </TabPanel>
             </Box>
         </LocalizationProvider>

@@ -10,7 +10,8 @@ from webapp.models.trend_analysis import (
     WeekdayAnalysisResponse, 
     VolatilityAnalysisResponse,
     ArbitrageAnalysisResponse,
-    AnomalyAnalysisResponse
+    AnomalyAnalysisResponse,
+    TimeSlotAnalysisResponse
 )
 
 logger = logging.getLogger(__name__)
@@ -129,3 +130,26 @@ def get_anomaly(
     except Exception as e:
         logger.error(f"Error in get_anomaly: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@router.get(
+    "/timeslot-stats",
+    response_model=TimeSlotAnalysisResponse,
+    summary="获取时段统计分析数据",
+    description="将96个数据点聚合为48个时段,提供详细的统计指标、推荐策略和箱线图数据"
+)
+def get_timeslot_stats(
+    start_date: str = Query(..., description="开始日期 YYYY-MM-DD"),
+    end_date: str = Query(..., description="结束日期 YYYY-MM-DD")
+):
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        
+        service = get_service()
+        return service.get_timeslot_stats(start, end)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="日期格式无效")
+    except Exception as e:
+        logger.error(f"Error in get_timeslot_stats: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+

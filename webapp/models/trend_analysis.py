@@ -116,3 +116,57 @@ class AnomalyAnalysisResponse(BaseModel):
     events: Dict[str, AnomalyEventStats] = Field(..., description="各类异常事件统计")
     daily_extremums: List[ExtremumData] = Field(..., description="每日极值数据")
     risk_timeslots: List[Dict[str, Any]] = Field(..., description="高风险时段列表")
+
+# ============================================================================
+# 时段分析模型 (Time Slot Analysis Models)
+# ============================================================================
+
+class TimeSlotStats(BaseModel):
+    """单个时段的统计数据"""
+    timeslot: int = Field(..., description="时段编号 1-48")
+    time_label: str = Field(..., description="时间标签 如 '00:00-00:30'")
+    avg_price_rt: float = Field(..., description="平均价格_RT (元/MWh)")
+    avg_price_da: float = Field(..., description="平均价格_DA (元/MWh)")
+    std_price_rt: float = Field(..., description="价格标准差_RT")
+    max_price_rt: float = Field(..., description="最高价_RT")
+    min_price_rt: float = Field(..., description="最低价_RT")
+    avg_spread: float = Field(..., description="平均价差 (RT-DA)")
+    std_spread: float = Field(..., description="价差标准差")
+    positive_spread_ratio: float = Field(..., description="正价差占比 0-1")
+    negative_spread_ratio: float = Field(..., description="负价差占比 0-1")
+    max_spread: float = Field(..., description="最大正价差")
+    min_spread: float = Field(..., description="最大负价差")
+    consistency_score: float = Field(..., description="一致性评分 0-1")
+    recommended_strategy: str = Field(..., description="推荐策略: 做多日前/做空日前/观望")
+    confidence: str = Field(..., description="置信度: 高/中/低")
+    risk_level: str = Field(..., description="风险等级: 低风险/中风险/高风险")
+    sample_size: int = Field(..., description="样本量(有效天数)")
+    recommendation_index: float = Field(..., description="推荐指数 0-100")
+    signal_strength: int = Field(..., description="信号强度 1-5")
+
+class BoxPlotDataPoint(BaseModel):
+    """箱线图数据点"""
+    timeslot: int = Field(..., description="时段编号")
+    time_label: str = Field(..., description="时间标签")
+    min: float = Field(..., description="最小值")
+    q1: float = Field(..., description="第一四分位数")
+    median: float = Field(..., description="中位数")
+    q3: float = Field(..., description="第三四分位数")
+    max: float = Field(..., description="最大值")
+    outliers: List[float] = Field(default=[], description="离群值列表")
+
+class TimeSlotKPIs(BaseModel):
+    """时段分析核心指标"""
+    high_consistency_count: int = Field(..., description="高确定性时段数(一致性≥70%)")
+    avg_consistency: float = Field(..., description="平均一致性评分 0-1")
+    recommended_count: int = Field(..., description="有推荐策略的时段数")
+    high_risk_count: int = Field(..., description="高风险时段数")
+    top_consistency_timeslots: List[str] = Field(..., description="高确定性Top3时段标签")
+    top_risk_timeslots: List[str] = Field(..., description="高风险Top3时段标签")
+
+class TimeSlotAnalysisResponse(BaseModel):
+    """时段分析响应"""
+    kpis: TimeSlotKPIs = Field(..., description="核心指标")
+    timeslot_stats: List[TimeSlotStats] = Field(..., description="48个时段的详细统计")
+    box_plot_data: List[BoxPlotDataPoint] = Field(..., description="箱线图数据")
+
