@@ -7,15 +7,13 @@ import {
     LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
     Tooltip, Legend, ResponsiveContainer, ReferenceLine, Cell, ReferenceArea, ComposedChart
 } from 'recharts';
-import { format } from 'date-fns';
-import { zhCN } from 'date-fns/locale';
-import { trendAnalysisApi } from '../../api/trendAnalysis';
 import { useChartFullscreen } from '../../hooks/useChartFullscreen';
 import { useSelectableSeries } from '../../hooks/useSelectableSeries';
 
 interface PriceTrendTabProps {
-    startDate: Date | null;
-    endDate: Date | null;
+    data: any;
+    loading: boolean;
+    error: string | null;
 }
 
 // 趋势分析面板组件
@@ -161,7 +159,7 @@ const PriceDistributionChart: React.FC<{ data: any[] }> = ({ data }) => {
                         />
                         <YAxis label={{ value: '时段数', angle: -90, position: 'insideLeft' }} allowDecimals={false} />
                         <Tooltip />
-                        <Bar dataKey="count" name="时段数" fill="#8884d8">
+                        <Bar dataKey="count" name="时段数" fill="#8884d8" isAnimationActive={false}>
                             {data.map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill={entry.range.includes('-') && !entry.range.startsWith('-') ? '#8884d8' : (parseInt(entry.range) < 0 ? '#4caf50' : '#f44336')} />
                             ))}
@@ -205,8 +203,8 @@ const DailySpreadCountChart: React.FC<{ data: any[] }> = ({ data }) => {
                         />
                         <Legend />
                         <ReferenceLine y={0} stroke="#000" />
-                        <Bar dataKey="positive_spread_count" name="正价差时段数" fill="#d32f2f" stackId="stack" />
-                        <Bar dataKey="negative_spread_count" name="负价差时段数" fill="#388e3c" stackId="stack">
+                        <Bar dataKey="positive_spread_count" name="正价差时段数" fill="#d32f2f" stackId="stack" isAnimationActive={false} />
+                        <Bar dataKey="negative_spread_count" name="负价差时段数" fill="#388e3c" stackId="stack" isAnimationActive={false}>
                             {data.map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill="#388e3c" />
                             ))}
@@ -218,15 +216,8 @@ const DailySpreadCountChart: React.FC<{ data: any[] }> = ({ data }) => {
     );
 };
 
-export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({ startDate, endDate }) => {
+export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({ data, loading, error }) => {
     const theme = useTheme();
-    // State
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [data, setData] = useState<any>(null);
-
-    // Ref to track last fetch params to prevent duplicates
-    const lastFetchParams = useRef<string>('');
 
     // Derived values
     const chartHeight = { xs: 350, sm: 400 };
@@ -310,10 +301,8 @@ export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({ startDate, endDate
         // 3. Distribution Data
         let distributionData = [];
         if (data.spread_distribution) {
-            console.log('Using backend spread distribution:', data.spread_distribution);
             distributionData = data.spread_distribution;
         } else {
-            console.log('Fallback to frontend distribution calculation');
             // Fallback: Frontend calculation
             const spreads = trends.map((d: any) => d.vwap_spread).filter((s: any) => s !== null && s !== undefined);
             const minSpread = statsObj.minSpread;
@@ -350,36 +339,6 @@ export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({ startDate, endDate
             distributionData
         };
     }, [data]);
-
-    // Data fetching
-    const fetchData = async () => {
-        if (!startDate || !endDate) return;
-
-        const start = format(startDate, 'yyyy-MM-dd');
-        const end = format(endDate, 'yyyy-MM-dd');
-        const paramsKey = `${start}-${end}`;
-
-        // Prevent duplicate requests
-        if (lastFetchParams.current === paramsKey && loading) return;
-
-        setLoading(true);
-        setError(null);
-        lastFetchParams.current = paramsKey;
-
-        try {
-            const response = await trendAnalysisApi.fetchPriceTrend({ start_date: start, end_date: end });
-            setData(response.data);
-        } catch (err: any) {
-            console.error('Error fetching price trend:', err);
-            setError(err.response?.data?.detail || '获取数据失败');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        fetchData();
-    }, [startDate, endDate]);
 
     return (
         <Box>
@@ -430,9 +389,9 @@ export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({ startDate, endDate
                                             <YAxis label={{ value: '元/MWh', angle: -90, position: 'insideLeft' }} />
                                             <Tooltip formatter={(value: number) => value.toFixed(2)} />
                                             <Legend onClick={priceSeries.handleLegendClick} />
-                                            <Line hide={!priceSeries.seriesVisibility.vwap_rt} type="monotone" dataKey="vwap_rt" name="实时均价" stroke="#d32f2f" strokeWidth={2} dot={false} />
-                                            <Line hide={!priceSeries.seriesVisibility.vwap_da} type="monotone" dataKey="vwap_da" name="日前均价" stroke="#1976d2" strokeWidth={2} strokeDasharray="5 5" dot={false} />
-                                            <Line hide={!priceSeries.seriesVisibility.trend_line} type="monotone" dataKey="trend_line" name="趋势线" stroke="#9c27b0" strokeWidth={2} strokeDasharray="3 3" dot={false} />
+                                            <Line hide={!priceSeries.seriesVisibility.vwap_rt} type="monotone" dataKey="vwap_rt" name="实时均价" stroke="#d32f2f" strokeWidth={2} dot={false} isAnimationActive={false} />
+                                            <Line hide={!priceSeries.seriesVisibility.vwap_da} type="monotone" dataKey="vwap_da" name="日前均价" stroke="#1976d2" strokeWidth={2} strokeDasharray="5 5" dot={false} isAnimationActive={false} />
+                                            <Line hide={!priceSeries.seriesVisibility.trend_line} type="monotone" dataKey="trend_line" name="趋势线" stroke="#9c27b0" strokeWidth={2} strokeDasharray="3 3" dot={false} isAnimationActive={false} />
                                         </ComposedChart>
                                     </ResponsiveContainer>
                                 </Box>
@@ -462,7 +421,7 @@ export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({ startDate, endDate
                                             <Tooltip />
                                             <Legend />
                                             <ReferenceLine y={0} stroke="#000" />
-                                            <Bar dataKey="vwap_spread" name="价差 (实时-日前)">
+                                            <Bar dataKey="vwap_spread" name="价差 (实时-日前)" isAnimationActive={false}>
                                                 {data.daily_trends.map((entry: any, index: number) => (
                                                     <Cell key={`cell-${index}`} fill={entry.vwap_spread >= 0 ? '#d32f2f' : '#388e3c'} />
                                                 ))}

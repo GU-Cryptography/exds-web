@@ -1,15 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Box, Tabs, Tab, Typography, Paper, useMediaQuery, useTheme, Button, Stack } from '@mui/material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { zhCN } from 'date-fns/locale';
-import { subDays, startOfMonth, endOfMonth } from 'date-fns';
+import { subDays, startOfMonth, endOfMonth, format } from 'date-fns';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import { PriceTrendTab } from '../components/trend-analysis/PriceTrendTab';
 import { TimeSlotAnalysisTab } from '../components/trend-analysis/TimeSlotAnalysisTab';
+import { trendAnalysisApi } from '../api/trendAnalysis';
 
 interface TabPanelProps {
     children?: React.ReactNode;
@@ -19,12 +20,23 @@ interface TabPanelProps {
 
 function TabPanel(props: TabPanelProps) {
     const { children, value, index, ...other } = props;
+    const isActive = value === index;
+
     return (
         <div
             role="tabpanel"
-            hidden={value !== index}
             id={`trend-tabpanel-${index}`}
             aria-labelledby={`trend-tab-${index}`}
+            style={{
+                // 使用 visibility + position 而不是 hidden
+                // 这样可以保持 ResponsiveContainer 的尺寸计算，避免切换时重绘
+                visibility: isActive ? 'visible' : 'hidden',
+                position: isActive ? 'relative' : 'absolute',
+                top: isActive ? undefined : 0,
+                left: isActive ? undefined : 0,
+                width: '100%',
+                pointerEvents: isActive ? 'auto' : 'none',
+            }}
             {...other}
         >
             <Box sx={{ pt: 3 }}>
@@ -32,6 +44,13 @@ function TabPanel(props: TabPanelProps) {
             </Box>
         </div>
     );
+}
+
+
+// 缓存数据类型定义
+interface CachedData<T> {
+    data: T | null;
+    dateRange: string; // 格式: "startDate-endDate"
 }
 
 export const SpotTrendAnalysisPage: React.FC = () => {
@@ -44,10 +63,102 @@ export const SpotTrendAnalysisPage: React.FC = () => {
     const [startDate, setStartDate] = useState<Date | null>(subDays(new Date(), 30));
     const [endDate, setEndDate] = useState<Date | null>(subDays(new Date(), 1));
 
+    // ========== 状态提升：数据管理 ==========
+    // 价格走势数据
+    const [trendData, setTrendData] = useState<CachedData<any>>({ data: null, dateRange: '' });
+    const [trendLoading, setTrendLoading] = useState(false);
+    const [trendError, setTrendError] = useState<string | null>(null);
+
+    // 时段分析数据
+    const [timeSlotData, setTimeSlotData] = useState<CachedData<any>>({ data: null, dateRange: '' });
+    const [timeSlotLoading, setTimeSlotLoading] = useState(false);
+    const [timeSlotError, setTimeSlotError] = useState<string | null>(null);
+
+    // 获取当前日期区间标识
+    const getCurrentDateRange = (): string => {
+        if (!startDate || !endDate) return '';
+        return `${format(startDate, 'yyyy-MM-dd')}-${format(endDate, 'yyyy-MM-dd')}`;
+    };
+
+    // 加载价格走势数据
+    const fetchTrendData = async () => {
+        if (!startDate || !endDate) return;
+
+        const dateRange = getCurrentDateRange();
+
+        // 缓存命中检查：如果数据已存在且日期区间相同，不重新加载
+        if (trendData.data && trendData.dateRange === dateRange) {
+            return;
+        }
+
+        setTrendLoading(true);
+        setTrendError(null);
+
+        try {
+            const start = format(startDate, 'yyyy-MM-dd');
+            const end = format(endDate, 'yyyy-MM-dd');
+            const response = await trendAnalysisApi.fetchPriceTrend({ start_date: start, end_date: end });
+            setTrendData({ data: response.data, dateRange });
+        } catch (err: any) {
+            console.error('Error fetching price trend:', err);
+            setTrendError(err.response?.data?.detail || '获取数据失败');
+        } finally {
+            setTrendLoading(false);
+        }
+    };
+
+    // 加载时段分析数据
+    const fetchTimeSlotData = async () => {
+        if (!startDate || !endDate) return;
+
+        const dateRange = getCurrentDateRange();
+
+        // 缓存命中检查：如果数据已存在且日期区间相同，不重新加载
+        if (timeSlotData.data && timeSlotData.dateRange === dateRange) {
+            return;
+        }
+
+        setTimeSlotLoading(true);
+        setTimeSlotError(null);
+
+        try {
+            const start = format(startDate, 'yyyy-MM-dd');
+            const end = format(endDate, 'yyyy-MM-dd');
+            const response = await trendAnalysisApi.fetchTimeSlotStats({ start_date: start, end_date: end });
+            setTimeSlotData({ data: response.data, dateRange });
+        } catch (err: any) {
+            console.error('Error fetching time slot stats:', err);
+            setTimeSlotError(err.response?.data?.detail || '获取数据失败');
+        } finally {
+            setTimeSlotLoading(false);
+        }
+    };
+
+    // 日期变化时清空缓存
+    useEffect(() => {
+        const newDateRange = getCurrentDateRange();
+
+        // 如果日期区间变化，清空所有缓存数据
+        if (trendData.dateRange && trendData.dateRange !== newDateRange) {
+            setTrendData({ data: null, dateRange: '' });
+        }
+        if (timeSlotData.dateRange && timeSlotData.dateRange !== newDateRange) {
+            setTimeSlotData({ data: null, dateRange: '' });
+        }
+    }, [startDate, endDate]);
+
+    // 根据当前 Tab 懒加载数据
+    useEffect(() => {
+        if (tabIndex === 0) {
+            fetchTrendData();
+        } else if (tabIndex === 1) {
+            fetchTimeSlotData();
+        }
+    }, [tabIndex, startDate, endDate]);
+
     const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
         setTabIndex(newValue);
     };
-
 
     // 快捷按钮处理
     const handleQuickSelect = (type: 'last30' | 'last60' | 'thisMonth' | 'lastMonth') => {
@@ -227,18 +338,29 @@ export const SpotTrendAnalysisPage: React.FC = () => {
                     </Tabs>
                 </Paper>
 
-                <TabPanel value={tabIndex} index={0}>
-                    <PriceTrendTab startDate={startDate} endDate={endDate} />
-                </TabPanel>
-                <TabPanel value={tabIndex} index={1}>
-                    <TimeSlotAnalysisTab startDate={startDate} endDate={endDate} />
-                </TabPanel>
-                <TabPanel value={tabIndex} index={2}>
-                    <Box sx={{ p: 3, textAlign: 'center' }}>周内特性分析 (开发中)</Box>
-                </TabPanel>
-                <TabPanel value={tabIndex} index={3}>
-                    <Box sx={{ p: 3, textAlign: 'center' }}>储能套利分析 (开发中)</Box>
-                </TabPanel>
+                {/* TabPanel 容器 - 需要 relative 定位以支持隐藏面板的 absolute 定位 */}
+                <Box sx={{ position: 'relative' }}>
+                    <TabPanel value={tabIndex} index={0}>
+                        <PriceTrendTab
+                            data={trendData.data}
+                            loading={trendLoading}
+                            error={trendError}
+                        />
+                    </TabPanel>
+                    <TabPanel value={tabIndex} index={1}>
+                        <TimeSlotAnalysisTab
+                            data={timeSlotData.data}
+                            loading={timeSlotLoading}
+                            error={timeSlotError}
+                        />
+                    </TabPanel>
+                    <TabPanel value={tabIndex} index={2}>
+                        <Box sx={{ p: 3, textAlign: 'center' }}>周内特性分析 (开发中)</Box>
+                    </TabPanel>
+                    <TabPanel value={tabIndex} index={3}>
+                        <Box sx={{ p: 3, textAlign: 'center' }}>储能套利分析 (开发中)</Box>
+                    </TabPanel>
+                </Box>
             </Box>
         </LocalizationProvider>
     );
