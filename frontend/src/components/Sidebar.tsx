@@ -90,10 +90,11 @@ const menuItems: MenuItem[] = [
         subItems: [
             { text: '现货日内分析', path: '/price-analysis/spot-market', icon: <AnalyticsOutlined /> },
             { text: '现货趋势分析', path: '/price-analysis/spot-trend', icon: <TimelineIcon /> },
-            { text: '中长期价格分析', path: '/price-analysis/mid-long-term', icon: <TrendingUpOutlined /> },
-            { text: '价格对比分析', path: '/price-analysis/comparison', icon: <BarChartOutlined /> },
+            { text: '中长期日内分析', path: '/price-analysis/mid-long-term', icon: <TrendingUpOutlined /> },
+            { text: '中长期趋势分析', path: '/price-analysis/mid-long-trend', icon: <BarChartOutlined /> },
         ],
     },
+
     {
         text: '价格预测',
         icon: <QueryStatsOutlined />,

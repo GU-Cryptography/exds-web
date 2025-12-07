@@ -20,28 +20,20 @@ interface TabPanelProps {
 
 function TabPanel(props: TabPanelProps) {
     const { children, value, index, ...other } = props;
-    const isActive = value === index;
 
     return (
         <div
             role="tabpanel"
+            hidden={value !== index}
             id={`trend-tabpanel-${index}`}
             aria-labelledby={`trend-tab-${index}`}
-            style={{
-                // 使用 visibility + position 而不是 hidden
-                // 这样可以保持 ResponsiveContainer 的尺寸计算，避免切换时重绘
-                visibility: isActive ? 'visible' : 'hidden',
-                position: isActive ? 'relative' : 'absolute',
-                top: isActive ? undefined : 0,
-                left: isActive ? undefined : 0,
-                width: '100%',
-                pointerEvents: isActive ? 'auto' : 'none',
-            }}
             {...other}
         >
-            <Box sx={{ pt: 3 }}>
-                {children}
-            </Box>
+            {value === index && (
+                <Box sx={{ pt: 3 }}>
+                    {children}
+                </Box>
+            )}
         </div>
     );
 }

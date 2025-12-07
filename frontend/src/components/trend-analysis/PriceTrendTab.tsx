@@ -159,7 +159,7 @@ const PriceDistributionChart: React.FC<{ data: any[] }> = ({ data }) => {
                         />
                         <YAxis label={{ value: '时段数', angle: -90, position: 'insideLeft' }} allowDecimals={false} />
                         <Tooltip />
-                        <Bar dataKey="count" name="时段数" fill="#8884d8" isAnimationActive={false}>
+                        <Bar dataKey="count" name="时段数" fill="#8884d8">
                             {data.map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill={entry.range.includes('-') && !entry.range.startsWith('-') ? '#8884d8' : (parseInt(entry.range) < 0 ? '#4caf50' : '#f44336')} />
                             ))}
@@ -203,8 +203,8 @@ const DailySpreadCountChart: React.FC<{ data: any[] }> = ({ data }) => {
                         />
                         <Legend />
                         <ReferenceLine y={0} stroke="#000" />
-                        <Bar dataKey="positive_spread_count" name="正价差时段数" fill="#d32f2f" stackId="stack" isAnimationActive={false} />
-                        <Bar dataKey="negative_spread_count" name="负价差时段数" fill="#388e3c" stackId="stack" isAnimationActive={false}>
+                        <Bar dataKey="positive_spread_count" name="正价差时段数" fill="#d32f2f" stackId="stack" />
+                        <Bar dataKey="negative_spread_count" name="负价差时段数" fill="#388e3c" stackId="stack">
                             {data.map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill="#388e3c" />
                             ))}
@@ -258,8 +258,8 @@ export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({ data, loading, err
             slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
             intercept = (sumY - slope * sumX) / n;
 
-            trends.forEach((d: any, i: number) => {
-                d.trend_line = slope * i + intercept;
+            const updatedTrends = trends.map((d: any, i: number) => {
+                return { ...d, trend_line: slope * i + intercept };
             });
         }
 
@@ -389,9 +389,9 @@ export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({ data, loading, err
                                             <YAxis label={{ value: '元/MWh', angle: -90, position: 'insideLeft' }} />
                                             <Tooltip formatter={(value: number) => value.toFixed(2)} />
                                             <Legend onClick={priceSeries.handleLegendClick} />
-                                            <Line hide={!priceSeries.seriesVisibility.vwap_rt} type="monotone" dataKey="vwap_rt" name="实时均价" stroke="#d32f2f" strokeWidth={2} dot={false} isAnimationActive={false} />
-                                            <Line hide={!priceSeries.seriesVisibility.vwap_da} type="monotone" dataKey="vwap_da" name="日前均价" stroke="#1976d2" strokeWidth={2} strokeDasharray="5 5" dot={false} isAnimationActive={false} />
-                                            <Line hide={!priceSeries.seriesVisibility.trend_line} type="monotone" dataKey="trend_line" name="趋势线" stroke="#9c27b0" strokeWidth={2} strokeDasharray="3 3" dot={false} isAnimationActive={false} />
+                                            <Line hide={!priceSeries.seriesVisibility.vwap_rt} type="monotone" dataKey="vwap_rt" name="实时均价" stroke="#d32f2f" strokeWidth={2} dot={false} />
+                                            <Line hide={!priceSeries.seriesVisibility.vwap_da} type="monotone" dataKey="vwap_da" name="日前均价" stroke="#1976d2" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+                                            <Line hide={!priceSeries.seriesVisibility.trend_line} type="monotone" dataKey="trend_line" name="趋势线" stroke="#9c27b0" strokeWidth={2} strokeDasharray="3 3" dot={false} />
                                         </ComposedChart>
                                     </ResponsiveContainer>
                                 </Box>
@@ -421,7 +421,7 @@ export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({ data, loading, err
                                             <Tooltip />
                                             <Legend />
                                             <ReferenceLine y={0} stroke="#000" />
-                                            <Bar dataKey="vwap_spread" name="价差 (实时-日前)" isAnimationActive={false}>
+                                            <Bar dataKey="vwap_spread" name="价差 (实时-日前)">
                                                 {data.daily_trends.map((entry: any, index: number) => (
                                                     <Cell key={`cell-${index}`} fill={entry.vwap_spread >= 0 ? '#d32f2f' : '#388e3c'} />
                                                 ))}

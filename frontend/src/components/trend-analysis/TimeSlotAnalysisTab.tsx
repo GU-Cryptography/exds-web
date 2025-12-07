@@ -220,6 +220,23 @@ export const TimeSlotAnalysisTab: React.FC<TimeSlotAnalysisTabProps> = ({ data, 
     // 移动端卡片列表状态
     const [visibleCount, setVisibleCount] = useState(10);
 
+    // 动画控制状态
+    const [chartData, setChartData] = useState<BoxPlotDataPoint[]>([]);
+
+    // 监听 data 变化，强制触发重绘动画
+    useEffect(() => {
+        if (data?.box_plot_data) {
+            // 先置空，利用 setTimeout 触发 Recharts 的 update 动画
+            setChartData([]);
+            const timer = setTimeout(() => {
+                setChartData(data.box_plot_data);
+            }, 50);
+            return () => clearTimeout(timer);
+        } else {
+            setChartData([]);
+        }
+    }, [data]);
+
     // Ref for chart
     const chartRef = useRef<HTMLDivElement>(null);
     const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle } = useChartFullscreen({
@@ -378,7 +395,7 @@ export const TimeSlotAnalysisTab: React.FC<TimeSlotAnalysisTabProps> = ({ data, 
                             <FullscreenExitButton />
                             <FullscreenTitle />
                             <ResponsiveContainer>
-                                <ComposedChart data={data.box_plot_data} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                                <ComposedChart data={chartData} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
                                     <CartesianGrid strokeDasharray="3 3" />
                                     <XAxis
                                         dataKey="timeslot"
@@ -390,8 +407,16 @@ export const TimeSlotAnalysisTab: React.FC<TimeSlotAnalysisTabProps> = ({ data, 
                                     <YAxis
                                         label={{ value: '价差 (元/MWh)', angle: -90, position: 'insideLeft' }}
                                         domain={[
-                                            (dataMin: number) => Math.floor(Math.min(dataMin, ...data.box_plot_data.map(d => d.min)) * 1.1),
-                                            (dataMax: number) => Math.ceil(Math.max(dataMax, ...data.box_plot_data.map(d => d.max)) * 1.1)
+                                            (dataMin: number) => {
+                                                const hasData = chartData.length > 0;
+                                                const minVal = hasData ? Math.min(...chartData.map(d => d.min)) : 0;
+                                                return Math.floor(Math.min(dataMin, minVal) * 1.1);
+                                            },
+                                            (dataMax: number) => {
+                                                const hasData = chartData.length > 0;
+                                                const maxVal = hasData ? Math.max(...chartData.map(d => d.max)) : 0;
+                                                return Math.ceil(Math.max(dataMax, maxVal) * 1.1);
+                                            }
                                         ]}
                                     />
                                     <Tooltip content={({ active, payload }) => {
@@ -414,10 +439,10 @@ export const TimeSlotAnalysisTab: React.FC<TimeSlotAnalysisTabProps> = ({ data, 
                                     <ReferenceLine y={0} stroke="#000" strokeWidth={1.5} />
 
                                     {/* 隐藏的Bar,用于强制触发图表渲染和坐标轴计算 */}
-                                    <Bar dataKey="median" fill="rgba(0,0,0,0)" legendType="none" tooltipType="none" isAnimationActive={false} />
+                                    <Bar dataKey="median" fill="rgba(0,0,0,0)" legendType="none" tooltipType="none" animationDuration={1000} />
 
                                     {/* 使用 ReferenceArea 和 ReferenceLine 绘制箱线图 */}
-                                    {data.box_plot_data.map((entry, index) => {
+                                    {chartData.map((entry, index) => {
                                         const { timeslot, min, q1, median, q3, max } = entry;
                                         const color = median >= 0 ? '#f44336' : '#4caf50';
                                         const width = 0.3; // 箱体宽度 (X轴单位)
