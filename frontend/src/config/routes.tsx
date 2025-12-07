@@ -9,6 +9,7 @@ import RetailContractPage from '../pages/RetailContractPage';
 import { ForecastBaseDataPage } from '../pages/ForecastBaseDataPage';
 import { SpotTrendAnalysisPage } from '../pages/SpotTrendAnalysisPage';
 import TouRulesPage from '../pages/TouRulesPage';
+import { ContractPriceDailyPage } from '../pages/ContractPriceDailyPage';
 
 // 路由配置接口
 export interface RouteConfig {
@@ -36,8 +37,8 @@ export const routeConfigs: RouteConfig[] = [
     // 价格分析
     { path: '/price-analysis/spot-market', title: '现货日内分析', component: MarketPriceAnalysisPage },
     { path: '/price-analysis/spot-trend', title: '现货趋势分析', component: SpotTrendAnalysisPage },
-    { path: '/price-analysis/mid-long-term', title: '中长期价格分析', component: PlaceholderPage },
-    { path: '/price-analysis/comparison', title: '价格对比分析', component: PlaceholderPage },
+    { path: '/price-analysis/mid-long-term', title: '中长期日内分析', component: ContractPriceDailyPage },
+    { path: '/price-analysis/mid-long-trend', title: '中长期趋势分析', component: PlaceholderPage },
 
     // 价格预测
     { path: '/price-forecast/baseline-data', title: '预测基础数据', component: ForecastBaseDataPage },

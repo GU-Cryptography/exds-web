@@ -23,6 +23,7 @@ import RetailContractPage from './pages/RetailContractPage';
 import { CustomerManagementPage } from './pages/CustomerManagementPage';
 import { ForecastBaseDataPage } from './pages/ForecastBaseDataPage';
 import { SpotTrendAnalysisPage } from './pages/SpotTrendAnalysisPage';
+import { ContractPriceDailyPage } from './pages/ContractPriceDailyPage';
 import { TabProvider } from './contexts/TabContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { DesktopTabLayout } from './layouts/DesktopTabLayout';
@@ -72,8 +73,8 @@ const ResponsiveLayout: React.FC = () => {
                     {/* 价格分析 */}
                     <Route path="price-analysis/spot-market" element={<MarketPriceAnalysisPage />} />
                     <Route path="price-analysis/spot-trend" element={<SpotTrendAnalysisPage />} />
-                    <Route path="price-analysis/mid-long-term" element={<PlaceholderPage />} />
-                    <Route path="price-analysis/comparison" element={<PlaceholderPage />} />
+                    <Route path="price-analysis/mid-long-term" element={<ContractPriceDailyPage />} />
+                    <Route path="price-analysis/mid-long-trend" element={<PlaceholderPage />} />
 
                     {/* 价格预测 */}
                     <Route path="price-forecast/baseline-data" element={<ForecastBaseDataPage />} />
