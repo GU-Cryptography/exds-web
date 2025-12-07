@@ -26,12 +26,54 @@ class ContractPriceService:
         self.contracts_collection = db["contracts_aggregated_daily"]
         self.spot_collection = db["day_ahead_spot_price"]
 
-    def _period_to_time_str(self, period: int) -> str:
-        """将时段序号转换为时间字符串"""
-        # period 1-48 对应 00:00-23:30，每个时段30分钟
-        hour = (period - 1) // 2
-        minute = ((period - 1) % 2) * 30
+    def _period_to_time_str(self, period: int, total_periods: int = 48) -> str:
+        """
+        将时段序号转换为时间字符串（时段结束时间）
+        
+        Args:
+            period: 时段序号 (1-based)
+            total_periods: 总时段数 (24/48/96)
+        
+        Returns:
+            时间字符串 HH:MM（代表该时段的结束时间）
+        
+        Examples:
+            - 24点: period 1 -> 01:00, period 24 -> 24:00
+            - 48点: period 1 -> 00:30, period 48 -> 24:00
+            - 96点: period 1 -> 00:15, period 96 -> 24:00
+        """
+        if total_periods == 24:
+            # 24点: 每小时一个时段
+            # period 1 -> 01:00, period 24 -> 24:00
+            hour = period
+            minute = 0
+        elif total_periods == 48:
+            # 48点: 每30分钟一个时段
+            # period 1 -> 00:30, period 2 -> 01:00, ..., period 48 -> 24:00
+            hour = period // 2
+            minute = (period % 2) * 30
+            if minute == 0 and period % 2 == 0:
+                minute = 0
+            else:
+                minute = 30 if period % 2 == 1 else 0
+            # 简化计算
+            total_minutes = period * 30
+            hour = total_minutes // 60
+            minute = total_minutes % 60
+        elif total_periods == 96:
+            # 96点: 每15分钟一个时段
+            # period 1 -> 00:15, period 96 -> 24:00
+            total_minutes = period * 15
+            hour = total_minutes // 60
+            minute = total_minutes % 60
+        else:
+            # 默认使用48点逻辑
+            total_minutes = period * 30
+            hour = total_minutes // 60
+            minute = total_minutes % 60
+        
         return f"{hour:02d}:{minute:02d}"
+
 
     def _calc_daily_stats(self, doc: dict) -> tuple:
         """
@@ -54,58 +96,17 @@ class ContractPriceService:
         avg_price = weighted_sum / total_quantity if total_quantity > 0 else 0
         return total_quantity, avg_price
 
+    # 注：现货价格获取已迁移到通用模块 spot_price_service.py
 
-    def _get_spot_prices(self, date_str: str) -> List[CurvePoint]:
-        """获取日前现货价格"""
-        try:
-            # 从day_ahead_spot_price集合获取数据
-            cursor = self.spot_collection.find(
-                {"date_str": date_str},
-                {"_id": 0, "time_str": 1, "avg_clearing_price": 1}
-            ).sort("time_str", 1)
-
-            results = list(cursor)
-            if not results:
-                return []
-
-            # 转换为48时段格式（现货是96点，需要聚合为48点）
-            period_prices: Dict[int, List[float]] = {}
-            for doc in results:
-                time_str = doc.get("time_str", "")
-                price = doc.get("avg_clearing_price")
-                if price is None:
-                    continue
-
-                # 解析时间，计算属于哪个30分钟时段
-                parts = time_str.split(":")
-                if len(parts) >= 2:
-                    hour = int(parts[0])
-                    minute = int(parts[1])
-                    period = hour * 2 + (1 if minute < 30 else 2)
-                    if period not in period_prices:
-                        period_prices[period] = []
-                    period_prices[period].append(price)
-
-            # 计算每个时段的平均价格
-            curve_points = []
-            for period in range(1, 49):
-                if period in period_prices and period_prices[period]:
-                    avg_price = sum(period_prices[period]) / len(period_prices[period])
-                    curve_points.append(CurvePoint(
-                        period=period,
-                        time_str=self._period_to_time_str(period),
-                        price=round(avg_price, 2)
-                    ))
-
-            return curve_points
-
-        except Exception as e:
-            logger.error(f"获取现货价格失败: {e}")
-            return []
-
-    def get_daily_summary(self, date_str: str, entity: str = "全市场") -> DailySummaryResponse:
-        """获取单日汇总数据"""
-        logger.info(f"[START] get_daily_summary: date={date_str}, entity={entity}")
+    def get_daily_summary(self, date_str: str, entity: str = "全市场", spot_type: str = "day_ahead") -> DailySummaryResponse:
+        """获取单日汇总数据
+        
+        Args:
+            date_str: 日期字符串 YYYY-MM-DD
+            entity: 实体名称
+            spot_type: 现货类型 day_ahead(日前) 或 real_time(实时)
+        """
+        logger.info(f"[START] get_daily_summary: date={date_str}, entity={entity}, spot_type={spot_type}")
 
         # 查询所有合同数据
         logger.info("[STEP 1] 查询合同数据...")
@@ -211,6 +212,8 @@ class ContractPriceService:
         # 构建整体价格曲线
         contract_curves = []
         if overall_doc and overall_doc.get("periods"):
+            # 确定时段总数用于计算时间字符串
+            total_periods = len(overall_doc["periods"])
             for p in overall_doc["periods"]:
                 period = p.get("period", 0)
                 price = p.get("price_yuan_per_mwh")
@@ -218,17 +221,41 @@ class ContractPriceService:
                 if period and price is not None:
                     contract_curves.append(CurvePoint(
                         period=period,
-                        time_str=self._period_to_time_str(period),
+                        time_str=self._period_to_time_str(period, total_periods),
                         price=round(price, 2),
                         quantity=round(quantity, 2) if quantity else None
                     ))
         contract_curves.sort(key=lambda x: x.period)
         logger.info(f"[STEP 3] 构建合同曲线完成，共 {len(contract_curves)} 个点")
 
-        # 获取现货价格
-        logger.info("[STEP 4] 获取现货价格...")
-        spot_curves = self._get_spot_prices(date_str)
+        # 根据中长期合同数据的点数动态确定现货价格分辨率
+        # 9月以前的中长期合同是24点，之后的是48点，未来可能是96点
+        contract_point_count = len(contract_curves)
+        if contract_point_count <= 24:
+            spot_resolution = 24
+        elif contract_point_count <= 48:
+            spot_resolution = 48
+        else:
+            spot_resolution = 96
+        
+        logger.info(f"[STEP 4] 获取现货价格... (分辨率: {spot_resolution}点，适配中长期{contract_point_count}点，类型: {spot_type})")
+        from webapp.services.spot_price_service import get_spot_prices
+        # 包含电量数据用于计算仓位占比
+        spot_data = get_spot_prices(self.db, date_str, data_type=spot_type, resolution=spot_resolution, include_volume=True)
+        spot_curves = [
+            CurvePoint(
+                period=p.period,
+                time_str=p.time_str,
+                price=p.price,
+                quantity=p.volume  # 日前出清电量
+            )
+            for p in spot_data.points
+            if p.price is not None
+        ]
         logger.info(f"[STEP 4] 获取现货价格完成，共 {len(spot_curves)} 个点")
+
+
+
 
 
         # 构建明细表格
@@ -274,18 +301,22 @@ class ContractPriceService:
                 if doc.get("contract_type") == target_type and doc.get("contract_period") == "整体":
                     curve_points = []
                     if doc.get("periods"):
+                        doc_total_periods = len(doc["periods"])
                         for p in doc["periods"]:
                             period = p.get("period", 0)
                             price = p.get("price_yuan_per_mwh")
+                            quantity = p.get("quantity_mwh")
                             if period and price is not None:
                                 curve_points.append({
                                     "period": period,
-                                    "time_str": self._period_to_time_str(period),
-                                    "price": round(price, 2)
+                                    "time_str": self._period_to_time_str(period, doc_total_periods),
+                                    "price": round(price, 2),
+                                    "quantity": round(quantity, 2) if quantity else None
                                 })
                         curve_points.sort(key=lambda x: x["period"])
                     curves_by_type[target_type] = curve_points
                     break
+
 
         logger.info(f"[STEP 5] 构建curves_by_type完成，类型数: {len(curves_by_type)}")
 

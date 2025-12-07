@@ -47,11 +47,15 @@ export interface DailySummaryResponse {
 export const contractPriceApi = {
     /**
      * 获取单日汇总数据
+     * @param date 日期 YYYY-MM-DD
+     * @param entity 实体名称，默认"全市场"
+     * @param spotType 现货类型："day_ahead"(日前) 或 "real_time"(实时)
      */
-    fetchDailySummary: (date: string, entity: string = '全市场') => {
+    fetchDailySummary: (date: string, entity: string = '全市场', spotType: string = 'day_ahead') => {
         return apiClient.get<DailySummaryResponse>('/api/v1/contract-price/daily-summary', {
-            params: { date, entity }
+            params: { date, entity, spot_type: spotType }
         });
     }
+
 
 };

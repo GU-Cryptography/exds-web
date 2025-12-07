@@ -53,6 +53,9 @@ export const ContractPriceDailyPage: React.FC = () => {
     const [summaryLoading, setSummaryLoading] = useState(false);
     const [summaryError, setSummaryError] = useState<string | null>(null);
 
+    // 基准价格选择状态
+    const [selectedBenchmark, setSelectedBenchmark] = useState<'day_ahead' | 'real_time'>('day_ahead');
+
     const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
 
     // 加载 Tab1 数据
@@ -63,7 +66,7 @@ export const ContractPriceDailyPage: React.FC = () => {
         setSummaryError(null);
 
         try {
-            const response = await contractPriceApi.fetchDailySummary(dateStr);
+            const response = await contractPriceApi.fetchDailySummary(dateStr, '全市场', selectedBenchmark);
             setSummaryData(response.data);
         } catch (err: any) {
             console.error('Error fetching summary:', err);
@@ -79,7 +82,7 @@ export const ContractPriceDailyPage: React.FC = () => {
         if (tabIndex === 0) {
             fetchSummaryData();
         }
-    }, [selectedDate, tabIndex]);
+    }, [selectedDate, tabIndex, selectedBenchmark]);
 
     const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
         setTabIndex(newValue);
@@ -178,8 +181,11 @@ export const ContractPriceDailyPage: React.FC = () => {
                         loading={summaryLoading}
                         error={summaryError}
                         dateStr={dateStr}
+                        selectedBenchmark={selectedBenchmark}
+                        onBenchmarkChange={setSelectedBenchmark}
                     />
                 </TabPanel>
+
                 <TabPanel value={tabIndex} index={1}>
                     <Box sx={{ p: 3, textAlign: 'center' }}>曲线对比 (开发中)</Box>
                 </TabPanel>

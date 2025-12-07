@@ -26,18 +26,20 @@ def get_service():
 )
 def get_daily_summary(
     date: str = Query(..., description="日期 YYYY-MM-DD"),
-    entity: str = Query("全市场", description="实体名称")
+    entity: str = Query("全市场", description="实体名称"),
+    spot_type: str = Query("day_ahead", description="现货类型: day_ahead(日前) 或 real_time(实时)")
 ):
     # 调试日志
-    print(f"[API] get_daily_summary called: date={date}, entity={entity}")
-    logger.info(f"[API] get_daily_summary called: date={date}, entity={entity}")
+    print(f"[API] get_daily_summary called: date={date}, entity={entity}, spot_type={spot_type}")
+    logger.info(f"[API] get_daily_summary called: date={date}, entity={entity}, spot_type={spot_type}")
 
     try:
         # 验证日期格式
         datetime.strptime(date, "%Y-%m-%d")
 
         service = get_service()
-        return service.get_daily_summary(date, entity)
+        return service.get_daily_summary(date, entity, spot_type)
+
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

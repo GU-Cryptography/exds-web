@@ -21,15 +21,18 @@ import {
     Alert
 } from '@mui/material';
 import {
+    ComposedChart,
     LineChart,
     Line,
+    Area,
     XAxis,
     YAxis,
     CartesianGrid,
     Tooltip,
     Legend,
     ResponsiveContainer,
-    ReferenceDot
+    ReferenceDot,
+    ReferenceLine
 } from 'recharts';
 import { useChartFullscreen } from '../../hooks/useChartFullscreen';
 import { DailySummaryResponse, CurvePoint, ContractTypeSummary } from '../../api/contractPrice';
@@ -40,6 +43,8 @@ interface DailySummaryTabProps {
     loading: boolean;
     error: string | null;
     dateStr: string;
+    selectedBenchmark: 'day_ahead' | 'real_time';
+    onBenchmarkChange: (benchmark: 'day_ahead' | 'real_time') => void;
 }
 
 // 蓝色渐变消息提示框组件
@@ -96,7 +101,9 @@ const PriceChart: React.FC<{
     spotCurves: CurvePoint[];
     curvesByType: { [key: string]: CurvePoint[] };
     dateStr: string;
-}> = ({ contractCurves, spotCurves, curvesByType, dateStr }) => {
+    selectedBenchmark: 'day_ahead' | 'real_time';
+    onBenchmarkChange: (benchmark: 'day_ahead' | 'real_time') => void;
+}> = ({ contractCurves, spotCurves, curvesByType, dateStr, selectedBenchmark, onBenchmarkChange }) => {
     const chartRef = useRef<HTMLDivElement>(null);
     const [selectedType, setSelectedType] = React.useState<string>('整体');
 
@@ -108,14 +115,20 @@ const PriceChart: React.FC<{
         ? contractCurves
         : (curvesByType[selectedType] || []);
 
-    // 合并数据用于图表
+    // 合并数据用于图表，计算仓位占比
     const chartData = currentCurves.map(cp => {
         const spotPoint = spotCurves.find(sp => sp.period === cp.period);
+        const contractQty = cp.quantity ?? 0;
+        const spotQty = spotPoint?.quantity ?? 0;
+        // 仓位占比 = 中长期电量 / 日前出清电量 * 100
+        const positionRatio = spotQty > 0 ? (contractQty / spotQty) * 100 : null;
+
         return {
             period: cp.period,
             time_str: cp.time_str,
             contract_price: cp.price,
-            spot_price: spotPoint?.price ?? null
+            spot_price: spotPoint?.price ?? null,
+            position_ratio: positionRatio !== null ? Math.round(positionRatio * 10) / 10 : null
         };
     });
 
@@ -154,42 +167,86 @@ const PriceChart: React.FC<{
 
     return (
         <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
-            {/* 标题栏：标题 + 合同类型单选按钮 */}
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', mb: 1 }}>
-                <Typography variant="h6">价格曲线</Typography>
-                <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                    {typeOptions.map(type => (
-                        <Box
-                            key={type}
-                            onClick={() => setSelectedType(type)}
-                            sx={{
-                                px: 1.5,
-                                py: 0.5,
-                                borderRadius: 1,
-                                fontSize: '0.875rem',
-                                cursor: 'pointer',
-                                border: '1px solid',
-                                borderColor: selectedType === type ? getCurveColor(type) : 'divider',
-                                backgroundColor: selectedType === type ? getCurveColor(type) : 'transparent',
-                                color: selectedType === type ? 'white' : 'text.primary',
-                                fontWeight: selectedType === type ? 'bold' : 'normal',
-                                transition: 'all 0.2s',
-                                '&:hover': {
-                                    borderColor: getCurveColor(type),
-                                    opacity: 0.8
-                                }
-                            }}
-                        >
-                            {type}
-                        </Box>
-                    ))}
+            {/* 标题栏：左侧标题+合同类型，右侧基准选择 */}
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 1 }}>
+                {/* 左侧：标题 + 合同类型 */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                    <Typography variant="h6">价格曲线</Typography>
+                    <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                        {typeOptions.map(type => (
+                            <Box
+                                key={type}
+                                onClick={() => setSelectedType(type)}
+                                sx={{
+                                    px: 1.5,
+                                    py: 0.5,
+                                    borderRadius: 1,
+                                    fontSize: '0.875rem',
+                                    cursor: 'pointer',
+                                    border: '1px solid',
+                                    borderColor: selectedType === type ? getCurveColor(type) : 'divider',
+                                    backgroundColor: selectedType === type ? getCurveColor(type) : 'transparent',
+                                    color: selectedType === type ? 'white' : 'text.primary',
+                                    fontWeight: selectedType === type ? 'bold' : 'normal',
+                                    transition: 'all 0.2s',
+                                    '&:hover': {
+                                        borderColor: getCurveColor(type),
+                                        opacity: 0.8
+                                    }
+                                }}
+                            >
+                                {type}
+                            </Box>
+                        ))}
+                    </Box>
+                </Box>
+
+                {/* 右侧：基准选择 */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="body2" color="text.secondary">基准:</Typography>
+                    <Box sx={{ display: 'flex', gap: 0.5 }}>
+                        {['日前', '实时'].map(benchmark => (
+                            <Box
+                                key={benchmark}
+                                onClick={() => onBenchmarkChange?.(benchmark === '日前' ? 'day_ahead' : 'real_time')}
+                                sx={{
+                                    px: 1,
+                                    py: 0.25,
+                                    borderRadius: 1,
+                                    fontSize: '0.75rem',
+                                    cursor: 'pointer',
+                                    border: '1px solid',
+                                    borderColor: (selectedBenchmark === 'day_ahead' && benchmark === '日前') ||
+                                        (selectedBenchmark === 'real_time' && benchmark === '实时')
+                                        ? '#f44336' : 'divider',
+                                    backgroundColor: (selectedBenchmark === 'day_ahead' && benchmark === '日前') ||
+                                        (selectedBenchmark === 'real_time' && benchmark === '实时')
+                                        ? '#f44336' : 'transparent',
+                                    color: (selectedBenchmark === 'day_ahead' && benchmark === '日前') ||
+                                        (selectedBenchmark === 'real_time' && benchmark === '实时')
+                                        ? 'white' : 'text.primary',
+                                    fontWeight: (selectedBenchmark === 'day_ahead' && benchmark === '日前') ||
+                                        (selectedBenchmark === 'real_time' && benchmark === '实时')
+                                        ? 'bold' : 'normal',
+                                    transition: 'all 0.2s',
+                                    '&:hover': {
+                                        borderColor: '#f44336',
+                                        opacity: 0.8
+                                    }
+                                }}
+                            >
+                                {benchmark}
+                            </Box>
+                        ))}
+                    </Box>
                 </Box>
             </Box>
+
 
             <Box
                 ref={chartRef}
                 sx={{
-                    height: { xs: 350, sm: 400 },
+                    height: { xs: 450, sm: 520 },  // 增加高度容纳两个图表
                     position: 'relative',
                     backgroundColor: isFullscreen ? 'background.paper' : 'transparent',
                     p: isFullscreen ? 2 : 0,
@@ -212,101 +269,161 @@ const PriceChart: React.FC<{
                         <Typography color="text.secondary">无曲线数据（{selectedType}）</Typography>
                     </Box>
                 ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis
-                                dataKey="time_str"
-                                tick={{ fontSize: 12 }}
-                                interval={5}
-                            />
-                            <YAxis
-                                domain={[Math.floor(minPrice * 0.9), Math.ceil(maxPrice * 1.1)]}
-                                label={{
-                                    value: '价格 (元/MWh)',
-                                    angle: -90,
-                                    position: 'insideLeft'
-                                }}
-                                tick={{ fontSize: 12 }}
-                            />
-                            <Tooltip
-                                content={({ active, payload, label }) => {
-                                    if (active && payload && payload.length) {
-                                        return (
-                                            <Paper sx={{ p: 1.5, backgroundColor: 'rgba(255, 255, 255, 0.95)', border: '1px solid #ccc', borderRadius: '4px' }}>
-                                                <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
-                                                    时间: {label}
-                                                </Typography>
-                                                {payload.map((pld: any) => (
-                                                    <Typography key={pld.dataKey} variant="body2" sx={{ color: pld.color }}>
-                                                        {pld.name}: {pld.value !== null ? `${Number(pld.value).toFixed(2)} 元/MWh` : 'N/A'}
-                                                    </Typography>
-                                                ))}
-                                            </Paper>
-                                        );
-                                    }
-                                    return null;
-                                }}
-                            />
-                            <Legend />
-                            <Line
-                                type="monotone"
-                                dataKey="contract_price"
-                                stroke={getCurveColor(selectedType)}
-                                strokeWidth={2}
-                                name={`${selectedType}均价`}
-                                dot={false}
-                            />
-                            <Line
-                                type="monotone"
-                                dataKey="spot_price"
-                                stroke="#f44336"
-                                strokeWidth={2}
-                                strokeDasharray="5 5"
-                                name="日前现货"
-                                dot={false}
-                            />
+                    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                        {/* 上方：价格曲线图 (70%) */}
+                        <Box sx={{ flex: '0 0 70%', width: '100%' }}>
+                            <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={chartData} syncId="priceChart" margin={{ top: 5, right: 30, left: 20, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis dataKey="time_str" tick={false} axisLine={false} />
+                                    <YAxis
+                                        domain={[Math.floor(minPrice * 0.9), Math.ceil(maxPrice * 1.1)]}
+                                        label={{
+                                            value: '价格 (元/MWh)',
+                                            angle: -90,
+                                            position: 'insideLeft'
+                                        }}
+                                        tick={{ fontSize: 12 }}
+                                    />
+                                    <Tooltip
+                                        content={({ active, payload, label }) => {
+                                            if (active && payload && payload.length) {
+                                                // 从chartData中找到对应的完整数据
+                                                const dataPoint = chartData.find(d => d.time_str === label);
+                                                return (
+                                                    <Paper sx={{ p: 1.5, backgroundColor: 'rgba(255, 255, 255, 0.95)', border: '1px solid #ccc', borderRadius: '4px' }}>
+                                                        <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
+                                                            时间: {label}
+                                                        </Typography>
+                                                        {payload.map((pld: any) => (
+                                                            <Typography key={pld.dataKey} variant="body2" sx={{ color: pld.color }}>
+                                                                {pld.name}: {pld.value !== null ? `${Number(pld.value).toFixed(2)} 元/MWh` : 'N/A'}
+                                                            </Typography>
+                                                        ))}
+                                                        {dataPoint && dataPoint.position_ratio !== null && (
+                                                            <Typography variant="body2" sx={{ color: '#ffc658' }}>
+                                                                仓位占比: {dataPoint.position_ratio.toFixed(1)}%
+                                                            </Typography>
+                                                        )}
+                                                    </Paper>
+                                                );
+                                            }
+                                            return null;
+                                        }}
+                                    />
+                                    {/* 图例不在这里显示 */}
+                                    <Line
+                                        type="monotone"
+                                        dataKey="contract_price"
+                                        stroke={getCurveColor(selectedType)}
+                                        strokeWidth={2}
+                                        name={`${selectedType}均价`}
+                                        dot={false}
+                                    />
+                                    <Line
+                                        type="monotone"
+                                        dataKey="spot_price"
+                                        stroke="#f44336"
+                                        strokeWidth={2}
+                                        strokeDasharray="5 5"
+                                        name={selectedBenchmark === 'day_ahead' ? '日前现货' : '实时现货'}
+                                        dot={false}
+                                    />
 
-                            {/* 最高价标注 */}
-                            {maxContractPoint && (
-                                <ReferenceDot
-                                    x={maxContractPoint.time_str}
-                                    y={maxContractPoint.price}
-                                    r={6}
-                                    fill={getCurveColor(selectedType)}
-                                    stroke="#fff"
-                                    strokeWidth={2}
-                                    label={{
-                                        value: maxContractPoint.price.toFixed(0),
-                                        position: 'top',
-                                        fill: getCurveColor(selectedType),
-                                        fontSize: 12,
-                                        fontWeight: 'bold'
-                                    }}
-                                />
-                            )}
+                                    {/* 最高价标注 */}
+                                    {maxContractPoint && (
+                                        <ReferenceDot
+                                            x={maxContractPoint.time_str}
+                                            y={maxContractPoint.price}
+                                            r={6}
+                                            fill={getCurveColor(selectedType)}
+                                            stroke="#fff"
+                                            strokeWidth={2}
+                                            label={{
+                                                value: maxContractPoint.price.toFixed(0),
+                                                position: 'top',
+                                                fill: getCurveColor(selectedType),
+                                                fontSize: 12,
+                                                fontWeight: 'bold'
+                                            }}
+                                        />
+                                    )}
 
-                            {/* 最低价标注 */}
-                            {minContractPoint && (
-                                <ReferenceDot
-                                    x={minContractPoint.time_str}
-                                    y={minContractPoint.price}
-                                    r={6}
-                                    fill={getCurveColor(selectedType)}
-                                    stroke="#fff"
-                                    strokeWidth={2}
-                                    label={{
-                                        value: minContractPoint.price.toFixed(0),
-                                        position: 'bottom',
-                                        fill: getCurveColor(selectedType),
-                                        fontSize: 12,
-                                        fontWeight: 'bold'
-                                    }}
-                                />
-                            )}
-                        </LineChart>
-                    </ResponsiveContainer>
+                                    {/* 最低价标注 */}
+                                    {minContractPoint && (
+                                        <ReferenceDot
+                                            x={minContractPoint.time_str}
+                                            y={minContractPoint.price}
+                                            r={6}
+                                            fill={getCurveColor(selectedType)}
+                                            stroke="#fff"
+                                            strokeWidth={2}
+                                            label={{
+                                                value: minContractPoint.price.toFixed(0),
+                                                position: 'bottom',
+                                                fill: getCurveColor(selectedType),
+                                                fontSize: 12,
+                                                fontWeight: 'bold'
+                                            }}
+                                        />
+                                    )}
+                                </LineChart>
+                            </ResponsiveContainer>
+                        </Box>
+
+                        {/* 下方：仓位占比面积图 (30%) */}
+                        <Box sx={{ flex: '0 0 30%', width: '100%' }}>
+                            <ResponsiveContainer width="100%" height="100%">
+                                <ComposedChart data={chartData} syncId="priceChart" margin={{ top: 0, right: 30, left: 20, bottom: 5 }}>
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis
+                                        dataKey="time_str"
+                                        tick={{ fontSize: 12 }}
+                                        interval={5}
+                                    />
+                                    <YAxis
+                                        domain={[0, 100]}
+                                        label={{
+                                            value: '仓位 (%)',
+                                            angle: -90,
+                                            position: 'insideLeft'
+                                        }}
+                                        tick={{ fontSize: 12 }}
+                                        tickFormatter={(value) => `${value}%`}
+                                    />
+                                    <Tooltip content={() => null} />
+                                    <Area
+                                        type="monotone"
+                                        dataKey="position_ratio"
+                                        stroke="#ffc658"
+                                        fill="#ffc658"
+                                        fillOpacity={0.5}
+                                        name="仓位占比"
+                                        dot={false}
+                                    />
+                                </ComposedChart>
+
+                            </ResponsiveContainer>
+                        </Box>
+
+                        {/* 底部统一图例 */}
+                        <Box sx={{ display: 'flex', justifyContent: 'center', gap: 3, flexWrap: 'wrap', pt: 1 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <Box sx={{ width: 20, height: 2, backgroundColor: getCurveColor(selectedType) }} />
+                                <Typography variant="caption">{selectedType}均价</Typography>
+                            </Box>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <Box sx={{ width: 20, height: 0, borderTop: '2px dashed #f44336' }} />
+                                <Typography variant="caption">{selectedBenchmark === 'day_ahead' ? '日前现货' : '实时现货'}</Typography>
+                            </Box>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <Box sx={{ width: 12, height: 12, backgroundColor: '#ffc658', opacity: 0.5 }} />
+                                <Typography variant="caption">仓位占比</Typography>
+                            </Box>
+                        </Box>
+                    </Box>
                 )}
+
             </Box>
         </Paper>
     );
@@ -370,9 +487,12 @@ export const DailySummaryTab: React.FC<DailySummaryTabProps> = ({
     data,
     loading,
     error,
-    dateStr
+    dateStr,
+    selectedBenchmark,
+    onBenchmarkChange
 }) => {
     // 首次加载显示完整loading
+
     if (loading && !data) {
         return (
             <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -420,7 +540,10 @@ export const DailySummaryTab: React.FC<DailySummaryTabProps> = ({
                 spotCurves={data.spot_curves}
                 curvesByType={data.curves_by_type || {}}
                 dateStr={dateStr}
+                selectedBenchmark={selectedBenchmark}
+                onBenchmarkChange={onBenchmarkChange}
             />
+
 
             {/* 第三部分：明细表格 */}
             <DetailTable typeSummary={data.type_summary} />
