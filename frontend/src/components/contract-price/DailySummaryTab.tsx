@@ -18,13 +18,16 @@ import {
     TableHead,
     TableRow,
     CircularProgress,
-    Alert
+    Alert,
+    useMediaQuery,
+    useTheme
 } from '@mui/material';
 import {
     ComposedChart,
     LineChart,
     Line,
     Area,
+    Bar,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -34,6 +37,7 @@ import {
     ReferenceDot,
     ReferenceLine
 } from 'recharts';
+
 import { useChartFullscreen } from '../../hooks/useChartFullscreen';
 import { DailySummaryResponse, CurvePoint, ContractTypeSummary } from '../../api/contractPrice';
 
@@ -106,31 +110,38 @@ const PriceChart: React.FC<{
 }> = ({ contractCurves, spotCurves, curvesByType, dateStr, selectedBenchmark, onBenchmarkChange }) => {
     const chartRef = useRef<HTMLDivElement>(null);
     const [selectedType, setSelectedType] = React.useState<string>('整体');
+    const theme = useTheme();
+    const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-    // 合同类型选项
-    const typeOptions = ['整体', '市场化', '绿电', '代理购电'];
+    // 合同类型选项（移动端简写）
+    const typeOptions = [
+        { value: '整体', label: '整体', mobileLabel: '整体' },
+        { value: '市场化', label: '市场化', mobileLabel: '市场化' },
+        { value: '绿电', label: '绿电', mobileLabel: '绿电' },
+        { value: '代理购电', label: '代理购电', mobileLabel: '代购电' }
+    ];
 
     // 根据选择获取当前显示的曲线数据
     const currentCurves = selectedType === '整体'
         ? contractCurves
         : (curvesByType[selectedType] || []);
 
-    // 合并数据用于图表，计算仓位占比
+    // 合并数据用于图表
     const chartData = currentCurves.map(cp => {
         const spotPoint = spotCurves.find(sp => sp.period === cp.period);
         const contractQty = cp.quantity ?? 0;
         const spotQty = spotPoint?.quantity ?? 0;
-        // 仓位占比 = 中长期电量 / 日前出清电量 * 100
-        const positionRatio = spotQty > 0 ? (contractQty / spotQty) * 100 : null;
 
         return {
             period: cp.period,
             time_str: cp.time_str,
             contract_price: cp.price,
             spot_price: spotPoint?.price ?? null,
-            position_ratio: positionRatio !== null ? Math.round(positionRatio * 10) / 10 : null
+            contract_quantity: contractQty,  // 合同电量
+            spot_quantity: spotQty  // 出清电量
         };
     });
+
 
     // 计算Y轴范围
     const allPrices = [
@@ -173,10 +184,10 @@ const PriceChart: React.FC<{
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
                     <Typography variant="h6">价格曲线</Typography>
                     <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                        {typeOptions.map(type => (
+                        {typeOptions.map(option => (
                             <Box
-                                key={type}
-                                onClick={() => setSelectedType(type)}
+                                key={option.value}
+                                onClick={() => setSelectedType(option.value)}
                                 sx={{
                                     px: 1.5,
                                     py: 0.5,
@@ -184,18 +195,18 @@ const PriceChart: React.FC<{
                                     fontSize: '0.875rem',
                                     cursor: 'pointer',
                                     border: '1px solid',
-                                    borderColor: selectedType === type ? getCurveColor(type) : 'divider',
-                                    backgroundColor: selectedType === type ? getCurveColor(type) : 'transparent',
-                                    color: selectedType === type ? 'white' : 'text.primary',
-                                    fontWeight: selectedType === type ? 'bold' : 'normal',
+                                    borderColor: selectedType === option.value ? getCurveColor(option.value) : 'divider',
+                                    backgroundColor: selectedType === option.value ? getCurveColor(option.value) : 'transparent',
+                                    color: selectedType === option.value ? 'white' : 'text.primary',
+                                    fontWeight: selectedType === option.value ? 'bold' : 'normal',
                                     transition: 'all 0.2s',
                                     '&:hover': {
-                                        borderColor: getCurveColor(type),
+                                        borderColor: getCurveColor(option.value),
                                         opacity: 0.8
                                     }
                                 }}
                             >
-                                {type}
+                                {isMobile ? option.mobileLabel : option.label}
                             </Box>
                         ))}
                     </Box>
@@ -290,23 +301,32 @@ const PriceChart: React.FC<{
                                             if (active && payload && payload.length) {
                                                 // 从chartData中找到对应的完整数据
                                                 const dataPoint = chartData.find(d => d.time_str === label);
+                                                const spotLabel = selectedBenchmark === 'day_ahead' ? '日前' : '实时';
                                                 return (
                                                     <Paper sx={{ p: 1.5, backgroundColor: 'rgba(255, 255, 255, 0.95)', border: '1px solid #ccc', borderRadius: '4px' }}>
                                                         <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
                                                             时间: {label}
                                                         </Typography>
+                                                        {/* 价格 */}
                                                         {payload.map((pld: any) => (
                                                             <Typography key={pld.dataKey} variant="body2" sx={{ color: pld.color }}>
                                                                 {pld.name}: {pld.value !== null ? `${Number(pld.value).toFixed(2)} 元/MWh` : 'N/A'}
                                                             </Typography>
                                                         ))}
-                                                        {dataPoint && dataPoint.position_ratio !== null && (
-                                                            <Typography variant="body2" sx={{ color: '#ffc658' }}>
-                                                                仓位占比: {dataPoint.position_ratio.toFixed(1)}%
-                                                            </Typography>
+                                                        {/* 电量 */}
+                                                        {dataPoint && (
+                                                            <>
+                                                                <Typography variant="body2" sx={{ color: getCurveColor(selectedType), mt: 0.5 }}>
+                                                                    {selectedType}电量: {dataPoint.contract_quantity.toFixed(1)} MWh
+                                                                </Typography>
+                                                                <Typography variant="body2" sx={{ color: '#f44336' }}>
+                                                                    {spotLabel}出清: {dataPoint.spot_quantity.toFixed(1)} MWh
+                                                                </Typography>
+                                                            </>
                                                         )}
                                                     </Paper>
                                                 );
+
                                             }
                                             return null;
                                         }}
@@ -381,27 +401,41 @@ const PriceChart: React.FC<{
                                         tick={{ fontSize: 12 }}
                                         interval={5}
                                     />
+                                    {/* Y轴：电量 */}
                                     <YAxis
-                                        domain={[0, 100]}
+                                        yAxisId="quantity"
                                         label={{
-                                            value: '仓位 (%)',
+                                            value: '电量 (MWh)',
                                             angle: -90,
                                             position: 'insideLeft'
                                         }}
                                         tick={{ fontSize: 12 }}
-                                        tickFormatter={(value) => `${value}%`}
                                     />
+
+                                    {/* 共用上方Tooltip，此处隐藏 */}
                                     <Tooltip content={() => null} />
+                                    {/* 柱状图：合同电量 */}
+                                    <Bar
+                                        yAxisId="quantity"
+                                        dataKey="contract_quantity"
+                                        fill={getCurveColor(selectedType)}
+                                        fillOpacity={0.4}
+                                        name={`${selectedType}电量`}
+                                    />
+                                    {/* 面积图：出清电量 */}
                                     <Area
+                                        yAxisId="quantity"
                                         type="monotone"
-                                        dataKey="position_ratio"
-                                        stroke="#ffc658"
-                                        fill="#ffc658"
-                                        fillOpacity={0.5}
-                                        name="仓位占比"
+                                        dataKey="spot_quantity"
+                                        stroke="#f44336"
+                                        fill="#f44336"
+                                        fillOpacity={0.2}
+                                        name={selectedBenchmark === 'day_ahead' ? '日前出清' : '实时出清'}
                                         dot={false}
                                     />
                                 </ComposedChart>
+
+
 
                             </ResponsiveContainer>
                         </Box>
@@ -417,15 +451,20 @@ const PriceChart: React.FC<{
                                 <Typography variant="caption">{selectedBenchmark === 'day_ahead' ? '日前现货' : '实时现货'}</Typography>
                             </Box>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                <Box sx={{ width: 12, height: 12, backgroundColor: '#ffc658', opacity: 0.5 }} />
-                                <Typography variant="caption">仓位占比</Typography>
+                                <Box sx={{ width: 12, height: 12, backgroundColor: getCurveColor(selectedType), opacity: 0.4 }} />
+                                <Typography variant="caption">{selectedType}电量</Typography>
+                            </Box>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <Box sx={{ width: 12, height: 12, backgroundColor: '#f44336', opacity: 0.2 }} />
+                                <Typography variant="caption">{selectedBenchmark === 'day_ahead' ? '日前出清' : '实时出清'}</Typography>
                             </Box>
                         </Box>
+
                     </Box>
                 )}
 
             </Box>
-        </Paper>
+        </Paper >
     );
 };
 
