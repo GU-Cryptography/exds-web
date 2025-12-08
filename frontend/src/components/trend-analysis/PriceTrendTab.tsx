@@ -258,8 +258,9 @@ export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({ data, loading, err
             slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
             intercept = (sumY - slope * sumX) / n;
 
-            const updatedTrends = trends.map((d: any, i: number) => {
-                return { ...d, trend_line: slope * i + intercept };
+            // 给每个数据点添加趋势线值
+            trends.forEach((d: any, i: number) => {
+                d.trend_line = slope * i + intercept;
             });
         }
 

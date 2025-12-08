@@ -12,11 +12,11 @@ import { addDays, format } from 'date-fns';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
 import BarChartIcon from '@mui/icons-material/BarChart';
-import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import ArrowLeftIcon from '@mui/icons-material/ArrowLeft';
 import ArrowRightIcon from '@mui/icons-material/ArrowRight';
 import { DailySummaryTab } from '../components/contract-price/DailySummaryTab';
 import { CurveCompareTab } from '../components/contract-price/CurveCompareTab';
+import { QuantityStructureTab } from '../components/contract-price/QuantityStructureTab';
 import { contractPriceApi, DailySummaryResponse } from '../api/contractPrice';
 
 interface TabPanelProps {
@@ -78,12 +78,10 @@ export const ContractPriceDailyPage: React.FC = () => {
         }
     };
 
-    // 日期变化时加载数据
+    // 日期变化时加载数据（所有Tab共享数据）
     useEffect(() => {
-        if (tabIndex === 0) {
-            fetchSummaryData();
-        }
-    }, [selectedDate, tabIndex, selectedBenchmark]);
+        fetchSummaryData();
+    }, [selectedDate, selectedBenchmark]);
 
     const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
         setTabIndex(newValue);
@@ -100,7 +98,6 @@ export const ContractPriceDailyPage: React.FC = () => {
         { icon: <DashboardIcon />, label: '价格总览', mobileLabel: '总览' },
         { icon: <ShowChartIcon />, label: '曲线对比', mobileLabel: '曲线' },
         { icon: <BarChartIcon />, label: '电量结构', mobileLabel: '电量' },
-        { icon: <CompareArrowsIcon />, label: '与现货对比', mobileLabel: '对比' },
     ];
 
     return (
@@ -197,11 +194,14 @@ export const ContractPriceDailyPage: React.FC = () => {
                     />
                 </TabPanel>
                 <TabPanel value={tabIndex} index={2}>
-                    <Box sx={{ p: 3, textAlign: 'center' }}>电量结构 (开发中)</Box>
+                    <QuantityStructureTab
+                        data={summaryData}
+                        loading={summaryLoading}
+                        error={summaryError}
+                        dateStr={dateStr}
+                    />
                 </TabPanel>
-                <TabPanel value={tabIndex} index={3}>
-                    <Box sx={{ p: 3, textAlign: 'center' }}>与现货对比 (开发中)</Box>
-                </TabPanel>
+
             </Box>
         </LocalizationProvider>
     );

@@ -185,19 +185,26 @@ class ContractPriceService:
         price_range_max = max(all_prices) if all_prices else 0
 
         # 计算各周期占比和均价
+        # 优先从 contract_type="整体" 下的各周期文档获取电量
         period_stats = {"年度": {"quantity": 0, "price": None}, 
                        "月度": {"quantity": 0, "price": None}, 
                        "月内": {"quantity": 0, "price": None}}
 
-        for doc in detail_docs:
-            period = doc.get("contract_period")
-            if period in period_stats:
-                # 从 periods 数组计算日电量和均价
+        # 方案1：从整体类型下的周期文档获取
+        for doc in docs:
+            if doc.get("contract_type") == "整体" and doc.get("contract_period") in period_stats:
+                period = doc.get("contract_period")
                 doc_qty, doc_price = self._calc_daily_stats(doc)
-                period_stats[period]["quantity"] += doc_qty
-                # 取整体类型的价格
-                if doc.get("contract_type") == "整体":
-                    period_stats[period]["price"] = doc_price if doc_price > 0 else None
+                period_stats[period]["quantity"] = doc_qty
+                period_stats[period]["price"] = doc_price if doc_price > 0 else None
+
+        # 方案2：如果整体类型下无数据，则从具体类型累加
+        for period in period_stats:
+            if period_stats[period]["quantity"] == 0:
+                for doc in detail_docs:
+                    if doc.get("contract_period") == period:
+                        doc_qty, doc_price = self._calc_daily_stats(doc)
+                        period_stats[period]["quantity"] += doc_qty
 
         # 计算占比
         yearly_ratio = (period_stats["年度"]["quantity"] / total_quantity * 100) if total_quantity > 0 else 0

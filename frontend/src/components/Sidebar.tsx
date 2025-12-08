@@ -116,11 +116,11 @@ const menuItems: MenuItem[] = [
         ],
     },
     {
-        text: '风险管理',
+        text: '交易复盘',
         icon: <ShieldIcon />,
         subItems: [
-            { text: '持仓合约管理', path: '/risk-management/position-contracts', icon: <FunctionsOutlined /> },
-            { text: '风险敞口分析', path: '/risk-management/exposure', icon: <BarChartOutlined /> },
+            { text: '中长期交易复盘', path: '/risk-management/position-contracts', icon: <FunctionsOutlined /> },
+            { text: '现货交易复盘', path: '/risk-management/exposure', icon: <BarChartOutlined /> },
         ],
     },
     {
