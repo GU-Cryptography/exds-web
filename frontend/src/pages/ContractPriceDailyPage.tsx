@@ -16,6 +16,7 @@ import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import ArrowLeftIcon from '@mui/icons-material/ArrowLeft';
 import ArrowRightIcon from '@mui/icons-material/ArrowRight';
 import { DailySummaryTab } from '../components/contract-price/DailySummaryTab';
+import { CurveCompareTab } from '../components/contract-price/CurveCompareTab';
 import { contractPriceApi, DailySummaryResponse } from '../api/contractPrice';
 
 interface TabPanelProps {
@@ -187,7 +188,13 @@ export const ContractPriceDailyPage: React.FC = () => {
                 </TabPanel>
 
                 <TabPanel value={tabIndex} index={1}>
-                    <Box sx={{ p: 3, textAlign: 'center' }}>曲线对比 (开发中)</Box>
+                    <CurveCompareTab
+                        data={summaryData}
+                        loading={summaryLoading}
+                        error={summaryError}
+                        dateStr={dateStr}
+                        selectedBenchmark={selectedBenchmark}
+                    />
                 </TabPanel>
                 <TabPanel value={tabIndex} index={2}>
                     <Box sx={{ p: 3, textAlign: 'center' }}>电量结构 (开发中)</Box>

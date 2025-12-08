@@ -77,9 +77,17 @@ class ContractPriceService:
 
     def _calc_daily_stats(self, doc: dict) -> tuple:
         """
-        从periods数组计算日电量和日均价
+        获取日电量和日均价（直接从文档预计算字段读取）
         返回 (total_quantity, avg_price)
         """
+        # 优先使用文档中的预计算字段
+        total_quantity = doc.get("daily_total_quantity")
+        avg_price = doc.get("daily_avg_price")
+        
+        if total_quantity is not None and avg_price is not None:
+            return total_quantity, avg_price
+        
+        # 兜底：如果预计算字段不存在，从periods数组计算
         periods = doc.get("periods", [])
         if not periods:
             return 0, 0
@@ -320,12 +328,50 @@ class ContractPriceService:
 
         logger.info(f"[STEP 5] 构建curves_by_type完成，类型数: {len(curves_by_type)}")
 
+        # 构建按"类型-周期"组合的曲线数据
+        # 可选曲线: 市场化-整体/年度/月度/月内, 绿电-整体/年度/月度/月内, 代购电-整体/年度/月度
+        curves_by_period = {}
+        combinations = [
+            ("市场化", "整体"), ("市场化", "年度"), ("市场化", "月度"), ("市场化", "月内"),
+            ("绿电", "整体"), ("绿电", "年度"), ("绿电", "月度"), ("绿电", "月内"),
+            ("代理购电", "整体"), ("代理购电", "年度"), ("代理购电", "月度")
+        ]
+
+
+        for contract_type, contract_period in combinations:
+            for doc in docs:
+                if doc.get("contract_type") == contract_type and doc.get("contract_period") == contract_period:
+                    curve_points = []
+                    if doc.get("periods"):
+                        doc_total_periods = len(doc["periods"])
+                        for p in doc["periods"]:
+                            period = p.get("period", 0)
+                            price = p.get("price_yuan_per_mwh")
+                            quantity = p.get("quantity_mwh")
+                            if period and price is not None:
+                                curve_points.append({
+                                    "period": period,
+                                    "time_str": self._period_to_time_str(period, doc_total_periods),
+                                    "price": round(price, 2),
+                                    "quantity": round(quantity, 2) if quantity else None
+                                })
+                        curve_points.sort(key=lambda x: x["period"])
+                    # 使用组合键名
+                    key = f"{contract_type}-{contract_period}"
+                    curves_by_period[key] = curve_points
+                    break
+
+        logger.info(f"[STEP 6] 构建curves_by_period(组合)完成，组合数: {len(curves_by_period)}")
+
         return DailySummaryResponse(
             date=date_str,
             kpis=kpis,
             contract_curves=contract_curves,
             spot_curves=spot_curves,
             type_summary=type_summary,
-            curves_by_type=curves_by_type
+            curves_by_type=curves_by_type,
+            curves_by_period=curves_by_period
         )
+
+
 

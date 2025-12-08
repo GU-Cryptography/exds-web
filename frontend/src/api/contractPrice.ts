@@ -41,7 +41,9 @@ export interface DailySummaryResponse {
     spot_curves: CurvePoint[];
     type_summary: ContractTypeSummary[];
     curves_by_type: { [key: string]: CurvePoint[] };
+    curves_by_period: { [key: string]: CurvePoint[] };
 }
+
 
 // API 方法
 export const contractPriceApi = {

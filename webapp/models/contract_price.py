@@ -55,8 +55,11 @@ class DailySummaryResponse(BaseModel):
     contract_curves: List[CurvePoint] = Field(..., description="中长期整体价格曲线")
     spot_curves: List[CurvePoint] = Field(..., description="日前现货价格曲线")
     type_summary: List[ContractTypeSummary] = Field(..., description="按类型汇总表格")
-    # 新增：按合同类型的曲线数据，用于前端筛选
+    # 按合同类型的曲线数据，用于前端筛选
     curves_by_type: dict = Field(default_factory=dict, description="按合同类型的曲线数据 {类型名: [CurvePoint]}")
+    # 按交易周期的曲线数据
+    curves_by_period: dict = Field(default_factory=dict, description="按交易周期的曲线数据 {周期名: [CurvePoint]}")
+
 
 
 
