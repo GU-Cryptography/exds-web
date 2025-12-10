@@ -48,7 +48,6 @@ interface DailySummaryTabProps {
     error: string | null;
     dateStr: string;
     selectedBenchmark: 'day_ahead' | 'real_time';
-    onBenchmarkChange: (benchmark: 'day_ahead' | 'real_time') => void;
 }
 
 // 蓝色渐变消息提示框组件
@@ -106,8 +105,7 @@ const PriceChart: React.FC<{
     curvesByType: { [key: string]: CurvePoint[] };
     dateStr: string;
     selectedBenchmark: 'day_ahead' | 'real_time';
-    onBenchmarkChange: (benchmark: 'day_ahead' | 'real_time') => void;
-}> = ({ contractCurves, spotCurves, curvesByType, dateStr, selectedBenchmark, onBenchmarkChange }) => {
+}> = ({ contractCurves, spotCurves, curvesByType, dateStr, selectedBenchmark }) => {
     const chartRef = useRef<HTMLDivElement>(null);
     const [selectedType, setSelectedType] = React.useState<string>('整体');
     const theme = useTheme();
@@ -178,78 +176,35 @@ const PriceChart: React.FC<{
 
     return (
         <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
-            {/* 标题栏：左侧标题+合同类型，右侧基准选择 */}
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 1 }}>
-                {/* 左侧：标题 + 合同类型 */}
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-                    <Typography variant="h6">价格曲线</Typography>
-                    <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                        {typeOptions.map(option => (
-                            <Box
-                                key={option.value}
-                                onClick={() => setSelectedType(option.value)}
-                                sx={{
-                                    px: 1.5,
-                                    py: 0.5,
-                                    borderRadius: 1,
-                                    fontSize: '0.875rem',
-                                    cursor: 'pointer',
-                                    border: '1px solid',
-                                    borderColor: selectedType === option.value ? getCurveColor(option.value) : 'divider',
-                                    backgroundColor: selectedType === option.value ? getCurveColor(option.value) : 'transparent',
-                                    color: selectedType === option.value ? 'white' : 'text.primary',
-                                    fontWeight: selectedType === option.value ? 'bold' : 'normal',
-                                    transition: 'all 0.2s',
-                                    '&:hover': {
-                                        borderColor: getCurveColor(option.value),
-                                        opacity: 0.8
-                                    }
-                                }}
-                            >
-                                {isMobile ? option.mobileLabel : option.label}
-                            </Box>
-                        ))}
-                    </Box>
-                </Box>
-
-                {/* 右侧：基准选择 */}
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Typography variant="body2" color="text.secondary">基准:</Typography>
-                    <Box sx={{ display: 'flex', gap: 0.5 }}>
-                        {['日前', '实时'].map(benchmark => (
-                            <Box
-                                key={benchmark}
-                                onClick={() => onBenchmarkChange?.(benchmark === '日前' ? 'day_ahead' : 'real_time')}
-                                sx={{
-                                    px: 1,
-                                    py: 0.25,
-                                    borderRadius: 1,
-                                    fontSize: '0.75rem',
-                                    cursor: 'pointer',
-                                    border: '1px solid',
-                                    borderColor: (selectedBenchmark === 'day_ahead' && benchmark === '日前') ||
-                                        (selectedBenchmark === 'real_time' && benchmark === '实时')
-                                        ? '#f44336' : 'divider',
-                                    backgroundColor: (selectedBenchmark === 'day_ahead' && benchmark === '日前') ||
-                                        (selectedBenchmark === 'real_time' && benchmark === '实时')
-                                        ? '#f44336' : 'transparent',
-                                    color: (selectedBenchmark === 'day_ahead' && benchmark === '日前') ||
-                                        (selectedBenchmark === 'real_time' && benchmark === '实时')
-                                        ? 'white' : 'text.primary',
-                                    fontWeight: (selectedBenchmark === 'day_ahead' && benchmark === '日前') ||
-                                        (selectedBenchmark === 'real_time' && benchmark === '实时')
-                                        ? 'bold' : 'normal',
-                                    transition: 'all 0.2s',
-                                    '&:hover': {
-                                        borderColor: '#f44336',
-                                        opacity: 0.8
-                                    }
-                                }}
-                            >
-                                {benchmark}
-                            </Box>
-                        ))}
-                    </Box>
+            {/* 标题栏：左侧标题+合同类型 */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', mb: 1 }}>
+                <Typography variant="h6">价格曲线</Typography>
+                <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                    {typeOptions.map(option => (
+                        <Box
+                            key={option.value}
+                            onClick={() => setSelectedType(option.value)}
+                            sx={{
+                                px: 1.5,
+                                py: 0.5,
+                                borderRadius: 1,
+                                fontSize: '0.875rem',
+                                cursor: 'pointer',
+                                border: '1px solid',
+                                borderColor: selectedType === option.value ? getCurveColor(option.value) : 'divider',
+                                backgroundColor: selectedType === option.value ? getCurveColor(option.value) : 'transparent',
+                                color: selectedType === option.value ? 'white' : 'text.primary',
+                                fontWeight: selectedType === option.value ? 'bold' : 'normal',
+                                transition: 'all 0.2s',
+                                '&:hover': {
+                                    borderColor: getCurveColor(option.value),
+                                    opacity: 0.8
+                                }
+                            }}
+                        >
+                            {isMobile ? option.mobileLabel : option.label}
+                        </Box>
+                    ))}
                 </Box>
             </Box>
 
@@ -527,8 +482,7 @@ export const DailySummaryTab: React.FC<DailySummaryTabProps> = ({
     loading,
     error,
     dateStr,
-    selectedBenchmark,
-    onBenchmarkChange
+    selectedBenchmark
 }) => {
     // 首次加载显示完整loading
 
@@ -580,7 +534,6 @@ export const DailySummaryTab: React.FC<DailySummaryTabProps> = ({
                 curvesByType={data.curves_by_type || {}}
                 dateStr={dateStr}
                 selectedBenchmark={selectedBenchmark}
-                onBenchmarkChange={onBenchmarkChange}
             />
 
 

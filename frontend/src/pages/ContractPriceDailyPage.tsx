@@ -118,7 +118,7 @@ export const ContractPriceDailyPage: React.FC = () => {
                 )}
 
                 {/* 日期选择器 */}
-                <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
                     <IconButton onClick={() => handleShiftDate(-1)} size="small" disabled={summaryLoading}>
                         <ArrowLeftIcon />
                     </IconButton>
@@ -137,6 +137,46 @@ export const ContractPriceDailyPage: React.FC = () => {
                     <IconButton onClick={() => handleShiftDate(1)} size="small" disabled={summaryLoading}>
                         <ArrowRightIcon />
                     </IconButton>
+
+                    {/* 基准价格选择 - 放置在最右侧 */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 'auto' }}>
+                        <Typography variant="body2" color="text.secondary">基准:</Typography>
+                        <Box sx={{ display: 'flex', gap: 0.5 }}>
+                            {['日前', '实时'].map(benchmark => (
+                                <Box
+                                    key={benchmark}
+                                    onClick={() => setSelectedBenchmark(benchmark === '日前' ? 'day_ahead' : 'real_time')}
+                                    sx={{
+                                        px: 1,
+                                        py: 0.25,
+                                        borderRadius: 1,
+                                        fontSize: '0.75rem',
+                                        cursor: 'pointer',
+                                        border: '1px solid',
+                                        borderColor: (selectedBenchmark === 'day_ahead' && benchmark === '日前') ||
+                                            (selectedBenchmark === 'real_time' && benchmark === '实时')
+                                            ? '#f44336' : 'divider',
+                                        backgroundColor: (selectedBenchmark === 'day_ahead' && benchmark === '日前') ||
+                                            (selectedBenchmark === 'real_time' && benchmark === '实时')
+                                            ? '#f44336' : 'transparent',
+                                        color: (selectedBenchmark === 'day_ahead' && benchmark === '日前') ||
+                                            (selectedBenchmark === 'real_time' && benchmark === '实时')
+                                            ? 'white' : 'text.primary',
+                                        fontWeight: (selectedBenchmark === 'day_ahead' && benchmark === '日前') ||
+                                            (selectedBenchmark === 'real_time' && benchmark === '实时')
+                                            ? 'bold' : 'normal',
+                                        transition: 'all 0.2s',
+                                        '&:hover': {
+                                            borderColor: '#f44336',
+                                            opacity: 0.8
+                                        }
+                                    }}
+                                >
+                                    {benchmark}
+                                </Box>
+                            ))}
+                        </Box>
+                    </Box>
                 </Paper>
 
                 <Paper variant="outlined" sx={{ borderColor: 'divider' }}>
@@ -180,7 +220,6 @@ export const ContractPriceDailyPage: React.FC = () => {
                         error={summaryError}
                         dateStr={dateStr}
                         selectedBenchmark={selectedBenchmark}
-                        onBenchmarkChange={setSelectedBenchmark}
                     />
                 </TabPanel>
 
