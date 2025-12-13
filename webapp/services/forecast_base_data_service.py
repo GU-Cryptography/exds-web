@@ -97,12 +97,16 @@ class ForecastBaseDataService:
 
                 query = {"datetime": target_dt}
                 query.update(config["filter"])
-                doc = collection.find_one(query, {"_id": 0, "datetime": 1})
+                # 同时查询目标字段，判断其是否存在且非空
+                field_name = config["field"]
+                doc = collection.find_one(query, {"_id": 0, "datetime": 1, field_name: 1})
+                # 可用性判断：文档存在 且 目标字段非空
+                is_available = bool(doc and doc.get("datetime") and doc.get(field_name) is not None)
                 row.append(
                     {
                         "data_item_id": data_item_id,
                         "date": date_str,
-                        "is_available": bool(doc and doc.get("datetime")),
+                        "is_available": is_available,
                         "sample_timestamp": (doc.get("datetime").isoformat() if doc and doc.get("datetime") else None),
                     }
                 )
