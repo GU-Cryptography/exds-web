@@ -148,7 +148,7 @@ const menuItems: MenuItem[] = [
         icon: <SettingsIcon />,
         subItems: [
             { text: '用户与权限', path: '/system-settings/user-permissions', icon: <VpnKeyOutlined /> },
-            { text: '数据接入管理', path: '/system-settings/data-access', icon: <SourceOutlined /> },
+            { text: '数据下载监控', path: '/system-settings/data-access', icon: <SourceOutlined /> },
             { text: '预测模型参数', path: '/system-settings/model-parameters', icon: <ModelTrainingOutlined /> },
         ],
     },

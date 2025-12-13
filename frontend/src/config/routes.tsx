@@ -11,6 +11,7 @@ import { SpotTrendAnalysisPage } from '../pages/SpotTrendAnalysisPage';
 import TouRulesPage from '../pages/TouRulesPage';
 import { ContractPriceDailyPage } from '../pages/ContractPriceDailyPage';
 import { ContractPriceTrendPage } from '../pages/ContractPriceTrendPage';
+import { RpaMonitorPage } from '../pages/RpaMonitorPage';
 
 // 路由配置接口
 export interface RouteConfig {
@@ -72,7 +73,7 @@ export const routeConfigs: RouteConfig[] = [
 
     // 系统管理
     { path: '/system-settings/user-permissions', title: '用户与权限', component: PlaceholderPage },
-    { path: '/system-settings/data-access', title: '数据接入管理', component: PlaceholderPage },
+    { path: '/system-settings/data-access', title: '数据下载监控', component: RpaMonitorPage },
     { path: '/system-settings/model-parameters', title: '预测模型参数', component: PlaceholderPage },
 ];
 

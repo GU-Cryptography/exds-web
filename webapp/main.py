@@ -11,6 +11,7 @@ from webapp.tools.mongo import DATABASE as db
 from webapp.tools.logging_config import configure_logging
 from webapp.api import v1
 from webapp.api import v1_forecast_base_data
+from webapp.api import v1_rpa_monitor
 
 # Import security functions and models from the new security tool
 from webapp.tools.security import (
@@ -72,6 +73,7 @@ async def login_for_access_token(request: Request, form_data: OAuth2PasswordRequ
 app.include_router(v1.public_router)
 app.include_router(v1.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(v1_forecast_base_data.router, dependencies=[Depends(get_current_active_user)])
+app.include_router(v1_rpa_monitor.router, prefix="/api/v1/rpa", tags=["RPA监控"])
 
 
 
