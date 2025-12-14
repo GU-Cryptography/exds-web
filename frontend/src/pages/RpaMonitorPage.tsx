@@ -20,7 +20,10 @@ import {
     Tab,
     useTheme,
     useMediaQuery,
-    Tooltip
+    Tooltip,
+    Select,
+    MenuItem,
+    FormControl
 } from '@mui/material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -162,12 +165,151 @@ const StatCard: React.FC<{
     );
 };
 
+// 移动端紧凑统计条
+const CompactStatsBar: React.FC<{
+    taskCount: number;
+    success: number;
+    skipped: number;
+    failed: number;
+}> = ({ taskCount, success, skipped, failed }) => {
+    return (
+        <Paper
+            variant="outlined"
+            sx={{
+                p: 1.5,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-around',
+                gap: 1,
+                mt: 2
+            }}
+        >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <AssignmentIcon sx={{ fontSize: 18, color: '#3B82F6' }} />
+                <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                    {taskCount}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">任务</Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <CheckCircleIcon sx={{ fontSize: 18, color: '#10B981' }} />
+                <Typography variant="body2" sx={{ fontWeight: 'bold', color: '#10B981' }}>
+                    {success}
+                </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <SkipNextIcon sx={{ fontSize: 18, color: '#6B7280' }} />
+                <Typography variant="body2" sx={{ fontWeight: 'bold', color: '#6B7280' }}>
+                    {skipped}
+                </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <CancelIcon sx={{ fontSize: 18, color: '#EF4444' }} />
+                <Typography variant="body2" sx={{ fontWeight: 'bold', color: '#EF4444' }}>
+                    {failed}
+                </Typography>
+            </Box>
+        </Paper>
+    );
+};
+
+// 移动端任务行（简洁版，避免横向滚动）
+const MobileTaskRow: React.FC<{
+    task: TaskExecutionSummary;
+    index: number;
+}> = ({ task, index }) => {
+    // 状态图标
+    const StatusIcon = () => {
+        switch (task.daily_status) {
+            case 'SUCCESS':
+                return <CheckCircleIcon sx={{ fontSize: 18, color: '#10B981' }} />;
+            case 'FAILED':
+                return <CancelIcon sx={{ fontSize: 18, color: '#EF4444' }} />;
+            case 'SKIPPED':
+                return <SkipNextIcon sx={{ fontSize: 18, color: '#6B7280' }} />;
+            default:
+                return null;
+        }
+    };
+
+    // 结果文本
+    const getResultText = () => {
+        if (task.daily_status === 'SUCCESS') {
+            if (task.records_inserted > 0 || task.records_updated > 0) {
+                let text = '';
+                if (task.records_inserted > 0) text += `+${task.records_inserted}`;
+                if (task.records_updated > 0) text += ` ↻${task.records_updated}`;
+                return text.trim();
+            }
+            return '无变化';
+        } else if (task.daily_status === 'SKIPPED') {
+            return task.message || '已跳过';
+        } else {
+            return task.error_message ? task.error_message.substring(0, 20) + '...' : '失败';
+        }
+    };
+
+    return (
+        <Box
+            sx={{
+                display: 'flex',
+                alignItems: 'center',
+                py: 1,
+                px: 1,
+                borderBottom: '1px solid',
+                borderColor: 'divider',
+                '&:last-child': { borderBottom: 'none' }
+            }}
+        >
+            {/* 序号 */}
+            <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ width: 24, flexShrink: 0 }}
+            >
+                {index + 1}
+            </Typography>
+
+            {/* 任务名 + 结果 */}
+            <Box sx={{ flex: 1, minWidth: 0, mr: 1 }}>
+                <Typography
+                    variant="body2"
+                    sx={{
+                        fontWeight: 500,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                    }}
+                >
+                    {task.task_key}
+                </Typography>
+                <Typography
+                    variant="caption"
+                    color={task.daily_status === 'FAILED' ? 'error' : 'text.secondary'}
+                    sx={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        display: 'block'
+                    }}
+                >
+                    {getResultText()}
+                </Typography>
+            </Box>
+
+            {/* 状态图标 */}
+            <StatusIcon />
+        </Box>
+    );
+};
+
 
 // ========== 主组件 ==========
 
 export const RpaMonitorPage: React.FC = () => {
     const theme = useTheme();
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
+    const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
 
     // 日期状态
     const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
@@ -309,7 +451,7 @@ export const RpaMonitorPage: React.FC = () => {
 
     return (
         <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
-            <Box sx={{ width: '100%' }}>
+            <Box sx={{ width: '100%', overflowX: 'hidden' }}>
                 {/* 移动端面包屑标题 */}
                 {isTablet && (
                     <Typography
@@ -321,7 +463,7 @@ export const RpaMonitorPage: React.FC = () => {
                 )}
 
                 {/* 日期选择器和刷新按钮 */}
-                <Paper variant="outlined" sx={{ p: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Paper variant="outlined" sx={{ p: 1.5, display: 'flex', gap: 0.5, alignItems: 'center' }}>
                     <IconButton onClick={() => handleShiftDate(-1)} disabled={loading}>
                         <ArrowLeftIcon />
                     </IconButton>
@@ -341,8 +483,6 @@ export const RpaMonitorPage: React.FC = () => {
                     <IconButton onClick={() => handleShiftDate(1)} disabled={loading}>
                         <ArrowRightIcon />
                     </IconButton>
-
-                    <Box sx={{ flexGrow: 1 }} />
 
                     <Tooltip title="刷新数据">
                         <IconButton onClick={handleRefresh} disabled={loading}>
@@ -385,81 +525,94 @@ export const RpaMonitorPage: React.FC = () => {
                             </Box>
                         )}
 
-                        {/* 统计卡片 */}
-                        <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mt: 2 }}>
-                            <Grid size={{ xs: 6, sm: 2.4 }}>
-                                <StatCard
-                                    title="任务数"
-                                    value={dailySummary?.tasks.length || 0}
-                                    icon={<AssignmentIcon fontSize="inherit" />}
-                                    color="#3B82F6"
-                                />
+                        {/* 统计区域：移动端紧凑条，桌面端卡片 */}
+                        {isSmallScreen ? (
+                            <CompactStatsBar
+                                taskCount={dailySummary?.tasks.length || 0}
+                                success={dailySummary?.summary.success || 0}
+                                skipped={dailySummary?.summary.skipped || 0}
+                                failed={dailySummary?.summary.failed || 0}
+                            />
+                        ) : (
+                            <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mt: 2 }}>
+                                <Grid size={{ xs: 6, sm: 2.4 }}>
+                                    <StatCard
+                                        title="任务数"
+                                        value={dailySummary?.tasks.length || 0}
+                                        icon={<AssignmentIcon fontSize="inherit" />}
+                                        color="#3B82F6"
+                                    />
+                                </Grid>
+                                <Grid size={{ xs: 6, sm: 2.4 }}>
+                                    <StatCard
+                                        title="成功"
+                                        value={dailySummary?.summary.success || 0}
+                                        icon={<CheckCircleIcon fontSize="inherit" />}
+                                        color="#10B981"
+                                    />
+                                </Grid>
+                                <Grid size={{ xs: 6, sm: 2.4 }}>
+                                    <StatCard
+                                        title="跳过"
+                                        value={dailySummary?.summary.skipped || 0}
+                                        icon={<SkipNextIcon fontSize="inherit" />}
+                                        color="#6B7280"
+                                    />
+                                </Grid>
+                                <Grid size={{ xs: 6, sm: 2.4 }}>
+                                    <StatCard
+                                        title="失败"
+                                        value={dailySummary?.summary.failed || 0}
+                                        icon={<CancelIcon fontSize="inherit" />}
+                                        color="#EF4444"
+                                    />
+                                </Grid>
+                                <Grid size={{ xs: 6, sm: 2.4 }}>
+                                    <StatCard
+                                        title="告警"
+                                        value={alerts.length}
+                                        icon={<WarningIcon fontSize="inherit" />}
+                                        color="#F59E0B"
+                                        onClick={() => setAlertsExpanded(!alertsExpanded)}
+                                    />
+                                </Grid>
                             </Grid>
-                            <Grid size={{ xs: 6, sm: 2.4 }}>
-                                <StatCard
-                                    title="成功"
-                                    value={dailySummary?.summary.success || 0}
-                                    icon={<CheckCircleIcon fontSize="inherit" />}
-                                    color="#10B981"
-                                />
-                            </Grid>
-                            <Grid size={{ xs: 6, sm: 2.4 }}>
-                                <StatCard
-                                    title="跳过"
-                                    value={dailySummary?.summary.skipped || 0}
-                                    icon={<SkipNextIcon fontSize="inherit" />}
-                                    color="#6B7280"
-                                />
-                            </Grid>
-                            <Grid size={{ xs: 6, sm: 2.4 }}>
-                                <StatCard
-                                    title="失败"
-                                    value={dailySummary?.summary.failed || 0}
-                                    icon={<CancelIcon fontSize="inherit" />}
-                                    color="#EF4444"
-                                />
-                            </Grid>
-                            <Grid size={{ xs: 6, sm: 2.4 }}>
-                                <StatCard
-                                    title="告警"
-                                    value={alerts.length}
-                                    icon={<WarningIcon fontSize="inherit" />}
-                                    color="#F59E0B"
-                                    onClick={() => setAlertsExpanded(!alertsExpanded)}
-                                />
-                            </Grid>
-                        </Grid>
+                        )}
 
                         {/* 告警展开区 */}
                         {alerts.length > 0 && (
-                            <Paper variant="outlined" sx={{ mt: 2 }}>
+                            <Paper variant="outlined" sx={{ mt: 2, overflow: 'hidden' }}>
                                 <Box
                                     sx={{
-                                        p: 2,
+                                        p: 1.5,
                                         display: 'flex',
                                         alignItems: 'center',
+                                        flexWrap: 'wrap',
+                                        gap: 1,
                                         bgcolor: 'warning.light'
                                     }}
                                 >
                                     <Box
-                                        sx={{ display: 'flex', alignItems: 'center', flexGrow: 1, cursor: 'pointer' }}
+                                        sx={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 120, cursor: 'pointer' }}
                                         onClick={() => setAlertsExpanded(!alertsExpanded)}
                                     >
-                                        <WarningIcon sx={{ mr: 1, color: 'warning.dark' }} />
-                                        <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-                                            告警信息 ({alerts.length})
+                                        <WarningIcon sx={{ mr: 0.5, fontSize: 20, color: 'warning.dark' }} />
+                                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                                            告警 ({alerts.length})
                                         </Typography>
                                     </Box>
-                                    {/* 重试按钮放在标题栏 */}
+                                    {/* 重试按钮 */}
                                     {alerts.some(a => a.can_retry) && (
                                         <Button
                                             size="small"
                                             variant="outlined"
-                                            startIcon={isRetrying ? <CircularProgress size={14} sx={{ color: 'warning.dark' }} /> : <ReplayIcon />}
+                                            startIcon={isRetrying ? <CircularProgress size={12} sx={{ color: 'warning.dark' }} /> : <ReplayIcon sx={{ fontSize: 16 }} />}
                                             onClick={(e) => { e.stopPropagation(); handleRetryAll(); }}
                                             disabled={!!isRetryDisabled}
                                             sx={{
-                                                mr: 1,
+                                                py: 0.25,
+                                                px: 1,
+                                                fontSize: '0.75rem',
                                                 color: 'warning.dark',
                                                 borderColor: 'warning.dark',
                                                 '&:hover': {
@@ -473,13 +626,13 @@ export const RpaMonitorPage: React.FC = () => {
                                                 }
                                             }}
                                         >
-                                            {isRetrying ? '重试中...' : retryDisabledUntil && new Date() < retryDisabledUntil ? '已发送' : '重试'}
+                                            {isRetrying ? '...' : retryDisabledUntil && new Date() < retryDisabledUntil ? '已发' : '重试'}
                                         </Button>
                                     )}
                                     <IconButton
                                         size="small"
                                         onClick={() => setAlertsExpanded(!alertsExpanded)}
-                                        sx={{ color: 'warning.dark' }}
+                                        sx={{ color: 'warning.dark', p: 0.5 }}
                                     >
                                         {alertsExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                                     </IconButton>
@@ -490,21 +643,32 @@ export const RpaMonitorPage: React.FC = () => {
                                             <Box
                                                 key={index}
                                                 sx={{
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: 1,
                                                     p: 1,
                                                     borderBottom: index < alerts.length - 1 ? '1px solid' : 'none',
                                                     borderColor: 'divider'
                                                 }}
                                             >
-                                                <Chip
-                                                    label={alert.level === 'critical' ? '严重' : alert.level === 'warning' ? '警告' : '提示'}
-                                                    size="small"
-                                                    color={alert.level === 'critical' ? 'error' : alert.level === 'warning' ? 'warning' : 'info'}
-                                                />
-                                                <Typography variant="body2" sx={{ flexGrow: 1 }}>
-                                                    <strong>{alert.pipeline_name}/{alert.task_key}</strong>: {alert.message}
+                                                {/* 第一行：级别标签 + 任务名 */}
+                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                                                    <Chip
+                                                        label={alert.level === 'critical' ? '严重' : alert.level === 'warning' ? '警告' : '提示'}
+                                                        size="small"
+                                                        color={alert.level === 'critical' ? 'error' : alert.level === 'warning' ? 'warning' : 'info'}
+                                                    />
+                                                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                                                        {alert.task_key}
+                                                    </Typography>
+                                                </Box>
+                                                {/* 第二行：消息（允许换行） */}
+                                                <Typography
+                                                    variant="body2"
+                                                    color="text.secondary"
+                                                    sx={{
+                                                        wordBreak: 'break-word',
+                                                        pl: 0.5
+                                                    }}
+                                                >
+                                                    {alert.message}
                                                 </Typography>
                                             </Box>
                                         ))}
@@ -524,84 +688,114 @@ export const RpaMonitorPage: React.FC = () => {
                                     <Typography variant="h6" gutterBottom>
                                         当日摘要
                                     </Typography>
-                                    <TableContainer sx={{ overflowX: 'auto' }}>
-                                        <Table
-                                            size="small"
-                                            sx={{
-                                                '& .MuiTableCell-root': {
-                                                    fontSize: { xs: '0.75rem', sm: '0.875rem' },
-                                                    px: { xs: 0.5, sm: 2 }
-                                                }
-                                            }}
-                                        >
-                                            <TableHead>
-                                                <TableRow>
-                                                    <TableCell align="center">序号</TableCell>
-                                                    <TableCell>管道</TableCell>
-                                                    <TableCell>任务</TableCell>
-                                                    <TableCell>状态</TableCell>
-                                                    <TableCell align="right">记录数</TableCell>
-                                                    <TableCell>执行时间</TableCell>
-                                                    <TableCell align="right">耗时</TableCell>
-                                                </TableRow>
-                                            </TableHead>
-                                            <TableBody>
-                                                {dailySummary.tasks.map((task, index) => (
-                                                    <TableRow key={`${task.pipeline_name}-${task.task_key}-${index}`}>
-                                                        <TableCell align="center">{index + 1}</TableCell>
-                                                        <TableCell>{task.pipeline_name}</TableCell>
-                                                        <TableCell>{task.task_key}</TableCell>
-                                                        <TableCell>
-                                                            <StatusChip status={task.daily_status} />
-                                                        </TableCell>
-                                                        <TableCell align="right">
-                                                            {task.daily_status === 'SUCCESS' ? (
-                                                                <>
-                                                                    {task.records_inserted > 0 && `+${task.records_inserted}`}
-                                                                    {task.records_updated > 0 && ` ↻${task.records_updated}`}
-                                                                </>
-                                                            ) : '-'}
-                                                        </TableCell>
-                                                        <TableCell>
-                                                            {task.execution_time
-                                                                ? format(new Date(task.execution_time), 'HH:mm:ss')
-                                                                : task.last_success_date || '-'}
-                                                        </TableCell>
-                                                        <TableCell align="right">
-                                                            {task.duration_seconds != null
-                                                                ? `${task.duration_seconds.toFixed(1)}s`
-                                                                : '-'}
-                                                        </TableCell>
+
+                                    {/* 移动端：简洁列表 */}
+                                    {isSmallScreen ? (
+                                        <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+                                            {dailySummary.tasks.map((task, index) => (
+                                                <MobileTaskRow
+                                                    key={`${task.pipeline_name}-${task.task_key}-${index}`}
+                                                    task={task}
+                                                    index={index}
+                                                />
+                                            ))}
+                                        </Paper>
+                                    ) : (
+                                        /* 桌面端：表格布局 */
+                                        <TableContainer sx={{ overflowX: 'auto' }}>
+                                            <Table
+                                                size="small"
+                                                sx={{
+                                                    '& .MuiTableCell-root': {
+                                                        fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                                                        px: { xs: 0.5, sm: 2 }
+                                                    }
+                                                }}
+                                            >
+                                                <TableHead>
+                                                    <TableRow>
+                                                        <TableCell align="center">序号</TableCell>
+                                                        <TableCell>管道</TableCell>
+                                                        <TableCell>任务</TableCell>
+                                                        <TableCell>状态</TableCell>
+                                                        <TableCell align="right">记录数</TableCell>
+                                                        <TableCell>执行时间</TableCell>
+                                                        <TableCell align="right">耗时</TableCell>
                                                     </TableRow>
-                                                ))}
-                                            </TableBody>
-                                        </Table>
-                                    </TableContainer>
+                                                </TableHead>
+                                                <TableBody>
+                                                    {dailySummary.tasks.map((task, index) => (
+                                                        <TableRow key={`${task.pipeline_name}-${task.task_key}-${index}`}>
+                                                            <TableCell align="center">{index + 1}</TableCell>
+                                                            <TableCell>{task.pipeline_name}</TableCell>
+                                                            <TableCell>{task.task_key}</TableCell>
+                                                            <TableCell>
+                                                                <StatusChip status={task.daily_status} />
+                                                            </TableCell>
+                                                            <TableCell align="right">
+                                                                {task.daily_status === 'SUCCESS' ? (
+                                                                    <>
+                                                                        {task.records_inserted > 0 && `+${task.records_inserted}`}
+                                                                        {task.records_updated > 0 && ` ↻${task.records_updated}`}
+                                                                    </>
+                                                                ) : '-'}
+                                                            </TableCell>
+                                                            <TableCell>
+                                                                {task.execution_time
+                                                                    ? format(new Date(task.execution_time), 'HH:mm:ss')
+                                                                    : task.last_success_date || '-'}
+                                                            </TableCell>
+                                                            <TableCell align="right">
+                                                                {task.duration_seconds != null
+                                                                    ? `${task.duration_seconds.toFixed(1)}s`
+                                                                    : '-'}
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))}
+                                                </TableBody>
+                                            </Table>
+                                        </TableContainer>
+                                    )}
                                 </Paper>
 
-                                {/* 执行历史 */}
-                                {executionHistory?.has_data && executionHistory.batches.length > 0 && (
+                                {/* 执行历史（移动端隐藏） */}
+                                {!isSmallScreen && executionHistory?.has_data && executionHistory.batches.length > 0 && (
                                     <Paper variant="outlined" sx={{ mt: 2, p: { xs: 1, sm: 2 } }}>
                                         <Typography variant="h6" gutterBottom>
                                             执行历史
                                         </Typography>
 
-                                        {/* 批次选择 Tabs */}
-                                        <Tabs
-                                            value={selectedBatchIndex}
-                                            onChange={(_, val) => setSelectedBatchIndex(val)}
-                                            variant="scrollable"
-                                            scrollButtons="auto"
-                                            sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
-                                        >
-                                            {executionHistory.batches.map((batch, index) => (
-                                                <Tab
-                                                    key={batch.batch_index}
-                                                    label={`${batch.batch_time} 第${batch.batch_index}次`}
-                                                    value={index}
-                                                />
-                                            ))}
-                                        </Tabs>
+                                        {/* 批次选择：移动端用下拉，桌面端用 Tabs */}
+                                        {isSmallScreen ? (
+                                            <FormControl size="small" sx={{ mb: 2, minWidth: 200 }}>
+                                                <Select
+                                                    value={selectedBatchIndex}
+                                                    onChange={(e) => setSelectedBatchIndex(e.target.value as number)}
+                                                >
+                                                    {executionHistory.batches.map((batch, index) => (
+                                                        <MenuItem key={batch.batch_index} value={index}>
+                                                            {batch.batch_time} 第{batch.batch_index}次 ({batch.task_count}个任务)
+                                                        </MenuItem>
+                                                    ))}
+                                                </Select>
+                                            </FormControl>
+                                        ) : (
+                                            <Tabs
+                                                value={selectedBatchIndex}
+                                                onChange={(_, val) => setSelectedBatchIndex(val)}
+                                                variant="scrollable"
+                                                scrollButtons="auto"
+                                                sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
+                                            >
+                                                {executionHistory.batches.map((batch, index) => (
+                                                    <Tab
+                                                        key={batch.batch_index}
+                                                        label={`${batch.batch_time} 第${batch.batch_index}次`}
+                                                        value={index}
+                                                    />
+                                                ))}
+                                            </Tabs>
+                                        )}
 
                                         {/* 当前批次详情 */}
                                         {currentBatch && (

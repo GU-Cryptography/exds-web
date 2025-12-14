@@ -24,6 +24,7 @@ import { CustomerManagementPage } from './pages/CustomerManagementPage';
 import { ForecastBaseDataPage } from './pages/ForecastBaseDataPage';
 import { SpotTrendAnalysisPage } from './pages/SpotTrendAnalysisPage';
 import { ContractPriceDailyPage } from './pages/ContractPriceDailyPage';
+import { RpaMonitorPage } from './pages/RpaMonitorPage';
 import { TabProvider } from './contexts/TabContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { DesktopTabLayout } from './layouts/DesktopTabLayout';
@@ -110,7 +111,7 @@ const ResponsiveLayout: React.FC = () => {
 
                     {/* 系统管理 */}
                     <Route path="system-settings/user-permissions" element={<PlaceholderPage />} />
-                    <Route path="system-settings/data-access" element={<PlaceholderPage />} />
+                    <Route path="system-settings/data-access" element={<RpaMonitorPage />} />
                     <Route path="system-settings/model-parameters" element={<PlaceholderPage />} />
                 </Route>
             </Routes>
