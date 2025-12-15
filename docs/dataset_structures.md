@@ -224,3 +224,241 @@
 
 - `(date: 1)`: 唯一索引，确保每天只有一条记录。
 
+## 输出数据集合详细说明
+
+## 8. `price_forecast_results` - 价格预测结果
+
+该集合存储日前价格预测模型的输出结果，支持 D-1 和 D-2 两种预测模式。
+
+**业务价值**:
+- 为交易决策提供日前价格预测
+- 支持历史预测结果回溯和性能评估
+- 区分不同预测视野（D-1 近期 vs D-2 远期）
+
+- **数据来源**: 模型预测输出
+- **更新频率**: 每个工作日
+- **数据粒度**: 15分钟，每个目标日96个数据点
+- **预测范围**: 
+  - D-1 预测：D 日（次日1天）
+  - D-2 预测：D ~ D+9 日（10个目标日，共960个预测点）
+
+### 8.1 字段说明
+
+| 字段名 | 数据类型 | 描述 | 示例 |
+| :--- | :--- | :--- | :--- |
+| `forecast_id` | String | **[复合主键]** 预测批次唯一标识 | "20250117_0920" |
+| `forecast_type` | String | **[复合主键]** 预测类型：`d1_price` 或 `d2_price` | "d1_price" |
+| `forecast_date` | ISODate | **[复合主键]** 预测执行日期 | 2025-01-17 00:00 |
+| `target_date` | ISODate | **[复合主键]** 目标日期 | 2025-01-18 00:00 |
+| `datetime` | ISODate | **[复合主键]** 具体时间点（业务日96点） | 2025-01-18 00:15 |
+| `predicted_price` | Number | 预测价格 (元/MWh)，精度2位小数 | 350.25 |
+| `confidence_80_lower` | Number | 80%置信区间下界 (元/MWh) | 320.50 |
+| `confidence_80_upper` | Number | 80%置信区间上界 (元/MWh) | 380.00 |
+| `confidence_90_lower` | Number | 90%置信区间下界 (元/MWh) | 310.00 |
+| `confidence_90_upper` | Number | 90%置信区间上界 (元/MWh) | 390.50 |
+| `model_type` | String | 模型标识 | "d1_price_model" 或 "d2_near_term" |
+| `model_version` | String | 模型版本 | "v1.0.3" |
+| `created_at` | ISODate | 记录创建时间（UTC） | 2025-01-17 09:25 |
+
+### 8.2 预测类型定义
+
+| forecast_type | 说明 | 执行时间 | 预测范围 |
+| :--- | :--- | :--- | :--- |
+| `d1_price` | D-1 日前价格预测 | D-1 日 09:20 | D 日（次日） |
+| `d2_price` | D-2 日前价格预测 | D-2 日 09:20 | D ~ D+9 日（10天） |
+
+### 8.3 索引配置
+
+```javascript
+// 复合唯一索引（包含 forecast_type）
+db.price_forecast_results.createIndex({
+    "forecast_id": 1,
+    "forecast_type": 1,
+    "target_date": 1,
+    "datetime": 1
+}, { unique: true })
+
+// 按类型和日期查询
+db.price_forecast_results.createIndex({ "forecast_type": 1, "target_date": 1, "datetime": 1 })
+db.price_forecast_results.createIndex({ "forecast_date": 1, "target_date": 1 })
+```
+
+### 8.4 数据示例
+
+**D-1 预测**:
+```json
+{
+    "forecast_id": "20250117_0920",
+    "forecast_type": "d1_price",
+    "forecast_date": ISODate("2025-01-17T00:00:00Z"),
+    "target_date": ISODate("2025-01-18T00:00:00Z"),
+    "datetime": ISODate("2025-01-18T00:15:00Z"),
+    "predicted_price": 350.25,
+    "confidence_80_lower": 320.50,
+    "confidence_80_upper": 380.00,
+    "confidence_90_lower": 310.00,
+    "confidence_90_upper": 390.50,
+    "model_type": "d1_price_model",
+    "model_version": "v1.0.0",
+    "created_at": ISODate("2025-01-17T09:25:30Z")
+}
+```
+
+**D-2 预测**:
+```json
+{
+    "forecast_id": "20250117_0920",
+    "forecast_type": "d2_price",
+    "forecast_date": ISODate("2025-01-17T00:00:00Z"),
+    "target_date": ISODate("2025-01-19T00:00:00Z"),
+    "datetime": ISODate("2025-01-19T00:15:00Z"),
+    "predicted_price": 365.50,
+    "confidence_80_lower": 330.00,
+    "confidence_80_upper": 400.00,
+    "confidence_90_lower": 315.00,
+    "confidence_90_upper": 415.00,
+    "model_type": "d2_near_term",
+    "model_version": "v2.0.0",
+    "created_at": ISODate("2025-01-17T09:25:30Z")
+}
+```
+
+## 9. `forecast_accuracy_daily` - 预测准确度日报
+
+该集合存储各类预测模型的**日级别准确度评估结果**，支持多种预测类型和客户维度。
+
+**业务价值**:
+- 持续监控各类预测模型性能
+- 支持多客户负荷预测准确度追踪
+- 识别模型退化趋势
+- 分析影响准确度的因素（负价格、极端天气等）
+
+- **数据来源**: 定时任务自动计算
+- **更新频率**: 每日（T+1 回测）
+- **数据粒度**: 日级别（每个预测类型+客户每天 1 条记录）
+
+### 9.1 字段说明
+
+| 字段名 | 数据类型 | 描述 | 用途 |
+| :--- | :--- | :--- | :--- |
+| `target_date` | ISODate | **[复合主键]** 预测目标日期 | 时间索引 |
+| `forecast_type` | String | **[复合主键]** 预测类型（见下表） | 区分预测类型 |
+| `forecast_id` | String | **[复合主键]** 预测批次唯一标识 | 支持多批次评估 |
+| `customer_id` | String | **[复合主键]** 客户ID（负荷预测用，其他类型填 "system"） | 客户维度 |
+| `forecast_date` | ISODate | 预测执行日期 | 追溯预测时间 |
+| `model_type` | String | 模型标识（如 d1_price_model, d2_price_model） | 模型区分 |
+| `model_version` | String | 模型版本号 | 版本追踪 |
+| `wmape_accuracy` | Number | WMAPE 准确率 (0-100%) | **主评估指标** |
+| `mape` | Number | MAPE (%) | 百分比误差 |
+| `mae` | Number | 平均绝对误差 | 误差分析 |
+| `rmse` | Number | 均方根误差 | 误差分析 |
+| `r2` | Number | 决定系数 R² | 拟合度 |
+| `direction_accuracy` | Number | 方向准确率 (0-100%) | 涨跌/增减判断 |
+| `period_accuracy` | Object | 分时段准确率（从 tou_rules 动态获取） | 分时段分析 |
+| `stats` | Object | 当日统计信息 | 数据特征 |
+| ├─ `min_value` | Number | 最低值 | |
+| ├─ `max_value` | Number | 最高值 | |
+| ├─ `mean_value` | Number | 平均值 | |
+| ├─ `sum_value` | Number | 总值（负荷预测用） | |
+| └─ `has_negative` | Boolean | 是否含负值 | 异常标识 |
+| `rate_90_pass` | Boolean | 是否达 90% 准确率 | 达标标识 |
+| `rate_85_pass` | Boolean | 是否达 85% 准确率 | 达标标识 |
+| `calculated_at` | ISODate | 计算时间 | 数据管理 |
+| `notes` | String | 备注（可选） | 特殊说明 |
+
+### 9.2 预测类型定义
+
+| forecast_type | 说明 | 单位 | 数据粒度 |
+| :--- | :--- | :--- | :--- |
+| `d1_price` | D-1 日前价格预测 | CNY/MWh | 96点/天 |
+| `d2_price` | D-2 日前价格预测 | CNY/MWh | 96点/天 |
+| `d2_shadow_wind` | D-2 风电影子预测 | MW | 96点/天 |
+| `d2_shadow_pv` | D-2 光伏影子预测 | MW | 96点/天 |
+| `d2_shadow_tieline` | D-2 联络线影子预测 | MW | 96点/天 |
+| `d2_shadow_nonmarket` | D-2 非市场化机组影子预测 | MW | 96点/天 |
+| `load_forecast` | 负荷预测（客户级） | MWh | 48点/天 |
+
+### 9.3 索引配置
+
+```javascript
+// 复合唯一索引（包含 forecast_id，支持多批次准确度评估）
+db.forecast_accuracy_daily.createIndex({ 
+    "target_date": 1, 
+    "forecast_type": 1,
+    "forecast_id": 1,
+    "customer_id": 1 
+}, { unique: true })
+
+// 按类型和日期查询
+db.forecast_accuracy_daily.createIndex({ "forecast_type": 1, "target_date": -1 })
+
+// 按 forecast_id 查询
+db.forecast_accuracy_daily.createIndex({ "forecast_id": 1 })
+
+// 按客户查询（负荷预测用）
+db.forecast_accuracy_daily.createIndex({ "customer_id": 1, "target_date": -1 })
+```
+
+### 9.4 数据示例
+
+**D-1 价格预测**:
+```json
+{
+    "target_date": ISODate("2025-12-10T00:00:00Z"),
+    "forecast_type": "d1_price",
+    "forecast_id": "D1_20251209_092015",
+    "customer_id": "system",
+    "forecast_date": ISODate("2025-12-09T00:00:00Z"),
+    "model_type": "d1_price_model",
+    "model_version": "v1.0.0",
+    "wmape_accuracy": 88.29,
+    "mae": 50.5,
+    "rmse": 68.2,
+    "r2": 0.85,
+    "direction_accuracy": 75.8,
+    "period_accuracy": {
+        "高峰": 86.5,
+        "平段": 82.3,
+        "低谷": 91.2
+    },
+    "stats": {
+        "min_value": 120.5,
+        "max_value": 580.0,
+        "mean_value": 385.2,
+        "has_negative": false
+    },
+    "rate_90_pass": false,
+    "rate_85_pass": true,
+    "calculated_at": ISODate("2025-12-11T09:25:00Z")
+}
+```
+
+**负荷预测（某客户）**:
+```json
+{
+    "target_date": ISODate("2025-12-10T00:00:00Z"),
+    "forecast_type": "load_forecast",
+    "customer_id": "customer_001",
+    "forecast_date": ISODate("2025-12-08T00:00:00Z"),
+    "model_type": "load_model",
+    "model_version": "v2.1.0",
+    "wmape_accuracy": 92.5,
+    "mape": 7.5,
+    "mae": 12.3,
+    "stats": {
+        "min_value": 50.0,
+        "max_value": 250.0,
+        "mean_value": 150.5,
+        "sum_value": 7224.0
+    },
+    "rate_90_pass": true,
+    "rate_85_pass": true,
+    "calculated_at": ISODate("2025-12-11T09:30:00Z")
+}
+```
+
+---
+
+
+
+
