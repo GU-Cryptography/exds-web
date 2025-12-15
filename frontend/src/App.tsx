@@ -25,6 +25,7 @@ import { ForecastBaseDataPage } from './pages/ForecastBaseDataPage';
 import { SpotTrendAnalysisPage } from './pages/SpotTrendAnalysisPage';
 import { ContractPriceDailyPage } from './pages/ContractPriceDailyPage';
 import { RpaMonitorPage } from './pages/RpaMonitorPage';
+import { DayAheadPriceForecastPage } from './pages/DayAheadPriceForecastPage';
 import { TabProvider } from './contexts/TabContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { DesktopTabLayout } from './layouts/DesktopTabLayout';
@@ -80,7 +81,7 @@ const ResponsiveLayout: React.FC = () => {
                     {/* 价格预测 */}
                     <Route path="price-forecast/baseline-data" element={<ForecastBaseDataPage />} />
                     <Route path="price-forecast/d-2" element={<PlaceholderPage />} />
-                    <Route path="price-forecast/day-ahead" element={<PlaceholderPage />} />
+                    <Route path="price-forecast/day-ahead" element={<DayAheadPriceForecastPage />} />
                     <Route path="price-forecast/monthly" element={<PlaceholderPage />} />
 
                     {/* 交易决策 */}

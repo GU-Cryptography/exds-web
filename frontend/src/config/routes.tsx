@@ -12,6 +12,7 @@ import TouRulesPage from '../pages/TouRulesPage';
 import { ContractPriceDailyPage } from '../pages/ContractPriceDailyPage';
 import { ContractPriceTrendPage } from '../pages/ContractPriceTrendPage';
 import { RpaMonitorPage } from '../pages/RpaMonitorPage';
+import { DayAheadPriceForecastPage } from '../pages/DayAheadPriceForecastPage';
 
 // 路由配置接口
 export interface RouteConfig {
@@ -46,7 +47,7 @@ export const routeConfigs: RouteConfig[] = [
     // 价格预测
     { path: '/price-forecast/baseline-data', title: '预测基础数据', component: ForecastBaseDataPage },
     { path: '/price-forecast/d-2', title: 'D-2价格预测', component: PlaceholderPage },
-    { path: '/price-forecast/day-ahead', title: '日前价格预测', component: PlaceholderPage },
+    { path: '/price-forecast/day-ahead', title: '日前价格预测', component: DayAheadPriceForecastPage },
     { path: '/price-forecast/monthly', title: '月度价格预测', component: PlaceholderPage },
 
     // 交易决策

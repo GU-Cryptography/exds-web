@@ -100,8 +100,8 @@ const menuItems: MenuItem[] = [
         icon: <QueryStatsOutlined />,
         subItems: [
             { text: '预测基础数据', path: '/price-forecast/baseline-data', icon: <StorageOutlined /> },
-            { text: 'D-2价格预测', path: '/price-forecast/d-2', icon: <CrisisAlertOutlined /> },
             { text: '日前价格预测', path: '/price-forecast/day-ahead', icon: <TrendingUpOutlined /> },
+            { text: 'D-2价格预测', path: '/price-forecast/d-2', icon: <CrisisAlertOutlined /> },
             { text: '月度价格预测', path: '/price-forecast/monthly', icon: <CalendarMonthOutlined /> },
         ],
     },

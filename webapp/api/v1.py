@@ -16,6 +16,7 @@ from webapp.api import v1_forecast_base_data
 from webapp.api import v1_trend_analysis
 from webapp.api import v1_contract_price
 from webapp.api import v1_contract_price_trend
+from webapp.api import v1_price_forecast
 from webapp.services.package_service import PackageService
 from webapp.services.pricing_engine import PricingEngine
 from webapp.services.pricing_model_service import pricing_model_service
@@ -30,6 +31,7 @@ router.include_router(v1_forecast_base_data.router)  # 预测基础数据路由
 router.include_router(v1_trend_analysis.router)  # 现货趋势分析路由
 router.include_router(v1_contract_price.router)  # 中长期合同价格分析路由
 router.include_router(v1_contract_price_trend.router)  # 中长期趋势分析路由
+router.include_router(v1_price_forecast.router)  # 价格预测路由
 
 
 
