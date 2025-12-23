@@ -3,7 +3,9 @@
 
 提供日前价格预测结果的 RESTful API 接口。
 """
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Query, HTTPException, status
+from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from webapp.tools.mongo import DATABASE
 from webapp.services.price_forecast_service import PriceForecastService
@@ -129,6 +131,146 @@ async def get_accuracy(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"获取准确度评估失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="服务器内部错误"
+        )
+
+
+# ============ 预测触发相关 API ============
+
+class TriggerRequest(BaseModel):
+    """触发预测任务的请求体"""
+    target_date: str
+
+
+@router.get(
+    "/data-check",
+    status_code=status.HTTP_200_OK,
+    summary="检查预测基础数据条数",
+    description="检查指定日期的 daily_release 数据条数，用于判断是否可以触发预测任务。"
+)
+async def check_data_availability(
+    target_date: str = Query(..., description="目标日期, 格式 YYYY-MM-DD")
+) -> Dict[str, Any]:
+    """检查 daily_release 数据条数"""
+    try:
+        # 解析日期
+        target_dt = datetime.strptime(target_date, "%Y-%m-%d")
+        start_of_day = target_dt
+        end_of_day = target_dt + timedelta(days=1)
+
+        # 查询 daily_release 集合中指定日期的记录数
+        count = DATABASE["daily_release"].count_documents({
+            "datetime": {"$gte": start_of_day, "$lt": end_of_day}
+        })
+
+        return {
+            "target_date": target_date,
+            "count": count,
+            "is_sufficient": count > 90
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"日期格式错误: {e}")
+    except Exception as e:
+        logger.error(f"检查数据条数失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="服务器内部错误"
+        )
+
+
+@router.post(
+    "/trigger",
+    status_code=status.HTTP_200_OK,
+    summary="触发预测任务",
+    description="向 task_commands 集合插入预测命令，触发后台预测任务执行。"
+)
+async def trigger_forecast(request: TriggerRequest) -> Dict[str, Any]:
+    """触发预测任务"""
+    try:
+        target_date = request.target_date
+        task_type = "d1_price"
+        command_col = DATABASE["task_commands"]
+
+        # 检查是否存在未完成的同类型命令（5分钟内）
+        existing = command_col.find_one({
+            "task_type": task_type,
+            "status": {"$in": ["pending", "running"]},
+            "created_at": {"$gte": datetime.now() - timedelta(minutes=5)}
+        })
+
+        if existing:
+            return {
+                "success": False,
+                "message": "已有相同任务在执行中，请等待完成",
+                "existing_command_id": existing["command_id"],
+                "status": existing["status"],
+                "created_at": existing["created_at"].isoformat()
+            }
+
+        # 插入新命令
+        command_id = f"{task_type}_manual_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        doc = {
+            "command_id": command_id,
+            "command": "run",
+            "task_type": task_type,
+            "service_type": "forecast",
+            "status": "pending",
+            "parameters": {"target_date": target_date},
+            "priority": 1,
+            "created_at": datetime.now(),
+            "created_by": "web_user"
+        }
+
+        command_col.insert_one(doc)
+        logger.info(f"已创建预测命令: {command_id}, 目标日期: {target_date}")
+
+        return {
+            "success": True,
+            "message": "命令已发送，预计1-2分钟内开始执行",
+            "command_id": command_id
+        }
+    except Exception as e:
+        logger.error(f"触发预测任务失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="服务器内部错误"
+        )
+
+
+@router.get(
+    "/command/{command_id}",
+    status_code=status.HTTP_200_OK,
+    summary="查询命令状态",
+    description="查询预测命令的执行状态。"
+)
+async def get_command_status(command_id: str) -> Dict[str, Any]:
+    """查询命令状态"""
+    try:
+        command_col = DATABASE["task_commands"]
+        doc = command_col.find_one({"command_id": command_id})
+
+        if not doc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="命令不存在"
+            )
+
+        return {
+            "command_id": doc["command_id"],
+            "task_type": doc["task_type"],
+            "status": doc["status"],
+            "created_at": doc["created_at"].isoformat() if doc.get("created_at") else None,
+            "started_at": doc["started_at"].isoformat() if doc.get("started_at") else None,
+            "completed_at": doc["completed_at"].isoformat() if doc.get("completed_at") else None,
+            "result_message": doc.get("result_message"),
+            "error_message": doc.get("error_message")
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"查询命令状态失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="服务器内部错误"

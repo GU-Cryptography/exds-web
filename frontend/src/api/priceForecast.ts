@@ -71,4 +71,56 @@ export const priceForecastApi = {
     fetchAccuracy: (params: { forecast_id: string }) => {
         return apiClient.get<AccuracyData | null>('/api/v1/price-forecast/accuracy', { params });
     },
+
+    /**
+     * 检查预测基础数据条数
+     */
+    checkDataAvailability: (params: { target_date: string }) => {
+        return apiClient.get<DataCheckResult>('/api/v1/price-forecast/data-check', { params });
+    },
+
+    /**
+     * 触发预测任务
+     */
+    triggerForecast: (params: { target_date: string }) => {
+        return apiClient.post<TriggerResult>('/api/v1/price-forecast/trigger', params);
+    },
+
+    /**
+     * 查询命令状态
+     */
+    getCommandStatus: (commandId: string) => {
+        return apiClient.get<CommandStatus>(`/api/v1/price-forecast/command/${commandId}`);
+    },
 };
+
+// ============ 触发预测相关类型 ============
+
+/** 数据检查结果 */
+export interface DataCheckResult {
+    target_date: string;
+    count: number;
+    is_sufficient: boolean;
+}
+
+/** 触发结果 */
+export interface TriggerResult {
+    success: boolean;
+    message: string;
+    command_id?: string;
+    existing_command_id?: string;
+    status?: string;
+    created_at?: string;
+}
+
+/** 命令状态 */
+export interface CommandStatus {
+    command_id: string;
+    task_type: string;
+    status: 'pending' | 'running' | 'completed' | 'failed';
+    created_at: string | null;
+    started_at: string | null;
+    completed_at: string | null;
+    result_message: string | null;
+    error_message: string | null;
+}

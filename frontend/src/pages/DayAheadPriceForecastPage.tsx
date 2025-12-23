@@ -6,7 +6,7 @@
  * 2. 显示预测准确度评估指标
  * 3. 支持多版本回溯
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     Box,
     Paper,
@@ -26,7 +26,12 @@ import {
     useTheme,
     useMediaQuery,
     SelectChangeEvent,
+    Button,
+    Snackbar,
 } from '@mui/material';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
+import SyncIcon from '@mui/icons-material/Sync';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { zhCN } from 'date-fns/locale';
@@ -36,6 +41,7 @@ import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorIcon from '@mui/icons-material/Error';
 import { format, addDays } from 'date-fns';
 import {
     ComposedChart,
@@ -49,7 +55,7 @@ import {
     ResponsiveContainer,
 } from 'recharts';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
-import { priceForecastApi, ForecastVersion, ChartDataPoint, AccuracyData } from '../api/priceForecast';
+import { priceForecastApi, ForecastVersion, ChartDataPoint, AccuracyData, CommandStatus } from '../api/priceForecast';
 
 
 // ============ 自定义 Tooltip ============
@@ -350,6 +356,16 @@ export const DayAheadPriceForecastPage: React.FC = () => {
     const [loadingAccuracy, setLoadingAccuracy] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    // 预测触发相关状态
+    const [triggerLoading, setTriggerLoading] = useState(false);
+    const [commandId, setCommandId] = useState<string | null>(null);
+    const [commandStatus, setCommandStatus] = useState<CommandStatus['status'] | null>(null);
+    const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' | 'info' | 'warning' }>({ open: false, message: '', severity: 'info' });
+    const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+    // 日期限制：最多选到明天
+    const maxDate = addDays(new Date(), 1);
+
     // 图表全屏
     const chartRef = useRef<HTMLDivElement>(null);
     const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
@@ -456,7 +472,102 @@ export const DayAheadPriceForecastPage: React.FC = () => {
     const handleShiftDate = (days: number) => {
         if (!selectedDate) return;
         const newDate = addDays(selectedDate, days);
+        // 限制最大日期为明天
+        if (newDate > maxDate) return;
         setSelectedDate(newDate);
+    };
+
+    // 检查是否可以向右导航（+1天）
+    const canNavigateNext = selectedDate ? addDays(selectedDate, 1) <= maxDate : false;
+
+    // 停止轮询
+    const stopPolling = useCallback(() => {
+        if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+        }
+    }, []);
+
+    // 轮询命令状态
+    const startPolling = useCallback((cmdId: string) => {
+        stopPolling();
+        pollIntervalRef.current = setInterval(async () => {
+            try {
+                const response = await priceForecastApi.getCommandStatus(cmdId);
+                const status = response.data.status;
+                setCommandStatus(status);
+
+                if (status === 'completed') {
+                    stopPolling();
+                    setSnackbar({ open: true, message: '预测任务已完成！', severity: 'success' });
+                    // 刷新版本列表
+                    fetchVersions(selectedDate);
+                    setCommandId(null);
+                    setCommandStatus(null);
+                } else if (status === 'failed') {
+                    stopPolling();
+                    setSnackbar({ open: true, message: response.data.error_message || '预测任务执行失败', severity: 'error' });
+                    setCommandId(null);
+                    setCommandStatus(null);
+                }
+            } catch (err) {
+                console.error('轮询命令状态失败:', err);
+            }
+        }, 5000); // 每 5 秒轮询一次
+    }, [stopPolling, selectedDate]);
+
+    // 组件卸载时清理轮询
+    useEffect(() => {
+        return () => stopPolling();
+    }, [stopPolling]);
+
+    // 触发预测
+    const handleTriggerForecast = async () => {
+        if (!selectedDate) return;
+
+        const targetDate = format(selectedDate, 'yyyy-MM-dd');
+        setTriggerLoading(true);
+
+        try {
+            // 1. 检查数据充足性
+            const checkResponse = await priceForecastApi.checkDataAvailability({ target_date: targetDate });
+            if (!checkResponse.data.is_sufficient) {
+                setSnackbar({
+                    open: true,
+                    message: `数据不足（${checkResponse.data.count}/96条），无法触发预测`,
+                    severity: 'warning'
+                });
+                setTriggerLoading(false);
+                return;
+            }
+
+            // 2. 触发预测任务
+            const triggerResponse = await priceForecastApi.triggerForecast({ target_date: targetDate });
+            if (triggerResponse.data.success) {
+                const cmdId = triggerResponse.data.command_id!;
+                setCommandId(cmdId);
+                setCommandStatus('pending');
+                setSnackbar({ open: true, message: '预测任务已提交，预计1-2分钟完成', severity: 'info' });
+                // 开始轮询状态
+                startPolling(cmdId);
+            } else {
+                // 已有任务在执行中
+                if (triggerResponse.data.existing_command_id) {
+                    const cmdId = triggerResponse.data.existing_command_id;
+                    setCommandId(cmdId);
+                    setCommandStatus(triggerResponse.data.status as CommandStatus['status']);
+                    setSnackbar({ open: true, message: triggerResponse.data.message, severity: 'warning' });
+                    startPolling(cmdId);
+                } else {
+                    setSnackbar({ open: true, message: triggerResponse.data.message, severity: 'error' });
+                }
+            }
+        } catch (err: any) {
+            console.error('触发预测失败:', err);
+            setSnackbar({ open: true, message: err.response?.data?.detail || '触发预测失败', severity: 'error' });
+        } finally {
+            setTriggerLoading(false);
+        }
     };
 
     // 版本选择
@@ -508,6 +619,7 @@ export const DayAheadPriceForecastPage: React.FC = () => {
                         value={selectedDate}
                         onChange={(date) => setSelectedDate(date)}
                         disabled={loading}
+                        maxDate={maxDate}
                         slotProps={{
                             textField: {
                                 sx: { width: { xs: '150px', sm: '200px' } },
@@ -515,7 +627,7 @@ export const DayAheadPriceForecastPage: React.FC = () => {
                         }}
                     />
 
-                    <IconButton onClick={() => handleShiftDate(1)} disabled={loading}>
+                    <IconButton onClick={() => handleShiftDate(1)} disabled={loading || !canNavigateNext}>
                         <ArrowRightIcon />
                     </IconButton>
 
@@ -537,7 +649,48 @@ export const DayAheadPriceForecastPage: React.FC = () => {
                             ))}
                         </Select>
                     </FormControl>
+
+                    {/* 预测按钮 */}
+                    <Button
+                        variant="contained"
+                        color={commandStatus ? 'warning' : 'primary'}
+                        startIcon={
+                            triggerLoading ? <CircularProgress size={16} color="inherit" /> :
+                                commandStatus === 'pending' ? <HourglassEmptyIcon /> :
+                                    commandStatus === 'running' ? <SyncIcon sx={{ animation: 'spin 1s linear infinite', '@keyframes spin': { '0%': { transform: 'rotate(0deg)' }, '100%': { transform: 'rotate(360deg)' } } }} /> :
+                                        <PlayArrowIcon />
+                        }
+                        onClick={handleTriggerForecast}
+                        disabled={
+                            loading ||
+                            triggerLoading ||
+                            versions.length > 0 ||
+                            commandStatus === 'pending' ||
+                            commandStatus === 'running'
+                        }
+                        sx={{ ml: { xs: 0, sm: 2 } }}
+                    >
+                        {commandStatus === 'pending' ? '等待中...' :
+                            commandStatus === 'running' ? '执行中...' :
+                                '预测'}
+                    </Button>
                 </Paper>
+
+                {/* Snackbar 提示 */}
+                <Snackbar
+                    open={snackbar.open}
+                    autoHideDuration={6000}
+                    onClose={() => setSnackbar({ ...snackbar, open: false })}
+                    anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+                >
+                    <Alert
+                        onClose={() => setSnackbar({ ...snackbar, open: false })}
+                        severity={snackbar.severity}
+                        sx={{ width: '100%' }}
+                    >
+                        {snackbar.message}
+                    </Alert>
+                </Snackbar>
 
                 {/* 错误提示 */}
                 {error && (
