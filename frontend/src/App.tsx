@@ -24,6 +24,7 @@ import { CustomerManagementPage } from './pages/CustomerManagementPage';
 import { ForecastBaseDataPage } from './pages/ForecastBaseDataPage';
 import { SpotTrendAnalysisPage } from './pages/SpotTrendAnalysisPage';
 import { ContractPriceDailyPage } from './pages/ContractPriceDailyPage';
+import { ContractPriceTrendPage } from './pages/ContractPriceTrendPage';
 import { RpaMonitorPage } from './pages/RpaMonitorPage';
 import { DayAheadPriceForecastPage } from './pages/DayAheadPriceForecastPage';
 import { TabProvider } from './contexts/TabContext';
@@ -76,7 +77,7 @@ const ResponsiveLayout: React.FC = () => {
                     <Route path="price-analysis/spot-market" element={<MarketPriceAnalysisPage />} />
                     <Route path="price-analysis/spot-trend" element={<SpotTrendAnalysisPage />} />
                     <Route path="price-analysis/mid-long-term" element={<ContractPriceDailyPage />} />
-                    <Route path="price-analysis/mid-long-trend" element={<PlaceholderPage />} />
+                    <Route path="price-analysis/mid-long-trend" element={<ContractPriceTrendPage />} />
 
                     {/* 价格预测 */}
                     <Route path="price-forecast/baseline-data" element={<ForecastBaseDataPage />} />

@@ -240,7 +240,7 @@ export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({ data, loading, err
     const spreadFullscreen = useChartFullscreen({ chartRef: spreadChartRef, title: '日均价差趋势' });
 
     // Series selection hooks
-    const priceSeries = useSelectableSeries({ contract_vwap: true, spot_vwap: true, trend_line: true });
+    const priceSeries = useSelectableSeries({ contract_vwap: true, spot_vwap: true });
 
     // Calculate Trend Line and Stats
     const { chartData, stats, distributionData } = useMemo(() => {
@@ -347,7 +347,6 @@ export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({ data, loading, err
                                             <Legend onClick={priceSeries.handleLegendClick} />
                                             <Line hide={!priceSeries.seriesVisibility.contract_vwap} type="monotone" dataKey="contract_vwap" name="中长期均价" stroke="#9c27b0" strokeWidth={2} dot={false} />
                                             <Line hide={!priceSeries.seriesVisibility.spot_vwap} type="monotone" dataKey="spot_vwap" name={`${spotLabel}均价`} stroke="#1976d2" strokeWidth={2} strokeDasharray="5 5" dot={false} />
-                                            <Line hide={!priceSeries.seriesVisibility.trend_line} type="monotone" dataKey="trend_line" name="趋势线" stroke="#ff9800" strokeWidth={2} strokeDasharray="3 3" dot={false} />
                                         </ComposedChart>
                                     </ResponsiveContainer>
                                 </Box>
