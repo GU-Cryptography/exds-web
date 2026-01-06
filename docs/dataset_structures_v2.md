@@ -28,12 +28,10 @@
 | `contact_phone` | `String` | 联系电话 |
 | `utility_accounts`| `Array` | 户号列表 |
 | `utility_accounts.account_id` | `String` | 户号 |
-| `utility_accounts.metering_points` | `Array` | 计量点列表 |
-| `utility_accounts.metering_points.metering_point_id` | `String` | 计量点ID |
-| `utility_accounts.metering_points.allocation_percentage` | `Number` | 分摊比例(%) |
-| `utility_accounts.metering_points.meter` | `Object` | 电表信息 |
-| `utility_accounts.metering_points.meter.meter_id` | `String` | 电表资产号 |
-| `utility_accounts.metering_points.meter.multiplier` | `Number` | 倍率 |
+| `utility_accounts.meters` | `Array` | 挂载在该户号下的电表列表 |
+| `utility_accounts.meters.meter_id` | `String` | 电表资产号 |
+| `utility_accounts.meters.multiplier` | `Number` | 倍率 |
+| `utility_accounts.meters.allocation_ratio` | `Number` | 结算分配系数，范围 0-1.0。**默认为空 (null)**，非空表示该电表已通过 RPA 校验。 |
 | `status` | `String` | 客户状态，枚举值: "prospect", "pending", "active", "suspended", "terminated" |
 | `created_at` | `DateTime` | 创建时间 |
 | `updated_at` | `DateTime` | 更新时间 |
@@ -171,3 +169,107 @@
 - `model_code` (唯一索引)
 - `package_type`, `enabled` (复合索引)
 - `sort_order`
+
+---
+
+## 5. `raw_meter_data` - 原始电表示度数据 (手工导入)
+
+该集合存储手工导入的原始电表示数，采用**按日宽表**结构。
+
+### 5.1. 字段说明
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `_id` | `ObjectId` | 数据唯一ID |
+| `meter_id` | `String` | 电表资产号 (Meter ID) |
+| `date` | `String` | 数据日期 (YYYY-MM-DD) |
+| `readings` | `Array` | 当日示数数组 (Number) |
+| `meta` | `Object` | 冗余元数据 (来自导入文件) |
+| `meta.customer_name` | `String` | 用户名称 |
+| `meta.account_id` | `String` | 用户编号 (户号) |
+| `updated_at` | `DateTime` | 最后更新时间 |
+
+### 5.2. 索引信息
+
+- `_id_` (默认)
+- `meter_id`, `date` (唯一复合索引)
+
+---
+
+## 6. `raw_mp_data` - 原始计量点负荷数据 (RPA导入)
+
+该集合存储通过RPA自动采集的原始负荷数据，采用**按日宽表**结构。
+
+### 6.1. 字段说明
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `_id` | `ObjectId` | 数据唯一ID |
+| `mp_id` | `String` | 计量点ID (Metering Point ID) |
+| `date` | `String` | 数据日期 (YYYY-MM-DD) |
+| `load_values` | `Array` | 当日负荷数组 (Number，单位: MWh) |
+| `total_load` | `Number` | 日电量合计 (校验用) |
+| `meta` | `Object` | 冗余元数据 (来自RPA源) |
+| `meta.customer_name` | `String` | 电力用户名称 |
+| `meta.account_id` | `String` | 用户号 |
+| `updated_at` | `DateTime` | 最后更新时间 |
+
+### 6.2. 索引信息
+
+- `_id_` (默认)
+- `mp_id`, `date` (唯一复合索引)
+
+---
+
+## 7. `unified_load_curve` - 统一负荷曲线
+
+该集合存储聚合后的用户级负荷数据，是系统内唯一的权威负荷曲线源。
+
+**设计原则**: 采用**长表 (Long Format)** 结构，每个时间点为一条独立记录。
+
+### 7.1. 字段说明
+
+| 字段名 | 类型 | 说明 | 示例 |
+| :--- | :--- | :--- | :--- |
+| `_id` | `ObjectId` | 唯一ID | `ObjectId("...")` |
+| `customer_id` | `String` | 关联客户ID (来自 `customers._id`) | `"673f9f87069d137d83be63a6"` |
+| `customer_name` | `String` | 冗余客户全称 (便于查询展示) | `"江西省xx物资公司"` |
+| `datetime` | `DateTime` | 数据时间点 (本地时间，24:00 存储为次日 00:00:00) | `ISODate("2025-11-11T00:00:00Z")` |
+| `load_value` | `Number` | 时段用电量，单位: **MWh** | `0.8505` |
+| `source` | `String` | 数据来源: `"rpa"` (权威结算) / `"manual"` (手工导入转换) | `"rpa"` |
+| `updated_at` | `DateTime` | 最后更新时间 | `ISODate("2025-11-12T10:00:00Z")` |
+
+### 7.2. 索引信息
+
+- `_id_` (默认)
+- `customer_id`, `datetime` (唯一复合索引，确保单一权威源)
+- `datetime` (时序查询优化)
+- `customer_name` (检索优化)
+- `source` (统计分析优化)
+
+---
+
+## 8. `temporary_load_curve` - 临时负荷曲线 (开发分析用)
+
+该集合存储**未签约客户**的手工导入负荷数据。此数据仅用于潜在客户开发阶段的用电分析，不参与正式结算或生产预测。
+
+**设计原则**: 结构与 `unified_load_curve` 完全一致，便于后续客户签约时迁移数据。
+
+### 8.1. 字段说明
+
+| 字段名 | 类型 | 说明 | 示例 |
+| :--- | :--- | :--- | :--- |
+| `_id` | `ObjectId` | 唯一ID | `ObjectId("...")` |
+| `customer_id` | `String` | 关联客户ID (来自 `customers._id`) | `"673f9f87069d137d83be63a6"` |
+| `customer_name` | `String` | 冗余客户全称 (便于查询展示) | `"江西省xx物资公司"` |
+| `datetime` | `DateTime` | 数据时间点 (本地时间，24:00 存储为次日 00:00:00) | `ISODate("2025-11-11T00:00:00Z")` |
+| `load_value` | `Number` | 时段用电量，单位: **MWh** | `0.8505` |
+| `source` | `String` | 固定为 `"manual"` | `"manual"` |
+| `updated_at` | `DateTime` | 最后更新时间 | `ISODate("2025-11-12T10:00:00Z")` |
+
+### 8.2. 索引信息
+
+- `_id_` (默认)
+- `customer_id`, `datetime` (唯一复合索引)
+- `datetime` (时序查询优化)
+- `customer_name` (检索优化)
