@@ -238,31 +238,31 @@ export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({ data, loading, err
     // Calculate Trend Line and Stats
     const { chartData, stats, distributionData } = useMemo(() => {
         if (!data?.daily_trends) return { chartData: [], stats: null, distributionData: [] };
-        const trends = [...data.daily_trends];
 
         // 1. Linear Regression
-        const points = trends
+        const points = data.daily_trends
             .map((d: any, i: number) => ({ x: i, y: d.vwap_rt }))
-            .filter(p => p.y !== null && p.y !== undefined);
+            .filter((p: any) => p.y !== null && p.y !== undefined);
 
         let slope = 0;
         let intercept = 0;
 
         if (points.length > 1) {
             const n = points.length;
-            const sumX = points.reduce((acc, p) => acc + p.x, 0);
-            const sumY = points.reduce((acc, p) => acc + p.y, 0);
-            const sumXY = points.reduce((acc, p) => acc + p.x * p.y, 0);
-            const sumXX = points.reduce((acc, p) => acc + p.x * p.x, 0);
+            const sumX = points.reduce((acc: number, p: any) => acc + p.x, 0);
+            const sumY = points.reduce((acc: number, p: any) => acc + p.y, 0);
+            const sumXY = points.reduce((acc: number, p: any) => acc + p.x * p.y, 0);
+            const sumXX = points.reduce((acc: number, p: any) => acc + p.x * p.x, 0);
 
             slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
             intercept = (sumY - slope * sumX) / n;
-
-            // 给每个数据点添加趋势线值
-            trends.forEach((d: any, i: number) => {
-                d.trend_line = slope * i + intercept;
-            });
         }
+
+        // 使用 map 创建新对象，避免修改原始数据（来自 React 状态的冻结对象）
+        const trends = data.daily_trends.map((d: any, i: number) => ({
+            ...d,
+            trend_line: points.length > 1 ? slope * i + intercept : undefined
+        }));
 
         // 2. Calculate Stats
         const startPrice = points.length > 0 ? (slope * 0 + intercept) : 0;
