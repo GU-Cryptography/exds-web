@@ -859,6 +859,321 @@ class TrendAnalysisService:
             "box_plot_data": box_plot_data_list
         }
 
+    # ========== 需求7&8：因素趋势分析 ==========
+
+    def get_da_factor_trend(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
+        """
+        需求7: 日前趋势分析 - 获取日前价格与供需因素的日级趋势数据
+        
+        数据来源:
+        - day_ahead_spot_price: 日前价格
+        - daily_release: 负荷预测、新能源预测、联络线计划等
+        
+        Returns:
+            Dict 包含 daily_data 和 correlations
+        """
+        # 1. 查询日前价格数据
+        query = {"datetime": {"$gt": start_date, "$lte": end_date}}
+        da_docs = list(self.da_collection.find(query))
+        
+        # 2. 查询 daily_release 数据
+        daily_release_docs = list(self.db['daily_release'].find(
+            query,
+            {
+                '_id': 0, 'datetime': 1,
+                'system_load_forecast': 1, 'pv_forecast': 1, 'wind_forecast': 1,
+                'tieline_plan': 1, 'nonmarket_unit_forecast': 1
+            }
+        ))
+        
+        # 3. 按日期聚合
+        daily_stats = defaultdict(lambda: {
+            "price_sum": 0, "price_vol": 0, "count": 0,
+            "load": 0, "wind": 0, "solar": 0, "tieline": 0, "nonmarket": 0,
+            "hydro": 0, "thermal": 0
+        })
+        
+        # 处理日前价格和出清数据
+        for doc in da_docs:
+            dt = doc.get('datetime')
+            if not dt: continue
+            
+            if dt.hour == 0 and dt.minute == 0:
+                business_date = (dt.date() - timedelta(days=1)).strftime("%Y-%m-%d")
+            else:
+                business_date = dt.date().strftime("%Y-%m-%d")
+            
+            price = doc.get('avg_clearing_price')
+            vol = doc.get('total_clearing_power', 0) or 0
+            
+            if price is not None:
+                daily_stats[business_date]["price_sum"] += price * vol
+                daily_stats[business_date]["price_vol"] += vol
+                daily_stats[business_date]["count"] += 1
+            
+            # 出清电量 (MWh -> GWh)
+            daily_stats[business_date]["hydro"] += (doc.get('hydro_clearing_power', 0) or 0) / 1000
+            daily_stats[business_date]["thermal"] += (doc.get('thermal_clearing_power', 0) or 0) / 1000
+        
+        # 处理 daily_release 数据 (预测数据)
+        def safe_float(val, default=0.0):
+            """安全转换为浮点数"""
+            if val is None:
+                return default
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return default
+        
+        for doc in daily_release_docs:
+            dt = doc.get('datetime')
+            if not dt: continue
+            
+            if dt.hour == 0 and dt.minute == 0:
+                business_date = (dt.date() - timedelta(days=1)).strftime("%Y-%m-%d")
+            else:
+                business_date = dt.date().strftime("%Y-%m-%d")
+            
+            # 单位: MW * 0.25h = MWh, 再 /1000 = GWh
+            factor = 0.25 / 1000
+            daily_stats[business_date]["load"] += safe_float(doc.get('system_load_forecast')) * factor
+            daily_stats[business_date]["wind"] += safe_float(doc.get('wind_forecast')) * factor
+            daily_stats[business_date]["solar"] += safe_float(doc.get('pv_forecast')) * factor
+            daily_stats[business_date]["tieline"] += safe_float(doc.get('tieline_plan')) * factor
+            daily_stats[business_date]["nonmarket"] += safe_float(doc.get('nonmarket_unit_forecast')) * factor
+        
+        # 4. 格式化输出
+        daily_data = []
+        sorted_dates = sorted(daily_stats.keys())
+        
+        for date_str in sorted_dates:
+            stat = daily_stats[date_str]
+            if stat["count"] == 0:
+                continue
+                
+            avg_price = stat["price_sum"] / stat["price_vol"] if stat["price_vol"] > 0 else 0
+            renewable = stat["wind"] + stat["solar"]
+            # 竞价空间 = 负荷 - 风电 - 光伏 - 非市场化 - 联络线
+            bidding_space = stat["load"] - stat["wind"] - stat["solar"] - stat["nonmarket"] - stat["tieline"]
+            
+            # 安全的 round 函数，处理 NaN 和 Inf
+            import math
+            def safe_round(val, decimals=2):
+                if val is None or math.isnan(val) or math.isinf(val):
+                    return 0.0
+                return round(val, decimals)
+            
+            daily_data.append({
+                "date": date_str,
+                "avg_price": safe_round(avg_price, 2),
+                "total_load": safe_round(stat["load"], 2),
+                "total_renewable": safe_round(renewable, 2),
+                "total_wind": safe_round(stat["wind"], 2),
+                "total_solar": safe_round(stat["solar"], 2),
+                "total_hydro": safe_round(stat["hydro"], 2),
+                "total_tieline": safe_round(stat["tieline"], 2),
+                "total_bidding_space": safe_round(bidding_space, 2),
+                "total_thermal": safe_round(stat["thermal"], 2)
+            })
+        
+        # 5. 计算相关性系数（包含所有因素）
+        correlations = self._calculate_correlations(daily_data, "avg_price", [
+            ("total_load", "price_vs_load"),
+            ("total_renewable", "price_vs_renewable"),
+            ("total_hydro", "price_vs_hydro"),
+            ("total_tieline", "price_vs_tieline"),
+            ("total_bidding_space", "price_vs_bidding_space"),
+            ("total_thermal", "price_vs_thermal")
+        ])
+        
+        return {
+            "daily_data": daily_data,
+            "correlations": correlations
+        }
+
+    def get_rt_factor_trend(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
+        """
+        需求8: 实时趋势分析 - 获取实时价格与运行因素的日级趋势数据
+        
+        数据来源:
+        - real_time_spot_price: 实时价格
+        - actual_operation: 实际系统负荷、联络线潮流
+        - real_time_generation: 实际发电出力
+        
+        Returns:
+            Dict 包含 daily_data 和 correlations
+        """
+        # 1. 查询实时价格数据
+        query = {"datetime": {"$gt": start_date, "$lte": end_date}}
+        rt_docs = list(self.rt_collection.find(query))
+        
+        # 2. 查询实际运行数据
+        actual_docs = list(self.db['actual_operation'].find(query, {
+            '_id': 0, 'datetime': 1, 'system_load': 1, 'tieline_flow': 1
+        }))
+        
+        # 3. 查询实时发电数据
+        gen_docs = list(self.db['real_time_generation'].find(query, {
+            '_id': 0, 'datetime': 1,
+            'thermal_generation': 1, 'hydro_generation': 1,
+            'wind_generation': 1, 'solar_generation': 1,
+            'pumped_storage_generation': 1
+        }))
+        
+        # 4. 按日期聚合
+        daily_stats = defaultdict(lambda: {
+            "price_sum": 0, "price_vol": 0, "count": 0,
+            "load": 0, "tieline": 0,
+            "thermal": 0, "hydro": 0, "wind": 0, "solar": 0, "storage": 0
+        })
+        
+        # 处理实时价格
+        for doc in rt_docs:
+            dt = doc.get('datetime')
+            if not dt: continue
+            
+            if dt.hour == 0 and dt.minute == 0:
+                business_date = (dt.date() - timedelta(days=1)).strftime("%Y-%m-%d")
+            else:
+                business_date = dt.date().strftime("%Y-%m-%d")
+            
+            price = doc.get('avg_clearing_price')
+            vol = doc.get('total_clearing_power', 0) or 0
+            
+            if price is not None:
+                daily_stats[business_date]["price_sum"] += price * vol
+                daily_stats[business_date]["price_vol"] += vol
+                daily_stats[business_date]["count"] += 1
+        
+        # 处理实际运行数据
+        def safe_float(val, default=0.0):
+            """安全转换为浮点数"""
+            if val is None:
+                return default
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return default
+        
+        factor = 0.25 / 1000  # MW * 0.25h / 1000 = GWh
+        for doc in actual_docs:
+            dt = doc.get('datetime')
+            if not dt: continue
+            
+            if dt.hour == 0 and dt.minute == 0:
+                business_date = (dt.date() - timedelta(days=1)).strftime("%Y-%m-%d")
+            else:
+                business_date = dt.date().strftime("%Y-%m-%d")
+            
+            daily_stats[business_date]["load"] += safe_float(doc.get('system_load')) * factor
+            daily_stats[business_date]["tieline"] += safe_float(doc.get('tieline_flow')) * factor
+        
+        # 处理实时发电数据
+        for doc in gen_docs:
+            dt = doc.get('datetime')
+            if not dt: continue
+            
+            if dt.hour == 0 and dt.minute == 0:
+                business_date = (dt.date() - timedelta(days=1)).strftime("%Y-%m-%d")
+            else:
+                business_date = dt.date().strftime("%Y-%m-%d")
+            
+            daily_stats[business_date]["thermal"] += safe_float(doc.get('thermal_generation')) * factor
+            daily_stats[business_date]["hydro"] += safe_float(doc.get('hydro_generation')) * factor
+            daily_stats[business_date]["wind"] += safe_float(doc.get('wind_generation')) * factor
+            daily_stats[business_date]["solar"] += safe_float(doc.get('solar_generation')) * factor
+            daily_stats[business_date]["storage"] += safe_float(doc.get('pumped_storage_generation')) * factor
+        
+        # 5. 格式化输出
+        daily_data = []
+        sorted_dates = sorted(daily_stats.keys())
+        
+        for date_str in sorted_dates:
+            stat = daily_stats[date_str]
+            if stat["count"] == 0:
+                continue
+                
+            avg_price = stat["price_sum"] / stat["price_vol"] if stat["price_vol"] > 0 else 0
+            renewable = stat["wind"] + stat["solar"]
+            # 竞价空间 = 负荷 - 新能源 - 水电 - 储能（实时市场）
+            bidding_space = stat["load"] - renewable - stat["hydro"] - stat["storage"]
+            
+            # 安全的 round 函数，处理 NaN 和 Inf
+            import math
+            def safe_round(val, decimals=2):
+                if val is None or math.isnan(val) or math.isinf(val):
+                    return 0.0
+                return round(val, decimals)
+            
+            daily_data.append({
+                "date": date_str,
+                "avg_price": safe_round(avg_price, 2),
+                "total_load": safe_round(stat["load"], 2),
+                "total_renewable": safe_round(renewable, 2),
+                "total_wind": safe_round(stat["wind"], 2),
+                "total_solar": safe_round(stat["solar"], 2),
+                "total_hydro": safe_round(stat["hydro"], 2),
+                "total_thermal": safe_round(stat["thermal"], 2),
+                "total_tieline": safe_round(stat["tieline"], 2),
+                "total_storage": safe_round(stat["storage"], 2),
+                "total_bidding_space": safe_round(bidding_space, 2)
+            })
+        
+        # 6. 计算相关性系数（包含所有因素）
+        correlations = self._calculate_correlations(daily_data, "avg_price", [
+            ("total_load", "price_vs_load"),
+            ("total_renewable", "price_vs_renewable"),
+            ("total_hydro", "price_vs_hydro"),
+            ("total_thermal", "price_vs_thermal"),
+            ("total_tieline", "price_vs_tieline"),
+            ("total_storage", "price_vs_storage"),
+            ("total_bidding_space", "price_vs_bidding_space")
+        ])
+        
+        return {
+            "daily_data": daily_data,
+            "correlations": correlations
+        }
+
+    def _calculate_correlations(self, data: List[Dict], price_key: str, 
+                                 factor_pairs: List[Tuple[str, str]]) -> Dict[str, float]:
+        """计算价格与各因素的皮尔逊相关系数"""
+        if len(data) < 3:
+            return {name: 0.0 for _, name in factor_pairs}
+        
+        prices = [d[price_key] for d in data]
+        correlations = {}
+        
+        for factor_key, corr_name in factor_pairs:
+            factors = [d.get(factor_key, 0) for d in data]
+            
+            try:
+                # 简化的皮尔逊相关系数计算
+                n = len(prices)
+                sum_x = sum(prices)
+                sum_y = sum(factors)
+                sum_xy = sum(p * f for p, f in zip(prices, factors))
+                sum_x2 = sum(p * p for p in prices)
+                sum_y2 = sum(f * f for f in factors)
+                
+                numerator = n * sum_xy - sum_x * sum_y
+                denominator = ((n * sum_x2 - sum_x ** 2) * (n * sum_y2 - sum_y ** 2)) ** 0.5
+                
+                if denominator == 0:
+                    correlations[corr_name] = 0.0
+                else:
+                    result = numerator / denominator
+                    # 检查 NaN 和 Inf，防止 JSON 序列化错误
+                    import math
+                    if math.isnan(result) or math.isinf(result):
+                        correlations[corr_name] = 0.0
+                    else:
+                        correlations[corr_name] = round(result, 3)
+            except Exception:
+                correlations[corr_name] = 0.0
+        
+        return correlations
+
     # ========== 私有辅助方法 ==========
 
     def _get_tou_rules(self, query_date: datetime) -> Dict[str, str]:

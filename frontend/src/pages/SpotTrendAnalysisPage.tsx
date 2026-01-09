@@ -5,11 +5,13 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { zhCN } from 'date-fns/locale';
 import { subDays, startOfMonth, endOfMonth, format } from 'date-fns';
 import TimelineIcon from '@mui/icons-material/Timeline';
-import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
-import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import SpeedIcon from '@mui/icons-material/Speed';
 import { PriceTrendTab } from '../components/trend-analysis/PriceTrendTab';
 import { TimeSlotAnalysisTab } from '../components/trend-analysis/TimeSlotAnalysisTab';
+import { DayAheadTrendTab } from '../components/trend-analysis/DayAheadTrendTab';
+import { RealTimeTrendTab } from '../components/trend-analysis/RealTimeTrendTab';
 import { trendAnalysisApi } from '../api/trendAnalysis';
 
 interface TabPanelProps {
@@ -65,6 +67,16 @@ export const SpotTrendAnalysisPage: React.FC = () => {
     const [timeSlotData, setTimeSlotData] = useState<CachedData<any>>({ data: null, dateRange: '' });
     const [timeSlotLoading, setTimeSlotLoading] = useState(false);
     const [timeSlotError, setTimeSlotError] = useState<string | null>(null);
+
+    // 日前趋势数据
+    const [daFactorData, setDaFactorData] = useState<CachedData<any>>({ data: null, dateRange: '' });
+    const [daFactorLoading, setDaFactorLoading] = useState(false);
+    const [daFactorError, setDaFactorError] = useState<string | null>(null);
+
+    // 实时趋势数据
+    const [rtFactorData, setRtFactorData] = useState<CachedData<any>>({ data: null, dateRange: '' });
+    const [rtFactorLoading, setRtFactorLoading] = useState(false);
+    const [rtFactorError, setRtFactorError] = useState<string | null>(null);
 
     // 获取当前日期区间标识
     const getCurrentDateRange = (): string => {
@@ -126,6 +138,48 @@ export const SpotTrendAnalysisPage: React.FC = () => {
         }
     };
 
+    // 加载日前趋势数据
+    const fetchDaFactorData = async () => {
+        if (!startDate || !endDate) return;
+        const dateRange = getCurrentDateRange();
+        if (daFactorData.data && daFactorData.dateRange === dateRange) return;
+
+        setDaFactorLoading(true);
+        setDaFactorError(null);
+        try {
+            const start = format(startDate, 'yyyy-MM-dd');
+            const end = format(endDate, 'yyyy-MM-dd');
+            const response = await trendAnalysisApi.fetchDaFactorTrend({ start_date: start, end_date: end });
+            setDaFactorData({ data: response.data, dateRange });
+        } catch (err: any) {
+            console.error('Error fetching DA factor trend:', err);
+            setDaFactorError(err.response?.data?.detail || '获取数据失败');
+        } finally {
+            setDaFactorLoading(false);
+        }
+    };
+
+    // 加载实时趋势数据
+    const fetchRtFactorData = async () => {
+        if (!startDate || !endDate) return;
+        const dateRange = getCurrentDateRange();
+        if (rtFactorData.data && rtFactorData.dateRange === dateRange) return;
+
+        setRtFactorLoading(true);
+        setRtFactorError(null);
+        try {
+            const start = format(startDate, 'yyyy-MM-dd');
+            const end = format(endDate, 'yyyy-MM-dd');
+            const response = await trendAnalysisApi.fetchRtFactorTrend({ start_date: start, end_date: end });
+            setRtFactorData({ data: response.data, dateRange });
+        } catch (err: any) {
+            console.error('Error fetching RT factor trend:', err);
+            setRtFactorError(err.response?.data?.detail || '获取数据失败');
+        } finally {
+            setRtFactorLoading(false);
+        }
+    };
+
     // 日期变化时清空缓存
     useEffect(() => {
         const newDateRange = getCurrentDateRange();
@@ -137,6 +191,12 @@ export const SpotTrendAnalysisPage: React.FC = () => {
         if (timeSlotData.dateRange && timeSlotData.dateRange !== newDateRange) {
             setTimeSlotData({ data: null, dateRange: '' });
         }
+        if (daFactorData.dateRange && daFactorData.dateRange !== newDateRange) {
+            setDaFactorData({ data: null, dateRange: '' });
+        }
+        if (rtFactorData.dateRange && rtFactorData.dateRange !== newDateRange) {
+            setRtFactorData({ data: null, dateRange: '' });
+        }
     }, [startDate, endDate]);
 
     // 根据当前 Tab 懒加载数据
@@ -145,6 +205,10 @@ export const SpotTrendAnalysisPage: React.FC = () => {
             fetchTrendData();
         } else if (tabIndex === 1) {
             fetchTimeSlotData();
+        } else if (tabIndex === 2) {
+            fetchDaFactorData();
+        } else if (tabIndex === 3) {
+            fetchRtFactorData();
         }
     }, [tabIndex, startDate, endDate]);
 
@@ -180,8 +244,8 @@ export const SpotTrendAnalysisPage: React.FC = () => {
     const tabsConfig = [
         { icon: <TimelineIcon />, label: '价格走势', mobileLabel: '走势' },
         { icon: <ShowChartIcon />, label: '时段分析', mobileLabel: '时段' },
-        { icon: <CalendarMonthIcon />, label: '周内特性', mobileLabel: '周内' },
-        { icon: <CompareArrowsIcon />, label: '储能套利', mobileLabel: '套利' },
+        { icon: <TrendingUpIcon />, label: '日前趋势', mobileLabel: '日前' },
+        { icon: <SpeedIcon />, label: '实时趋势', mobileLabel: '实时' },
     ];
 
     return (
@@ -347,10 +411,18 @@ export const SpotTrendAnalysisPage: React.FC = () => {
                         />
                     </TabPanel>
                     <TabPanel value={tabIndex} index={2}>
-                        <Box sx={{ p: 3, textAlign: 'center' }}>周内特性分析 (开发中)</Box>
+                        <DayAheadTrendTab
+                            data={daFactorData.data}
+                            loading={daFactorLoading}
+                            error={daFactorError}
+                        />
                     </TabPanel>
                     <TabPanel value={tabIndex} index={3}>
-                        <Box sx={{ p: 3, textAlign: 'center' }}>储能套利分析 (开发中)</Box>
+                        <RealTimeTrendTab
+                            data={rtFactorData.data}
+                            loading={rtFactorLoading}
+                            error={rtFactorError}
+                        />
                     </TabPanel>
                 </Box>
             </Box>

@@ -34,6 +34,16 @@ export const trendAnalysisApi = {
     // 6. 时段统计分析
     fetchTimeSlotStats: (params: PriceTrendParams) => {
         return apiClient.get('/api/v1/trend-analysis/timeslot-stats', { params });
+    },
+
+    // 7. 日前因素趋势分析
+    fetchDaFactorTrend: (params: PriceTrendParams) => {
+        return apiClient.get('/api/v1/trend-analysis/da-factor-trend', { params });
+    },
+
+    // 8. 实时因素趋势分析
+    fetchRtFactorTrend: (params: PriceTrendParams) => {
+        return apiClient.get('/api/v1/trend-analysis/rt-factor-trend', { params });
     }
 };
 

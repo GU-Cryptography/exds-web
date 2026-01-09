@@ -153,3 +153,45 @@ def get_timeslot_stats(
         logger.error(f"Error in get_timeslot_stats: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
+@router.get(
+    "/da-factor-trend",
+    summary="获取日前因素趋势数据",
+    description="获取日前价格与供需因素（负荷、新能源、水电、联络线等）的日级趋势数据及相关性系数"
+)
+def get_da_factor_trend(
+    start_date: str = Query(..., description="开始日期 YYYY-MM-DD"),
+    end_date: str = Query(..., description="结束日期 YYYY-MM-DD")
+):
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        
+        service = get_service()
+        return service.get_da_factor_trend(start, end)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="日期格式无效")
+    except Exception as e:
+        logger.error(f"Error in get_da_factor_trend: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@router.get(
+    "/rt-factor-trend",
+    summary="获取实时因素趋势数据",
+    description="获取实时价格与运行因素（负荷、火电、水电、新能源等）的日级趋势数据及相关性系数"
+)
+def get_rt_factor_trend(
+    start_date: str = Query(..., description="开始日期 YYYY-MM-DD"),
+    end_date: str = Query(..., description="结束日期 YYYY-MM-DD")
+):
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        
+        service = get_service()
+        return service.get_rt_factor_trend(start, end)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="日期格式无效")
+    except Exception as e:
+        logger.error(f"Error in get_rt_factor_trend: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
