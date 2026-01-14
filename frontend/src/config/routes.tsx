@@ -13,6 +13,7 @@ import { ContractPriceDailyPage } from '../pages/ContractPriceDailyPage';
 import { ContractPriceTrendPage } from '../pages/ContractPriceTrendPage';
 import { RpaMonitorPage } from '../pages/RpaMonitorPage';
 import { DayAheadPriceForecastPage } from '../pages/DayAheadPriceForecastPage';
+import { WeatherDataPage } from '../pages/WeatherDataPage';
 
 // 路由配置接口
 export interface RouteConfig {
@@ -69,6 +70,7 @@ export const routeConfigs: RouteConfig[] = [
     // 基础数据
     { path: '/basic-data/grid-price', title: '国网代理购电', component: GridAgencyPricePage },
     { path: '/basic-data/tou-definition', title: '时段电价分布', component: TouRulesPage },
+    { path: '/basic-data/weather-data', title: '天气预测数据', component: WeatherDataPage },
     { path: '/basic-data/retail-packages', title: '零售套餐管理', component: RetailPackagePage },
     { path: '/basic-data/load-validation', title: '负荷数据校验', component: PlaceholderPage },
 

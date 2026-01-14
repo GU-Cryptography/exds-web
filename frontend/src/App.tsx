@@ -27,6 +27,7 @@ import { ContractPriceDailyPage } from './pages/ContractPriceDailyPage';
 import { ContractPriceTrendPage } from './pages/ContractPriceTrendPage';
 import { RpaMonitorPage } from './pages/RpaMonitorPage';
 import { DayAheadPriceForecastPage } from './pages/DayAheadPriceForecastPage';
+import { WeatherDataPage } from './pages/WeatherDataPage';
 import { TabProvider } from './contexts/TabContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { DesktopTabLayout } from './layouts/DesktopTabLayout';
@@ -109,6 +110,7 @@ const ResponsiveLayout: React.FC = () => {
                     <Route path="basic-data/retail-packages/view/:packageId" element={<RetailPackagePage />} />
                     <Route path="basic-data/retail-packages/edit/:packageId" element={<RetailPackagePage />} />
                     <Route path="basic-data/retail-packages/copy/:packageId" element={<RetailPackagePage />} />
+                    <Route path="basic-data/weather-data" element={<WeatherDataPage />} />
                     <Route path="basic-data/load-validation" element={<PlaceholderPage />} />
 
                     {/* 系统管理 */}

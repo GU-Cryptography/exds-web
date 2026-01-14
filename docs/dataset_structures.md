@@ -121,46 +121,15 @@
 
 ---
 
-## 5. `weather_data` - 天气数据
 
-该集合存储从 Open-Meteo API 获取的历史和预测天气数据，并经过处理以匹配业务需求。
-
-- **数据来源**: `rpa.pipelines.download_weather`
-- **更新频率**: 每日（可配置）
-
-### 5.1. 字段说明
-
-| 字段名 | 数据类型 | 描述 |
-| :--- | :--- | :--- |
-| `target_timestamp` | ISODate | **[复合主键]** 数据点对应的精确日期和时间。 |
-| `location_id` | String | **[复合主键]** 地点名称，与 `customer` 集合中的 `district` 对应。 |
-| `is_forecast` | Boolean | 标记此条记录是预测数据 (`true`) 还是历史数据 (`false`)。 |
-| `creation_timestamp` | ISODate | 记录的创建或更新时间戳（UTC）。对于历史数据，此值等于 `target_timestamp`。 |
-| `apparent_temperature` | Number | 体感温度 (°C)。 |
-| `shortwave_radiation` | Number | 短波辐射 (W/m²)。 |
-| `wind_speed_10m` | Number | 10米高空风速 (m/s)。 |
-| `relative_humidity_2m` | Number | 2米高相对湿度 (%)。 |
-| `precipitation` | Number | 降水量 (mm)。 |
-| `cloud_cover` | Number | 云量 (%)。 |
-| `wind_speed_100m` | Number | 100米高空风速 (m/s)。 |
-
-### 5.2. 索引
-
-- `(location_id: 1, target_timestamp: 1)`: 唯一复合索引，确保每个地点在每个时间点的数据唯一性。
-- `(location_id: 1, is_forecast: 1, target_timestamp: -1)`: 普通复合索引，用于快速查询某个地点的最新历史或预测数据。
-
----
-
-附录：
-
-## 1. `real_time_spot_price` - 实时现货价格
+## 5. `real_time_spot_price` - 实时现货价格
 
 该集合存储实时的现货市场出清价格和电量信息。
 
 - **数据来源**: `rpa.pipelines.spot_price`
 - **更新频率**: 每日
 
-### 1.1. 字段说明
+### 5.1. 字段说明
 
 | 字段名 | 数据类型 | 描述 |
 | :--- | :--- | :--- |
@@ -176,14 +145,14 @@
 | `battery_storage_clearing_power` | Number | 储能出清电量 (MWh)，精度4位小数。 |
 | `avg_clearing_price` | Number | 出清均价 (元/MWh)，精度2位小数。 |
 
-### 1.2. 索引
+### 5.2. 索引
 
 - `(datetime: 1)`: 唯一索引，确保每个时间点的数据唯一。
 - `(date_str: 1, time_str: 1)`: 普通复合索引，用于按日期和时间点查询。
 
 ---
 
-## 2. `day_ahead_spot_price` - 日前现货价格
+## 6. `day_ahead_spot_price` - 日前现货价格
 
 该集合存储日前的现货市场出清价格和电量信息，其结构与 `real_time_spot_price` 完全相同。
 
@@ -194,7 +163,7 @@
 
 ---
 
-## 6. `fuel_futures_data` - 燃料期货数据
+## 7. `fuel_futures_data` - 燃料期货数据
 
 该集合存储燃料期货（动力煤、焦煤、原油）的日频价格数据，用于辅助电力成本预测。
 
@@ -202,7 +171,7 @@
 - **更新频率**: 每日
 - **数据粒度**: 日频
 
-### 6.1. 字段说明
+### 7.1. 字段说明
 
 | 字段名 | 数据类型 | 描述 |
 | :--- | :--- | :--- |
@@ -220,11 +189,10 @@
 | `created_at` | ISODate | 记录创建时间。 |
 | `updated_at` | ISODate | 记录更新时间。 |
 
-### 6.2. 索引
+### 7.2. 索引
 
 - `(date: 1)`: 唯一索引，确保每天只有一条记录。
 
-## 输出数据集合详细说明
 
 ## 8. `price_forecast_results` - 价格预测结果
 
@@ -457,7 +425,194 @@ db.forecast_accuracy_daily.createIndex({ "customer_id": 1, "target_date": -1 })
 }
 ```
 
+## 10. 天气数据 (双集合架构 v2.2)
+
+天气数据采用**双集合架构**，彻底分离实况与预测数据，避免数据泄露。
+
+**业务价值**:
+- 影子模型（负荷、风电、光伏预测）的核心输入特征
+- 支持 **D-1 ~ D+5** 的天气预测数据（每个发布日168条记录）
+- 提供历史实况用于误差分析和模型训练
+
+- **数据来源**: Open-Meteo API (Archive API + Forecast API + Previous Runs API)
+- **更新频率**: 每日
+- **数据粒度**: 1小时（需要插值到15分钟）
+- **覆盖范围**: 江西省11个地市
+- **预测范围**: **D-1到D+5** (D-2日发布的预测覆盖未来7天，共168条)
+- **数据起始日期**:
+  - 实况: 2023-08-01
+  - 预测: 2024-02-15 (Previous Runs API起始)
+
+### 10.1 集合定义
+
+| 集合名称 | 用途 | 唯一键 | 数据来源 |
+| :--- | :--- | :--- | :--- |
+| `weather_actuals` | 历史实况 | `(location_id, timestamp)` | Archive API |
+| `weather_forecasts` | 历史预测版本 | `(location_id, forecast_date, target_timestamp)` | Forecast API / Previous Runs API |
+| `weather_locations` | 站点配置管理 | `location_id` | 自定义配置 |
+
+**关键设计**:
+- **时间维度分离**: actuals用`timestamp`（观测时间），forecasts用`forecast_date`（发布日） + `target_timestamp`（预测目标）
+- **防止数据泄露**: 特征工程时根据`forecast_date`筛选，确保只用发布日之前的数据
+- **站点管理**: 使用 `weather_locations` 集中管理需要下载和处理的站点，通过 `enabled` 字段动态控制
+
+### 10.2 `weather_locations` 字段说明
+
+| 字段名 | 数据类型 | 描述 | 用途 |
+| :--- | :--- | :--- | :--- |
+| `location_id` | String | **[主键]** 站点唯一标识（如 "nanchang"） | 配置索引 |
+| `name` | String | 站点中文名称 | 显示用途 |
+| `latitude` | Number | 纬度 (WGS84) | API请求参数 |
+| `longitude` | Number | 经度 (WGS84) | API请求参数 |
+| `enabled` | Boolean | 是否启用 | **下载控制开关** |
+
+### 10.3 `weather_actuals` 字段说明
+
+| 字段名 | 数据类型 | 描述 | 用途 |
+| :--- | :--- | :--- | :--- |
+| `location_id` | String | **[复合主键]** 城市ID (nanchang, ganzhou等11个) | 区分地点 |
+| `timestamp` | ISODate | **[复合主键]** 观测时间（小时粒度） | 时间索引 |
+| `apparent_temperature` | Number | 体感温度 (°C) | 影子模型特征 |
+| `shortwave_radiation` | Number | 短波辐射 (W/m²) | **光伏预测关键** |
+| `wind_speed_10m` | Number | 10米风速 (km/h) | 风电特征 |
+| `wind_speed_100m` | Number | 100米风速 (km/h) | **风电预测关键** |
+| `relative_humidity_2m` | Number | 相对湿度 (%) | 辅助特征 |
+| `precipitation` | Number | 降水量 (mm) | 辅助特征 |
+| `cloud_cover` | Number | 云量 (%) | **光伏预测关键** |
+| `creation_timestamp` | ISODate | 数据写入时间 | 数据管理 |
+
+### 10.4 `weather_forecasts` 字段说明
+
+| 字段名 | 数据类型 | 描述 | 用途 |
+| :--- | :--- | :--- | :--- |
+| `location_id` | String | **[复合主键]** 城市ID | 区分地点 |
+| `forecast_date` | ISODate | **[复合主键]** 预测发布日期（无时分秒） | **防泄露关键** |
+| `target_timestamp` | ISODate | **[复合主键]** 预测目标时间（小时粒度） | 时间索引 |
+| `apparent_temperature` | Number | 体感温度预测 (°C) | 影子模型特征 |
+| `shortwave_radiation` | Number | 短波辐射预测 (W/m²) | 光伏预测 |
+| `wind_speed_10m` | Number | 10米风速预测 (km/h) | 风电特征 |
+| `wind_speed_100m` | Number | 100米风速预测 (km/h) | 风电预测 |
+| `relative_humidity_2m` | Number | 相对湿度预测 (%) | 辅助特征 |
+| `precipitation` | Number | 降水量预测 (mm) | 辅助特征 |
+| `cloud_cover` | Number | 云量预测 (%) | 光伏预测 |
+| `creation_timestamp` | ISODate | 数据写入时间 | 数据管理 |
+
+**预测版本范围**:
+- previous_day1~7: 共7个版本（1到7天前发布的预测）
+- **关键理解**: previous_dayN表示target_timestamp这个时间点在N天前发布的预测
+  - 例如: target_timestamp=2025-12-01的previous_day3 = 在2025-11-28发布的预测
+- **D-2日(如11-28)发布的预测**:
+  - 使用previous_day1~5 获取11-29到12-03的预测（覆盖D-1到D+5）
+  - 每个发布日包含7天×24小时=168条记录
+- Day 1-5: 数据质量较好
+- Day 6-7: 质量下降（官方警告）
+- Day 8+: API不提供
+
+### 10.5 索引配置
+
+```javascript
+// weather_actuals
+db.weather_actuals.createIndex({
+    "location_id": 1,
+    "timestamp": 1
+}, { unique: true })
+
+// weather_forecasts
+db.weather_forecasts.createIndex({
+    "location_id": 1,
+    "forecast_date": 1,
+    "target_timestamp": 1
+}, { unique: true })
+
+db.weather_forecasts.createIndex({ "forecast_date": 1 })
+db.weather_forecasts.createIndex({ "location_id": 1, "target_timestamp": 1 })
+```
+
+### 10.6 数据示例
+
+**weather_actuals** (历史实况):
+```json
+{
+    "location_id": "nanchang",
+    "timestamp": ISODate("2025-11-30T01:00:00Z"),
+    "apparent_temperature": 12.5,
+    "shortwave_radiation": 0.0,
+    "wind_speed_10m": 8.3,
+    "wind_speed_100m": 15.2,
+    "relative_humidity_2m": 75.0,
+    "precipitation": 0.0,
+    "cloud_cover": 60.0,
+    "creation_timestamp": ISODate("2025-12-01T08:00:00Z")
+}
+```
+
+**weather_forecasts** (D-2日发布的D-1日预测):
+```json
+{
+    "location_id": "nanchang",
+    "forecast_date": ISODate("2025-11-28T00:00:00Z"),  // D-2日(11-28)发布
+    "target_timestamp": ISODate("2025-11-29T12:00:00Z"), // 预测D-1日(11-29)12点
+    "apparent_temperature": 15.2,
+    "shortwave_radiation": 350.5,
+    "wind_speed_10m": 10.1,
+    "wind_speed_100m": 18.3,
+    "relative_humidity_2m": 65.0,
+    "precipitation": 0.0,
+    "cloud_cover": 40.0,
+    "creation_timestamp": ISODate("2025-11-29T08:00:00Z")
+}
+```
+
+**说明**: D-2日(11-28)发布的预测覆盖D-1到D+5(11-29到12-03)，共7天168条记录
+
+### 10.7 数据可用性
+
+**在 D-2 日预测时**:
+- ✅ **可用**: D-1 ~ D+5 的天气预测（`weather_forecasts`, forecast_date=D-2, 共168条）
+- ✅ **可用**: D-2 日及之前的历史实况（`weather_actuals`）
+- ℹ️ **说明**: D-2日发布时，预测覆盖"未来7天"，即D-1, D, D+1, D+2, D+3, D+4, D+5
+
+**查询示例**:
+```python
+from datetime import datetime, timedelta
+
+# 查询D-2日发布的D日预测
+d_minus_2 = datetime(2025, 11, 28)
+target_day = datetime(2025, 11, 30)
+
+forecast_data = db.weather_forecasts.find({
+    'location_id': 'nanchang',
+    'forecast_date': d_minus_2.replace(hour=0, minute=0, second=0),
+    'target_timestamp': {
+        '$gte': target_day.replace(hour=0, minute=0),
+        '$lt': (target_day + timedelta(days=1)).replace(hour=0, minute=0)
+    }
+}).sort('target_timestamp', 1)
+
+# 查询D-3日的历史实况
+d_minus_3 = datetime(2025, 11, 27)
+actual_data = db.weather_actuals.find({
+    'location_id': 'nanchang',
+    'timestamp': {
+        '$gte': d_minus_3.replace(hour=0, minute=0),
+        '$lt': (d_minus_3 + timedelta(days=1)).replace(hour=0, minute=0)
+    }
+}).sort('timestamp', 1)
+```
+
+### 10.8 迁移说明
+
+**⚠️ 重要**: 旧的单集合 `weather_data` 已废弃，请使用新的双集合架构。
+
+**旧集合字段映射**:
+- `weather_data.is_forecast=false` → `weather_actuals`
+- `weather_data.is_forecast=true` → `weather_forecasts`
+- `weather_data.target_timestamp` → actuals用`timestamp`，forecasts用`target_timestamp`
+- 新增: `forecast_date`字段用于标识预测发布日
+
 ---
+
+
 
 
 
