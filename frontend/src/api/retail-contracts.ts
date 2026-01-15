@@ -9,6 +9,7 @@ export interface Contract {
   _id?: string; // 保持向后兼容
   contract_name: string;
   package_name: string;
+  package_status?: string;
   package_id: string;
   customer_name: string;
   customer_id: string;
@@ -74,6 +75,9 @@ export interface ContractListParams {
   status?: 'pending' | 'active' | 'expired' | 'all';
   purchase_start_month?: string;
   purchase_end_month?: string;
+  year?: number;
+  sort_field?: string;
+  sort_order?: 'asc' | 'desc';
   page?: number;
   page_size?: number;
 }
@@ -111,6 +115,13 @@ export interface ExportParams {
  */
 export const getContracts = (params?: ContractListParams) => {
   return apiClient.get<ContractListResponse>('/api/v1/retail-contracts', { params });
+};
+
+/**
+ * 获取合同年份列表
+ */
+export const getContractYears = () => {
+  return apiClient.get<number[]>('/api/v1/retail-contracts/years');
 };
 
 /**

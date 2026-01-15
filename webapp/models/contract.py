@@ -35,13 +35,6 @@ class BaseMongoModel(BaseModel):
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
 
 
-# 套餐快照模型
-class PackageSnapshot(BaseModel):
-    """套餐内容快照（创建合同时保存）"""
-    package_type: Optional[str] = Field(None, description="套餐类型")
-    model_code: Optional[str] = Field(None, description="定价模型代码")
-    is_green_power: Optional[bool] = Field(None, description="是否绿电")
-    pricing_config: Optional[dict] = Field(None, description="定价配置详情")
 
 
 # 合同创建模型
@@ -55,7 +48,7 @@ class ContractCreate(BaseModel):
     purchasing_electricity_quantity: float = Field(..., gt=0, description="购买电量(kWh)")
     purchase_start_month: datetime = Field(..., description="购电开始月份")
     purchase_end_month: datetime = Field(..., description="购电结束月份")
-    package_snapshot: Optional[PackageSnapshot] = Field(None, description="套餐内容快照")
+
 
     @field_validator('purchase_end_month')
     @classmethod
@@ -84,6 +77,7 @@ class ContractListItem(BaseModel):
     id: str = Field(..., description="合同ID")
     contract_name: str = Field(..., description="合同名称")
     package_name: str = Field(..., description="套餐名称")
+    package_status: Optional[str] = Field(None, description="套餐状态")
     customer_name: str = Field(..., description="客户名称")
     purchasing_electricity_quantity: float = Field(..., description="购买电量(kWh)")
     purchase_start_month: datetime = Field(..., description="购电开始月份")

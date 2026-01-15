@@ -249,51 +249,24 @@ class DataValidator:
         errors = []
         row_number = row_data['row_number']
 
-        # 校验套餐存在性
-        if row_data['套餐']:
-            package = self.db.retail_packages.find_one({
-                "package_name": {"$regex": row_data['套餐'], "$options": "i"},
-                "status": "active"
-            })
-
-            if not package:
-                # 尝试精确匹配
-                exact_package = self.db.retail_packages.find_one({
-                    "package_name": row_data['套餐'],
-                    "status": "active"
-                })
-
-                if not exact_package:
-                    errors.append({
-                        'row': row_number,
-                        'field': '套餐',
-                        'value': row_data['套餐'],
-                        'message': '套餐不存在或未生效',
-                        'suggestion': '请检查套餐名称是否正确，或联系管理员添加该套餐'
-                    })
-
         # 校验客户存在性
         if row_data['购买用户']:
-            customer = self.db.customers.find_one({
-                "user_name": row_data['购买用户'],
-                "status": "active"
+            # MODIFIED: 使用 customer_archives 集合，仅通过 user_name 精确查找
+            customer = self.db.customer_archives.find_one({
+                "user_name": str(row_data['购买用户']).strip()
             })
 
             if not customer:
-                # 尝试使用company_name字段
-                customer = self.db.customers.find_one({
-                    "company_name": row_data['购买用户'],
-                    "status": "active"
+                errors.append({
+                    'row': row_number,
+                    'field': '购买用户',
+                    'value': row_data['购买用户'],
+                    'message': '客户不存在',
+                    'suggestion': '请检查客户名称是否正确'
                 })
 
-                if not customer:
-                    errors.append({
-                        'row': row_number,
-                        'field': '购买用户',
-                        'value': row_data['购买用户'],
-                        'message': '客户不存在或状态非正常',
-                        'suggestion': '请检查客户名称是否正确，或联系管理员激活该客户'
-                    })
+        # MODIFIED: 移除套餐存在性校验，因为新逻辑允许自动创建
+        # if row_data['套餐']: ... (Removed)
 
         return errors
 
@@ -323,6 +296,16 @@ class DataValidator:
                     'value': f"{row_data['购买时间-开始']} ~ {row_data['购买时间-结束']}",
                     'message': '购电结束月份不能早于开始月份',
                     'suggestion': '请确保结束月份大于或等于开始月份'
+                })
+
+            # 校验年份一致性（不允许跨年）
+            if end_date.year != start_date.year:
+                errors.append({
+                    'row': row_number,
+                    'field': '购电月份',
+                    'value': f"{row_data['购买时间-开始']} ~ {row_data['购买时间-结束']}",
+                    'message': '合同不允许跨年',
+                    'suggestion': f'请确保开始年份({start_date.year})与结束年份({end_date.year})一致'
                 })
 
             # 检查时间跨度是否合理（不超过5年）
@@ -420,30 +403,41 @@ class ContractDataTransformer:
         )
 
         # 3. 查询关联数据ID
+        # 3. 查询关联数据ID
+        # MODIFIED: 套餐精确匹配，不存在则自动创建
+        package_name = str(row_data['套餐']).strip()
         package = self.db.retail_packages.find_one({
-            "package_name": {"$regex": row_data['套餐'], "$options": "i"},
-            "status": "active"
+            "package_name": package_name
         })
 
         if not package:
-            raise ValueError(f"套餐'{row_data['套餐']}'不存在或未生效")
+            # 自动创建新套餐
+            now = datetime.utcnow()
+            new_package = {
+                "package_name": package_name,
+                "package_description": f"自动导入创建 - {now.strftime('%Y-%m-%d')}",
+                "package_type": "non_time_based", # 默认类型
+                "status": "draft",
+                "is_green_power": False,
+                "pricing_config": {},
+                "created_by": operator,
+                "created_at": now,
+                "updated_by": operator,
+                "updated_at": now
+            }
+            result = self.db.retail_packages.insert_one(new_package)
+            contract_data['package_id'] = str(result.inserted_id)
+        else:
+            contract_data['package_id'] = str(package['_id'])
 
-        contract_data['package_id'] = str(package['_id'])
-
-        customer = self.db.customers.find_one({
-            "user_name": row_data['购买用户'],
-            "status": "active"
+        # MODIFIED: 客户查询调整为 customer_archives 和 user_name
+        customer_name = str(row_data['购买用户']).strip()
+        customer = self.db.customer_archives.find_one({
+            "user_name": customer_name
         })
 
         if not customer:
-            # 尝试使用company_name字段
-            customer = self.db.customers.find_one({
-                "company_name": row_data['购买用户'],
-                "status": "active"
-            })
-
-            if not customer:
-                raise ValueError(f"客户'{row_data['购买用户']}'不存在或状态非正常")
+            raise ValueError(f"客户'{customer_name}'不存在")
 
         contract_data['customer_id'] = str(customer['_id'])
 
@@ -476,9 +470,8 @@ class ContractDataTransformer:
             str: 生成的合同名称
         """
         # 获取客户信息
-        customer = self.db.customers.find_one({
-            "_id": ObjectId(customer_id),
-            "status": "active"
+        customer = self.db.customer_archives.find_one({
+            "_id": ObjectId(customer_id)
         })
 
         if not customer:
@@ -488,7 +481,7 @@ class ContractDataTransformer:
             short_name = customer.get('short_name')
             if not short_name:
                 # 使用客户名称前4个字符
-                customer_name = customer.get('user_name', customer.get('company_name', ''))
+                customer_name = customer.get('user_name', '')
                 short_name = customer_name[:4] if customer_name else "客户"
 
         # 生成年月字符串

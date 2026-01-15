@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
-from typing import Optional
+from typing import Optional, List
 import pandas as pd
 import io
 from datetime import datetime
@@ -49,6 +49,9 @@ async def list_contracts(
     status: Optional[str] = Query(None, description="合同状态（pending/active/expired）"),
     purchase_start_month: Optional[str] = Query(None, description="购电开始月份筛选（yyyy-MM）"),
     purchase_end_month: Optional[str] = Query(None, description="购电结束月份筛选（yyyy-MM）"),
+    year: Optional[int] = Query(None, description="年份筛选（覆盖月份范围）"),
+    sort_field: Optional[str] = Query("created_at", description="排序字段"),
+    sort_order: Optional[str] = Query("desc", description="排序方向(asc/desc)"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
     current_user: User = Depends(get_current_active_user)
@@ -73,13 +76,25 @@ async def list_contracts(
             "package_name": package_name,
             "customer_name": customer_name,
             "status": status,
+            "year": year,
             "purchase_start_month": purchase_start_month,
             "purchase_end_month": purchase_end_month
         },
         page=page,
-        page_size=page_size
+        page_size=page_size,
+        sort_field=sort_field,
+        sort_order=sort_order
     )
     return result
+
+
+@router.get("/years", response_model=List[int])
+async def get_contract_years(
+    current_user: User = Depends(get_current_active_user)
+):
+    """获取所有合同中涉及的年份"""
+    service = ContractService(DATABASE)
+    return service.get_available_years()
 
 
 @router.post("/import", summary="导入合同数据")

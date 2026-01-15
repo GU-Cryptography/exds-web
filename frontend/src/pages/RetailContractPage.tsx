@@ -5,7 +5,8 @@ import {
   TableContainer, TablePagination, IconButton, Tooltip,
   CircularProgress, Alert, Dialog, DialogTitle, DialogContent, DialogContentText,
   DialogActions, Snackbar, Chip, useTheme, useMediaQuery,
-  FormControl, InputLabel, Select, MenuItem
+  FormControl, InputLabel, Select, MenuItem,
+  TableSortLabel
 } from '@mui/material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -19,8 +20,10 @@ import {
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
   FilterList as FilterListIcon,
+  ImportExport as SortIcon,
   CloudUpload as CloudUploadIcon,
-  Download as DownloadIcon
+  Download as DownloadIcon,
+  WarningAmber as WarningIcon
 } from '@mui/icons-material';
 import { useParams, useNavigate, useLocation, matchPath } from 'react-router-dom';
 import {
@@ -28,7 +31,8 @@ import {
   deleteContract,
   Contract,
   ContractListParams,
-  ImportResult
+  ImportResult,
+  getContractYears
 } from '../api/retail-contracts';
 import { ContractEditorDialog } from '../components/ContractEditorDialog';
 import { ContractDetailsDialog } from '../components/ContractDetailsDialog';
@@ -95,9 +99,30 @@ const RetailContractPage: React.FC = () => {
     package_name: '',
     customer_name: '',
     status: undefined,
-    purchase_start_month: undefined,
-    purchase_end_month: undefined,
+    year: new Date().getFullYear(),
   });
+
+  // 排序状态
+  const [orderBy, setOrderBy] = useState<string>('created_at');
+  const [order, setOrder] = useState<'asc' | 'desc'>('desc');
+
+  const [availableYears, setAvailableYears] = useState<number[]>([]);
+
+  // 处理排序请求
+  const handleRequestSort = (property: string) => {
+    const isAsc = orderBy === property && order === 'asc';
+    setOrder(isAsc ? 'desc' : 'asc');
+    setOrderBy(property);
+  };
+
+  // 加载可用年份
+  useEffect(() => {
+    getContractYears()
+      .then(response => {
+        setAvailableYears(response.data);
+      })
+      .catch(err => console.error('获取年份列表失败:', err));
+  }, []);
 
   // 检查是否有活跃的筛选条件
   const hasActiveFilters = Boolean(
@@ -105,8 +130,7 @@ const RetailContractPage: React.FC = () => {
     filters.package_name ||
     filters.customer_name ||
     filters.status ||
-    filters.purchase_start_month ||
-    filters.purchase_end_month
+    filters.year !== new Date().getFullYear()
   );
 
   // 对话框状态 (仅桌面端使用)
@@ -157,7 +181,9 @@ const RetailContractPage: React.FC = () => {
       const params: ContractListParams = {
         ...filters,
         page: page + 1,
-        page_size: pageSize
+        page_size: pageSize,
+        sort_field: orderBy,
+        sort_order: order
       };
       const response = await getContracts(params);
       setContracts(response.data.items);
@@ -176,7 +202,7 @@ const RetailContractPage: React.FC = () => {
 
   useEffect(() => {
     fetchContracts();
-  }, [filters, page, pageSize]);
+  }, [filters, page, pageSize, orderBy, order]);
 
   // 监听location.state变化，处理移动端返回后的刷新
   useEffect(() => {
@@ -326,14 +352,15 @@ const RetailContractPage: React.FC = () => {
       package_name: '',
       customer_name: '',
       status: undefined,
-      purchase_start_month: undefined,
-      purchase_end_month: undefined,
+      year: new Date().getFullYear(),
     });
+    setOrderBy('created_at');
+    setOrder('desc');
     setPage(0);
     fetchContracts();
   };
 
-  
+
   // 格式化月份显示
   const formatMonthDisplay = (dateString: string) => {
     try {
@@ -377,9 +404,16 @@ const RetailContractPage: React.FC = () => {
             </Box>
             <Box sx={{ flex: 1 }}>
               <Typography variant="body2" color="text.secondary">套餐名称:</Typography>
-              <Typography variant="body2" sx={{ fontWeight: 'medium', mb: 1 }}>
-                {contract.package_name}
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
+                <Typography variant="body2" sx={{ fontWeight: 'medium' }}>
+                  {contract.package_name}
+                </Typography>
+                {contract.package_status && contract.package_status !== 'active' && (
+                  <Tooltip title={`套餐状态: ${contract.package_status === 'draft' ? '草稿' : contract.package_status === 'archived' ? '已归档' : contract.package_status}`}>
+                    <WarningIcon color="warning" sx={{ fontSize: 16, cursor: 'help' }} />
+                  </Tooltip>
+                )}
+              </Box>
             </Box>
           </Box>
 
@@ -410,50 +444,14 @@ const RetailContractPage: React.FC = () => {
               />
             </Box>
 
-            {/* 操作按钮 */}
-            <Box sx={{ display: 'flex', gap: 0.5 }}>
-              {contract.status === 'pending' && (
-                <>
-                  <Tooltip title="编辑">
-                    <IconButton size="small" onClick={() => handleEdit(contract)}>
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
 
-                  <Tooltip title="删除">
-                    <IconButton size="small" onClick={() => handleDeleteClick(contract)} color="error">
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                </>
-              )}
-            </Box>
           </Box>
         </Paper>
       ))}
     </Box>
   );
 
-  // 渲染操作按钮（根据状态控制）
-  const renderTableActions = (contract: Contract) => (
-    <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
-      {contract.status === 'pending' && (
-        <>
-          <Tooltip title="编辑">
-            <IconButton size="small" onClick={() => handleEdit(contract)}>
-              <EditIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
 
-          <Tooltip title="删除">
-            <IconButton size="small" onClick={() => handleDeleteClick(contract)}>
-              <DeleteIcon fontSize="small" color="error" />
-            </IconButton>
-          </Tooltip>
-        </>
-      )}
-    </Box>
-  );
 
   // 详情对话框处理函数
   const handleCloseDetailsDialog = () => {
@@ -586,8 +584,6 @@ const RetailContractPage: React.FC = () => {
             open={true}
             contractId={currentContractId || null}
             onClose={handleBackToList}
-            onEdit={(contractId) => navigate(`/customer/retail-contracts/edit/${contractId}`)}
-            onCopy={(contractId) => navigate(`/customer/retail-contracts/create?copyFrom=${contractId}`)}
           />
         ) : currentContractId ? (
           <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -703,31 +699,14 @@ const RetailContractPage: React.FC = () => {
                 alignItems: isMobile ? 'stretch' : 'center',
                 flexDirection: isMobile ? 'column' : 'row'
               }}>
-                {/* 第一行筛选字段 */}
+                {/* 筛选字段区域 */}
                 <Box sx={{
                   display: 'flex',
                   gap: 2,
                   flexWrap: 'wrap',
-                  width: isMobile ? '100%' : 'auto'
+                  width: isMobile ? '100%' : 'auto',
+                  flex: 1
                 }}>
-                  <TextField
-                    label="合同名称"
-                    variant="outlined"
-                    size="small"
-                    value={filters.contract_name}
-                    onChange={(e) => setFilters({ ...filters, contract_name: e.target.value })}
-                    sx={{ width: { xs: '100%', sm: '200px' } }}
-                    placeholder="输入合同名称"
-                  />
-                  <TextField
-                    label="套餐名称"
-                    variant="outlined"
-                    size="small"
-                    value={filters.package_name}
-                    onChange={(e) => setFilters({ ...filters, package_name: e.target.value })}
-                    sx={{ width: { xs: '100%', sm: '200px' } }}
-                    placeholder="输入套餐名称"
-                  />
                   <TextField
                     label="客户名称"
                     variant="outlined"
@@ -737,50 +716,14 @@ const RetailContractPage: React.FC = () => {
                     sx={{ width: { xs: '100%', sm: '200px' } }}
                     placeholder="输入客户名称"
                   />
-                </Box>
-
-                {/* 第二行筛选字段 */}
-                <Box sx={{
-                  display: 'flex',
-                  gap: 2,
-                  flexWrap: 'wrap',
-                  width: isMobile ? '100%' : 'auto'
-                }}>
-                  <DatePicker
-                    views={['year', 'month']}
-                    label="开始月份"
-                    value={filters.purchase_start_month ? new Date(filters.purchase_start_month + '-01') : null}
-                    onChange={(date) => {
-                      const value = date ? format(date, 'yyyy-MM') : undefined;
-                      setFilters({ ...filters, purchase_start_month: value });
-                    }}
-                    sx={{ width: { xs: '100%', sm: '180px' } }}
-                    slotProps={{
-                      textField: {
-                        variant: "outlined",
-                        size: "small",
-                        placeholder: "选择开始月份"
-                      }
-                    }}
-                    format="yyyy年MM月"
-                  />
-                  <DatePicker
-                    views={['year', 'month']}
-                    label="结束月份"
-                    value={filters.purchase_end_month ? new Date(filters.purchase_end_month + '-01') : null}
-                    onChange={(date) => {
-                      const value = date ? format(date, 'yyyy-MM') : undefined;
-                      setFilters({ ...filters, purchase_end_month: value });
-                    }}
-                    sx={{ width: { xs: '100%', sm: '180px' } }}
-                    slotProps={{
-                      textField: {
-                        variant: "outlined",
-                        size: "small",
-                        placeholder: "选择结束月份"
-                      }
-                    }}
-                    format="yyyy年MM月"
+                  <TextField
+                    label="套餐名称"
+                    variant="outlined"
+                    size="small"
+                    value={filters.package_name}
+                    onChange={(e) => setFilters({ ...filters, package_name: e.target.value })}
+                    sx={{ width: { xs: '100%', sm: '200px' } }}
+                    placeholder="输入套餐名称"
                   />
                   <FormControl variant="outlined" size="small" sx={{ width: { xs: '100%', sm: '150px' } }}>
                     <InputLabel>状态</InputLabel>
@@ -793,6 +736,20 @@ const RetailContractPage: React.FC = () => {
                       <MenuItem value="pending">待生效</MenuItem>
                       <MenuItem value="active">生效</MenuItem>
                       <MenuItem value="expired">已过期</MenuItem>
+                    </Select>
+                  </FormControl>
+                  <FormControl variant="outlined" size="small" sx={{ width: { xs: '100%', sm: '150px' } }}>
+                    <InputLabel>年份</InputLabel>
+                    <Select
+                      value={filters.year || ''}
+                      label="年份"
+                      onChange={(e) => setFilters({ ...filters, year: Number(e.target.value) })}
+                    >
+                      {availableYears.map((year) => (
+                        <MenuItem key={year} value={year}>
+                          {year}年
+                        </MenuItem>
+                      ))}
                     </Select>
                   </FormControl>
                 </Box>
@@ -836,264 +793,339 @@ const RetailContractPage: React.FC = () => {
                   </Button>
                 </Box>
               )}
+
+              {/* 移动端排序 */}
+              {isMobile && (
+                <Box sx={{ mt: 2 }}>
+                  <FormControl variant="outlined" size="small" fullWidth>
+                    <InputLabel>排序</InputLabel>
+                    <Select
+                      value={`${orderBy}-${order}`}
+                      label="排序"
+                      onChange={(e) => {
+                        const [field, direction] = (e.target.value as string).split('-');
+                        setOrderBy(field);
+                        setOrder(direction as 'asc' | 'desc');
+                      }}
+                    >
+                      <MenuItem value="created_at-desc">创建时间: 从新到旧</MenuItem>
+                      <MenuItem value="created_at-asc">创建时间: 从旧到新</MenuItem>
+                      <MenuItem value="contract_name-asc">合同名称: 升序</MenuItem>
+                      <MenuItem value="contract_name-desc">合同名称: 降序</MenuItem>
+                      <MenuItem value="customer_name-asc">客户名称: 升序</MenuItem>
+                      <MenuItem value="customer_name-desc">客户名称: 降序</MenuItem>
+                      <MenuItem value="package_name-asc">套餐名称: 升序</MenuItem>
+                      <MenuItem value="package_name-desc">套餐名称: 降序</MenuItem>
+                      <MenuItem value="purchasing_electricity_quantity-desc">购电量: 从大到小</MenuItem>
+                      <MenuItem value="purchasing_electricity_quantity-asc">购电量: 从小到大</MenuItem>
+                      <MenuItem value="purchase_start_month-asc">开始时间: 从近到远</MenuItem>
+                      <MenuItem value="purchase_start_month-desc">开始时间: 从远到近</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Box>
+              )}
             </Box>
           )}
         </Paper>
 
-      {/* 列表区域 */}
-      <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 } }}>
-        {/* 工具栏 */}
-        <Box sx={{ mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={handleCreate}
-          >
-            + 新增
-          </Button>
-          <Button
-            variant="outlined"
-            onClick={handleImport}
-            startIcon={<DownloadIcon />}
-          >
-            导入
-          </Button>
-          <Button
-            variant="outlined"
-            onClick={handleExport}
-            startIcon={<CloudUploadIcon />}
-          >
-            导出
-          </Button>
-        </Box>
+        {/* 列表区域 */}
+        <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 } }}>
+          {/* 工具栏 */}
+          <Box sx={{ mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
 
-        {/* 根据设备类型显示不同的布局 */}
-        {isMobile ? (
-          // 移动端卡片布局
-          <Box>
-            {loading ? (
-              <Box display="flex" justifyContent="center" alignItems="center" py={4}>
-                <CircularProgress />
-              </Box>
-            ) : contracts.length === 0 ? (
-              <Box display="flex" justifyContent="center" alignItems="center" py={4}>
-                <Typography color="text.secondary">
-                  暂无数据
-                </Typography>
+            <Button
+              variant="outlined"
+              onClick={handleImport}
+              startIcon={<DownloadIcon />}
+            >
+              导入
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={handleExport}
+              startIcon={<CloudUploadIcon />}
+            >
+              导出
+            </Button>
+          </Box >
+
+          {/* 根据设备类型显示不同的布局 */}
+          {
+            isMobile ? (
+              // 移动端卡片布局
+              <Box>
+                {loading ? (
+                  <Box display="flex" justifyContent="center" alignItems="center" py={4}>
+                    <CircularProgress />
+                  </Box>
+                ) : contracts.length === 0 ? (
+                  <Box display="flex" justifyContent="center" alignItems="center" py={4}>
+                    <Typography color="text.secondary">
+                      暂无数据
+                    </Typography>
+                  </Box>
+                ) : (
+                  <>
+                    {renderMobileCards()}
+                    {/* 移动端分页 */}
+                    <TablePagination
+                      rowsPerPageOptions={[10, 20]}
+                      component="div"
+                      count={total}
+                      rowsPerPage={pageSize}
+                      page={page}
+                      onPageChange={(e, newPage) => setPage(newPage)}
+                      onRowsPerPageChange={(e) => {
+                        const newSize = parseInt(e.target.value, 10);
+                        setPageSize(newSize);
+                        setPage(0);
+                      }}
+                      labelRowsPerPage="行数:"
+                      labelDisplayedRows={({ from, to, count }) => `${from}-${to}/${count}`}
+                      sx={{
+                        '& .MuiTablePagination-toolbar': {
+                          paddingLeft: { xs: 1, sm: 2 },
+                          paddingRight: { xs: 1, sm: 2 },
+                        },
+                        '& .MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows': {
+                          fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                        },
+                        '& .MuiTablePagination-input': {
+                          fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                        }
+                      }}
+                    />
+                  </>
+                )}
               </Box>
             ) : (
+              // 桌面端表格布局
               <>
-                {renderMobileCards()}
-                {/* 移动端分页 */}
-                <TablePagination
-                  rowsPerPageOptions={[10, 20]}
-                  component="div"
-                  count={total}
-                  rowsPerPage={pageSize}
-                  page={page}
-                  onPageChange={(e, newPage) => setPage(newPage)}
-                  onRowsPerPageChange={(e) => {
-                    const newSize = parseInt(e.target.value, 10);
-                    setPageSize(newSize);
-                    setPage(0);
-                  }}
-                  labelRowsPerPage="行数:"
-                  labelDisplayedRows={({ from, to, count }) => `${from}-${to}/${count}`}
-                  sx={{
-                    '& .MuiTablePagination-toolbar': {
-                      paddingLeft: { xs: 1, sm: 2 },
-                      paddingRight: { xs: 1, sm: 2 },
-                    },
-                    '& .MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows': {
-                      fontSize: { xs: '0.75rem', sm: '0.875rem' },
-                    },
-                    '& .MuiTablePagination-input': {
-                      fontSize: { xs: '0.75rem', sm: '0.875rem' },
-                    }
-                  }}
-                />
-              </>
-            )}
-          </Box>
-        ) : (
-          // 桌面端表格布局
-          <>
-            {loading ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-                <CircularProgress />
-              </Box>
-            ) : error ? (
-              <Alert severity="error">{error}</Alert>
-            ) : (
-              <>
-                <TableContainer sx={{ overflowX: 'auto' }}>
-                  <Table sx={{
-                    '& .MuiTableCell-root': {
-                      fontSize: { xs: '0.75rem', sm: '0.875rem' },
-                      px: { xs: 0.5, sm: 2 },
-                    }
-                  }}>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>合同名称</TableCell>
-                        <TableCell>客户名称</TableCell>
-                        <TableCell>套餐名称</TableCell>
-                        <TableCell>购买电量(kWh)</TableCell>
-                        <TableCell>购电开始月份</TableCell>
-                        <TableCell>购电结束月份</TableCell>
-                        <TableCell>状态</TableCell>
-                        <TableCell align="right">操作</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {contracts.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={8} sx={{ textAlign: 'center', py: 3 }}>
-                            <Typography variant="body2" color="text.secondary">暂无数据</Typography>
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        contracts.map((contract) => (
-                          <TableRow key={contract.id}>
+                {loading ? (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+                    <CircularProgress />
+                  </Box>
+                ) : error ? (
+                  <Alert severity="error">{error}</Alert>
+                ) : (
+                  <>
+                    <TableContainer sx={{ overflowX: 'auto' }}>
+                      <Table sx={{
+                        '& .MuiTableCell-root': {
+                          fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                          px: { xs: 0.5, sm: 2 },
+                        }
+                      }}>
+                        <TableHead>
+                          <TableRow>
+
                             <TableCell>
-                              <Typography
-                                sx={{
-                                  cursor: 'pointer',
-                                  color: 'primary.main',
-                                  '&:hover': { textDecoration: 'underline' }
-                                }}
-                                onClick={() => handleView(contract)}
+                              <TableSortLabel
+                                active={orderBy === 'contract_name'}
+                                direction={orderBy === 'contract_name' ? order : 'asc'}
+                                onClick={() => handleRequestSort('contract_name')}
                               >
-                                {contract.contract_name || '未命名合同'}
-                              </Typography>
+                                合同名称
+                              </TableSortLabel>
                             </TableCell>
-                            <TableCell>{contract.customer_name}</TableCell>
-                            <TableCell>{contract.package_name}</TableCell>
-                            <TableCell>{contract.purchasing_electricity_quantity.toLocaleString()}</TableCell>
-                            <TableCell>{formatMonthDisplay(contract.purchase_start_month)}</TableCell>
-                            <TableCell>{formatMonthDisplay(contract.purchase_end_month)}</TableCell>
                             <TableCell>
-                              <Chip
-                                label={statusMap[contract.status] || contract.status}
-                                size="small"
-                                color={getStatusChipColor(contract.status)}
-                              />
+                              <TableSortLabel
+                                active={orderBy === 'customer_name'}
+                                direction={orderBy === 'customer_name' ? order : 'asc'}
+                                onClick={() => handleRequestSort('customer_name')}
+                              >
+                                客户名称
+                              </TableSortLabel>
                             </TableCell>
-                            <TableCell align="right" sx={{ pr: 1 }}>{renderTableActions(contract)}</TableCell>
+                            <TableCell>
+                              <TableSortLabel
+                                active={orderBy === 'package_name'}
+                                direction={orderBy === 'package_name' ? order : 'asc'}
+                                onClick={() => handleRequestSort('package_name')}
+                              >
+                                套餐名称
+                              </TableSortLabel>
+                            </TableCell>
+                            <TableCell>
+                              <TableSortLabel
+                                active={orderBy === 'purchasing_electricity_quantity'}
+                                direction={orderBy === 'purchasing_electricity_quantity' ? order : 'asc'}
+                                onClick={() => handleRequestSort('purchasing_electricity_quantity')}
+                              >
+                                购买电量(kWh)
+                              </TableSortLabel>
+                            </TableCell>
+                            <TableCell>
+                              <TableSortLabel
+                                active={orderBy === 'purchase_start_month'}
+                                direction={orderBy === 'purchase_start_month' ? order : 'asc'}
+                                onClick={() => handleRequestSort('purchase_start_month')}
+                              >
+                                购电开始月份
+                              </TableSortLabel>
+                            </TableCell>
+                            <TableCell>购电结束月份</TableCell>
+                            <TableCell>状态</TableCell>
+
                           </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
+                        </TableHead>
+                        <TableBody>
+                          {contracts.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={7} sx={{ textAlign: 'center', py: 3 }}>
+                                <Typography variant="body2" color="text.secondary">暂无数据</Typography>
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            contracts.map((contract) => (
+                              <TableRow key={contract.id}>
+                                <TableCell>
+                                  <Typography
+                                    sx={{
+                                      cursor: 'pointer',
+                                      color: 'primary.main',
+                                      '&:hover': { textDecoration: 'underline' }
+                                    }}
+                                    onClick={() => handleView(contract)}
+                                  >
+                                    {contract.contract_name || '未命名合同'}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell>{contract.customer_name}</TableCell>
+                                <TableCell>
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    {contract.package_name}
+                                    {contract.package_status && contract.package_status !== 'active' && (
+                                      <Tooltip title={`套餐状态: ${contract.package_status === 'draft' ? '草稿' : contract.package_status === 'archived' ? '已归档' : contract.package_status}`}>
+                                        <WarningIcon color="warning" sx={{ fontSize: 16, cursor: 'help' }} />
+                                      </Tooltip>
+                                    )}
+                                  </Box>
+                                </TableCell>
+                                <TableCell>{contract.purchasing_electricity_quantity.toLocaleString()}</TableCell>
+                                <TableCell>{formatMonthDisplay(contract.purchase_start_month)}</TableCell>
+                                <TableCell>{formatMonthDisplay(contract.purchase_end_month)}</TableCell>
+                                <TableCell>
+                                  <Chip
+                                    label={statusMap[contract.status] || contract.status}
+                                    size="small"
+                                    color={getStatusChipColor(contract.status)}
+                                  />
+                                </TableCell>
 
-                {/* 分页 */}
-                <TablePagination
-                  component="div"
-                  count={total}
-                  page={page}
-                  onPageChange={(e, newPage) => setPage(newPage)}
-                  rowsPerPage={pageSize}
-                  onRowsPerPageChange={(e) => {
-                    setPageSize(parseInt(e.target.value, 10));
-                    setPage(0);
-                  }}
-                  labelRowsPerPage="每页行数"
-                  rowsPerPageOptions={[5, 10, 20, 50]}
-                  labelDisplayedRows={({ from, to, count }) => `${from}-${to} 共 ${count} 条`}
-                />
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+
+                    {/* 分页 */}
+                    <TablePagination
+                      component="div"
+                      count={total}
+                      page={page}
+                      onPageChange={(e, newPage) => setPage(newPage)}
+                      rowsPerPage={pageSize}
+                      onRowsPerPageChange={(e) => {
+                        setPageSize(parseInt(e.target.value, 10));
+                        setPage(0);
+                      }}
+                      labelRowsPerPage="每页行数"
+                      rowsPerPageOptions={[5, 10, 20, 50]}
+                      labelDisplayedRows={({ from, to, count }) => `${from}-${to} 共 ${count} 条`}
+                    />
+                  </>
+                )}
               </>
-            )}
-          </>
-        )}
-      </Paper>
-
-      {/* 详情对话框 */}
-      <ContractDetailsDialog
-        open={isDetailsDialogOpen}
-        contractId={selectedContractId}
-        onClose={handleCloseDetailsDialog}
-        onEdit={handleEditFromDetails}
-        onCopy={handleCopyFromDetails}
-      />
-
-      {/* 编辑对话框 */}
-      <ContractEditorDialog
-        open={isEditorOpen}
-        onClose={() => {
-          setIsEditorOpen(false);
-          setSelectedContract(null);
-        }}
-        contract={selectedContract}
-        mode={editorMode}
-        onSuccess={() => {
-          setIsEditorOpen(false);
-          setSelectedContract(null);
-          fetchContracts();
-          showSnackbar(
-            editorMode === 'create' ? '合同创建成功' : '合同更新成功',
-            'success'
-          );
-        }}
-      />
-
-      {/* 删除确认对话框 */}
-      <Dialog
-        open={deleteDialogOpen}
-        onClose={(event, reason) => {
-          if (reason && reason === "backdropClick") {
-            return;
+            )
           }
-          handleDeleteCancel();
-        }}
-        disableEnforceFocus
-        aria-labelledby="delete-dialog-title"
-      >
-        <DialogTitle id="delete-dialog-title">确认删除</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            确定要删除合同"{contractToDelete?.package_name}"吗？此操作不可撤销。
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleDeleteCancel}>取消</Button>
-          <Button onClick={handleDeleteConfirm} color="error" variant="contained">
-            删除
-          </Button>
-        </DialogActions>
-      </Dialog>
+        </Paper >
 
-      {/* 导入对话框 */}
-      <ContractImportDialog
-        open={isImportDialogOpen}
-        onClose={() => setIsImportDialogOpen(false)}
-        onSuccess={handleImportSuccess}
-      />
+        {/* 详情对话框 */}
+        < ContractDetailsDialog
+          open={isDetailsDialogOpen}
+          contractId={selectedContractId}
+          onClose={handleCloseDetailsDialog}
+        />
 
-      {/* 导出对话框 */}
-      <ContractExportDialog
-        open={isExportDialogOpen}
-        onClose={() => setIsExportDialogOpen(false)}
-        currentFilters={filters}
-      />
+        {/* 编辑对话框 */}
+        < ContractEditorDialog
+          open={isEditorOpen}
+          onClose={() => {
+            setIsEditorOpen(false);
+            setSelectedContract(null);
+          }}
+          contract={selectedContract}
+          mode={editorMode}
+          onSuccess={() => {
+            setIsEditorOpen(false);
+            setSelectedContract(null);
+            fetchContracts();
+            showSnackbar(
+              editorMode === 'create' ? '合同创建成功' : '合同更新成功',
+              'success'
+            );
+          }}
+        />
 
-      {/* 全局 Snackbar 反馈 */}
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={3000}
-        onClose={handleSnackbarClose}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-      >
-        <Alert
-          onClose={handleSnackbarClose}
-          severity={snackbar.severity}
-          sx={{ width: '100%' }}
+        {/* 删除确认对话框 */}
+        <Dialog
+          open={deleteDialogOpen}
+          onClose={(event, reason) => {
+            if (reason && reason === "backdropClick") {
+              return;
+            }
+            handleDeleteCancel();
+          }}
+          disableEnforceFocus
+          aria-labelledby="delete-dialog-title"
         >
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
-      </Box>
-    </LocalizationProvider>
+          <DialogTitle id="delete-dialog-title">确认删除</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              确定要删除合同"{contractToDelete?.package_name}"吗？此操作不可撤销。
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={handleDeleteCancel}>取消</Button>
+            <Button onClick={handleDeleteConfirm} color="error" variant="contained">
+              删除
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* 导入对话框 */}
+        <ContractImportDialog
+          open={isImportDialogOpen}
+          onClose={() => setIsImportDialogOpen(false)}
+          onSuccess={handleImportSuccess}
+        />
+
+        {/* 导出对话框 */}
+        <ContractExportDialog
+          open={isExportDialogOpen}
+          onClose={() => setIsExportDialogOpen(false)}
+          currentFilters={filters}
+        />
+
+        {/* 全局 Snackbar 反馈 */}
+        <Snackbar
+          open={snackbar.open}
+          autoHideDuration={3000}
+          onClose={handleSnackbarClose}
+          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        >
+          <Alert
+            onClose={handleSnackbarClose}
+            severity={snackbar.severity}
+            sx={{ width: '100%' }}
+          >
+            {snackbar.message}
+          </Alert>
+        </Snackbar>
+      </Box >
+    </LocalizationProvider >
   );
 };
 

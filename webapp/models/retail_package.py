@@ -48,7 +48,7 @@ class RetailPackage(BaseMongoModel):
     package_name: str = Field(...)
     package_description: Optional[str] = None
     package_type: Literal["time_based", "non_time_based"]
-    model_code: str = Field(..., description="定价模型代码，如 'fixed_linked_fee_non_time'")
+    model_code: Optional[str] = Field(None, description="定价模型代码，如 'fixed_linked_fee_non_time'")
 
     # 价格配置（根据模型动态使用，扁平化字典结构）
     pricing_config: dict = Field(default_factory=dict, description="统一的定价配置字典")
@@ -75,7 +75,7 @@ class RetailPackage(BaseMongoModel):
 class RetailPackageListItem(BaseMongoModel):
     package_name: str
     package_type: Literal["time_based", "non_time_based"]
-    model_code: str  # 定价模型代码
+    model_code: Optional[str] = None  # 定价模型代码
     is_green_power: bool = False
     status: Literal["draft", "active", "archived"]
     contract_count: Optional[int] = Field(default=0, description="合同数（虚拟字段）")

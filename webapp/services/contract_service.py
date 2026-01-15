@@ -87,27 +87,28 @@ class ContractService:
             raise ValueError("无效的套餐ID")
 
         package = self.db.retail_packages.find_one({
-            "_id": ObjectId(package_id),
-            "status": "active"
+            "_id": ObjectId(package_id)
         })
         if not package:
-            raise ValueError(f"套餐不存在或状态不是已生效")
+            raise ValueError(f"套餐不存在")
 
         # 2. 验证客户存在且状态为 active
         customer_id = contract_data.get("customer_id")
         if not ObjectId.is_valid(customer_id):
             raise ValueError("无效的客户ID")
 
-        customer = self.db.customers.find_one({
-            "_id": ObjectId(customer_id),
-            "status": "active"
+        customer = self.db.customer_archives.find_one({
+            "_id": ObjectId(customer_id)
         })
         if not customer:
-            raise ValueError(f"客户不存在或状态不是正常")
+            raise ValueError(f"客户不存在")
 
         # 3. 检查日期范围重叠
         start_month = contract_data.get("purchase_start_month")
         end_month = contract_data.get("purchase_end_month")
+
+        # 校验年份一致性
+        self._validate_same_year(start_month, end_month)
 
         if self._check_date_range_overlap(customer_id, start_month, end_month):
             raise ValueError("该客户在指定日期范围内已存在合同，请检查日期设置")
@@ -159,7 +160,8 @@ class ContractService:
 
         return self._convert_to_dict_with_status(contract)
 
-    def list(self, filters: dict, page: int = 1, page_size: int = 20) -> dict:
+    def list(self, filters: dict, page: int = 1, page_size: int = 20, 
+             sort_field: str = "created_at", sort_order: str = "desc") -> dict:
         """
         获取合同列表
 
@@ -167,6 +169,8 @@ class ContractService:
             filters: 筛选条件
             page: 页码
             page_size: 每页大小
+            sort_field: 排序字段
+            sort_order: 排序方向 (asc/desc)
 
         Returns:
             合同列表响应（包含虚拟状态字段）
@@ -184,11 +188,21 @@ class ContractService:
         if filters.get("customer_name"):
             query["customer_name"] = {"$regex": filters["customer_name"], "$options": "i"}
 
-        if filters.get("purchase_start_month"):
-            query["purchase_start_month"] = {"$gte": filters["purchase_start_month"]}
+        if filters.get("year"):
+            try:
+                year = int(filters["year"])
+                start_of_year = datetime(year, 1, 1)
+                end_of_year = datetime(year, 12, 31, 23, 59, 59)
+                # 逻辑：开始日期和结束日期必须在同一年，所以只需查询 purchase_start_month 在该年即可
+                query["purchase_start_month"] = {"$gte": start_of_year, "$lte": end_of_year}
+            except (ValueError, TypeError):
+                pass
+        else:
+            if filters.get("purchase_start_month"):
+                query["purchase_start_month"] = {"$gte": filters["purchase_start_month"]}
 
-        if filters.get("purchase_end_month"):
-            query["purchase_end_month"] = {"$lte": filters["purchase_end_month"]}
+            if filters.get("purchase_end_month"):
+                query["purchase_end_month"] = {"$lte": filters["purchase_end_month"]}
 
         # 注意：status 是虚拟字段，需要在查询后过滤
         status_filter = filters.get("status")
@@ -198,12 +212,27 @@ class ContractService:
 
         # 分页查询
         skip = (page - 1) * page_size
+        # 排序处理
+        direction = 1 if sort_order == "asc" else -1
+        
+        # 允许排序的字段白名单
+        allowed_sort_fields = [
+            "created_at", "contract_name", "customer_name", 
+            "package_name", "purchasing_electricity_quantity", 
+            "purchase_start_month"
+        ]
+        if sort_field not in allowed_sort_fields:
+            sort_field = "created_at"
+
         # 如果有状态筛选，需要多取一些数据以便过滤后仍能满足分页要求
         # 为简化实现，这里先取所有数据再过滤（生产环境可优化）
+        # 使用中文校对规则进行排序
+        collation = {"locale": "zh"}
+        
         if status_filter:
-            cursor = self.collection.find(query).sort("created_at", -1)
+            cursor = self.collection.find(query).collation(collation).sort(sort_field, direction)
         else:
-            cursor = self.collection.find(query).sort("created_at", -1).skip(skip).limit(page_size)
+            cursor = self.collection.find(query).collation(collation).sort(sort_field, direction).skip(skip).limit(page_size)
 
         # 转换为列表项格式（计算虚拟状态）
         items = []
@@ -218,10 +247,21 @@ class ContractService:
             if status_filter and status != status_filter:
                 continue
 
+            # 获取套餐状态
+            package_status = None
+            if doc.get("package_id"):
+                package = self.db.retail_packages.find_one(
+                    {"_id": ObjectId(doc.get("package_id"))},
+                    {"status": 1}
+                )
+                if package:
+                    package_status = package.get("status")
+
             item = ContractListItem(
                 id=str(doc["_id"]),
                 contract_name=doc.get("contract_name", ""),
                 package_name=doc.get("package_name", ""),
+                package_status=package_status,
                 customer_name=doc.get("customer_name", ""),
                 purchasing_electricity_quantity=doc.get("purchasing_electricity_quantity", 0),
                 purchase_start_month=doc.get("purchase_start_month"),
@@ -287,23 +327,21 @@ class ContractService:
                 raise ValueError("无效的套餐ID")
 
             package = self.db.retail_packages.find_one({
-                "_id": ObjectId(package_id),
-                "status": "active"
+                "_id": ObjectId(package_id)
             })
             if not package:
-                raise ValueError("套餐不存在或状态不是已生效")
+                raise ValueError("套餐不存在")
 
         if "customer_id" in contract_data:
             customer_id = contract_data.get("customer_id")
             if not ObjectId.is_valid(customer_id):
                 raise ValueError("无效的客户ID")
 
-            customer = self.db.customers.find_one({
-                "_id": ObjectId(customer_id),
-                "status": "active"
+            customer = self.db.customer_archives.find_one({
+                "_id": ObjectId(customer_id)
             })
             if not customer:
-                raise ValueError("客户不存在或状态不是正常")
+                raise ValueError("客户不存在")
 
         # 5. 检查日期范围重叠（如果更新了日期或客户）
         customer_id_for_check = contract_data.get("customer_id", existing_contract.get("customer_id"))
@@ -424,9 +462,8 @@ class ContractService:
             合同名称，如"供服中心202509"
         """
         # 从客户档案获取客户简称
-        customer = self.db.customers.find_one({
-            "_id": ObjectId(customer_id),
-            "status": "active"
+        customer = self.db.customer_archives.find_one({
+            "_id": ObjectId(customer_id)
         })
 
         if customer and customer.get("short_name"):
@@ -439,6 +476,53 @@ class ContractService:
         year_month_str = purchase_start_month.strftime("%Y%m")
 
         return f"{short_name}{year_month_str}"
+
+    def get_available_years(self) -> List[int]:
+        """
+        获取所有合同中涉及的年份（去重）
+        """
+        pipeline = [
+            {"$project": {
+                "start_year": {"$substr": ["$purchase_start_month", 0, 4]},
+                "end_year": {"$substr": ["$purchase_end_month", 0, 4]}
+            }},
+            {"$group": {
+                "_id": None,
+                "years_start": {"$addToSet": "$start_year"},
+                "years_end": {"$addToSet": "$end_year"}
+            }}
+        ]
+        
+        result = list(self.collection.aggregate(pipeline))
+        if not result:
+            return [datetime.now().year]
+            
+        years = set()
+        for y in result[0].get("years_start", []):
+            try:
+                years.add(int(y))
+            except:
+                pass
+        for y in result[0].get("years_end", []):
+            try:
+                years.add(int(y))
+            except:
+                pass
+                
+        # 确保当前年份总是存在
+        years.add(datetime.now().year)
+        
+        return sorted(list(years), reverse=True)
+
+    def _validate_same_year(self, start_date: datetime, end_date: datetime):
+        """校验开始和结束日期必须在同一年"""
+        if isinstance(start_date, str):
+            start_date = datetime.strptime(start_date, "%Y-%m")
+        if isinstance(end_date, str):
+            end_date = datetime.strptime(end_date, "%Y-%m")
+            
+        if start_date.year != end_date.year:
+            raise ValueError(f"合同不允许跨年：开始年份({start_date.year})与结束年份({end_date.year})不一致")
 
     def _check_date_range_overlap(self, customer_id: str, start_month: datetime, end_month: datetime, exclude_contract_id: Optional[str] = None) -> bool:
         """
