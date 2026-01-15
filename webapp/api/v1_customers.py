@@ -65,6 +65,8 @@ async def list_customers(
     tags: Optional[List[str]] = Query(None, description="标签筛选（多选）"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
+    sort_field: str = Query("created_at", description="排序字段"),
+    sort_order: str = Query("desc", description="排序顺序 (asc/desc)"),
     current_user: User = Depends(get_current_active_user)
 ):
     """获取客户列表 (v2)"""
@@ -75,7 +77,9 @@ async def list_customers(
             "tags": tags
         },
         page=page,
-        page_size=page_size
+        page_size=page_size,
+        sort_field=sort_field,
+        sort_order=sort_order
     )
     return result
 

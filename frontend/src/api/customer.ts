@@ -91,6 +91,7 @@ export interface CustomerListItem {
   account_count: number;
   meter_count: number;
   mp_count: number;
+  current_year_contract_amount?: number;
   created_at: string;
   updated_at: string;
 }
@@ -100,6 +101,8 @@ export interface CustomerListParams {
   tags?: string[];  // 按标签筛选 (OR逻辑)
   page?: number;
   page_size?: number;
+  sort_field?: string;
+  sort_order?: 'asc' | 'desc';
 }
 
 export interface PaginatedResponse<T> {

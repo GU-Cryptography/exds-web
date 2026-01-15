@@ -24,7 +24,10 @@ import {
     Tooltip,
     Snackbar,
     useTheme,
-    useMediaQuery
+    useMediaQuery,
+    TableSortLabel,
+    Menu,
+    MenuItem
 } from '@mui/material';
 import {
     Edit as EditIcon,
@@ -34,7 +37,8 @@ import {
     ExpandLess as ExpandLessIcon,
     FilterList as FilterListIcon,
     Visibility as VisibilityIcon,
-    Sync as SyncIcon
+    Sync as SyncIcon,
+    Sort as SortIcon
 } from '@mui/icons-material';
 import { useParams, useNavigate, useLocation, matchPath } from 'react-router-dom';
 import { Customer, CustomerListItem, CustomerListParams, PaginatedResponse, Tag, SyncCandidate, getSyncPreview } from '../api/customer';
@@ -84,6 +88,11 @@ export const CustomerManagementPage: React.FC = () => {
         keyword: '',
         tags: []
     });
+
+    // 排序状态
+    const [orderBy, setOrderBy] = useState<string>('created_at');
+    const [order, setOrder] = useState<'asc' | 'desc'>('desc');
+    const [sortAnchorEl, setSortAnchorEl] = useState<null | HTMLElement>(null);
 
     // 检查是否有活跃的筛选条件
     const hasActiveFilters = Boolean(
@@ -141,7 +150,9 @@ export const CustomerManagementPage: React.FC = () => {
                 keyword: filters.keyword,
                 tags: filters.tags,
                 page: page + 1,
-                page_size: pageSize
+                page_size: pageSize,
+                sort_field: orderBy,
+                sort_order: order
             });
             const data: PaginatedResponse<CustomerListItem> = response.data;
 
@@ -188,7 +199,7 @@ export const CustomerManagementPage: React.FC = () => {
     // 监听搜索参数变化自动重新加载
     useEffect(() => {
         fetchCustomers();
-    }, [filters, page, pageSize]);
+    }, [filters, page, pageSize, orderBy, order]);
 
     // 监听location.state变化，处理移动端返回后的刷新
     useEffect(() => {
@@ -370,6 +381,29 @@ export const CustomerManagementPage: React.FC = () => {
     };
 
 
+    // ========== 排序处理 ==========
+    const handleRequestSort = (property: string) => {
+        const isAsc = orderBy === property && order === 'asc';
+        setOrder(isAsc ? 'desc' : 'asc');
+        setOrderBy(property);
+        setPage(0);
+    };
+
+    const handleMobileSortClick = (event: React.MouseEvent<HTMLElement>) => {
+        setSortAnchorEl(event.currentTarget);
+    };
+
+    const handleMobileSortClose = () => {
+        setSortAnchorEl(null);
+    };
+
+    const handleMobileSortSelect = (property: string, sortOrder: 'asc' | 'desc') => {
+        setOrderBy(property);
+        setOrder(sortOrder);
+        setPage(0);
+        handleMobileSortClose();
+    };
+
     // ========== 移动端卡片布局 ==========
     const renderMobileCards = () => (
         <Box>
@@ -411,9 +445,12 @@ export const CustomerManagementPage: React.FC = () => {
                     {/* 信息行2：资产统计和标签 */}
                     <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
                         <Box sx={{ flex: 1 }}>
-                            <Typography variant="body2" color="text.secondary">资产统计:</Typography>
                             <Typography variant="body2" sx={{ fontWeight: 'medium' }}>
                                 户:{customer.account_count} 表:{customer.meter_count} 点:{customer.mp_count}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>当年签约(万度):</Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 'medium' }}>
+                                {customer.current_year_contract_amount || '-'}
                             </Typography>
                         </Box>
                         <Box sx={{ flex: 1 }}>
@@ -594,12 +631,12 @@ export const CustomerManagementPage: React.FC = () => {
                             alignItems: 'center',
                             justifyContent: 'space-between',
                             p: 1.5,
-                            cursor: 'pointer',
-                            '&:hover': { backgroundColor: 'action.hover' }
                         }}
-                        onClick={() => setIsFilterExpanded(!isFilterExpanded)}
                     >
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Box
+                            sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer', flex: 1 }}
+                            onClick={() => setIsFilterExpanded(!isFilterExpanded)}
+                        >
                             <FilterListIcon sx={{ color: 'primary.main' }} />
                             <Typography variant="subtitle1" sx={{ fontWeight: 'medium' }}>
                                 筛选条件
@@ -613,11 +650,39 @@ export const CustomerManagementPage: React.FC = () => {
                                 />
                             )}
                         </Box>
-                        {isFilterExpanded ? (
-                            <ExpandLessIcon sx={{ color: 'text.secondary' }} />
-                        ) : (
-                            <ExpandMoreIcon sx={{ color: 'text.secondary' }} />
-                        )}
+
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Button
+                                size="small"
+                                startIcon={<SortIcon />}
+                                onClick={handleMobileSortClick}
+                                variant="outlined"
+                                sx={{ mr: 1 }}
+                            >
+                                排序
+                            </Button>
+                            {isFilterExpanded ? (
+                                <ExpandLessIcon sx={{ color: 'text.secondary' }} onClick={() => setIsFilterExpanded(false)} />
+                            ) : (
+                                <ExpandMoreIcon sx={{ color: 'text.secondary' }} onClick={() => setIsFilterExpanded(true)} />
+                            )}
+                        </Box>
+
+                        {/* 移动端排序菜单 */}
+                        <Menu
+                            anchorEl={sortAnchorEl}
+                            open={Boolean(sortAnchorEl)}
+                            onClose={handleMobileSortClose}
+                        >
+                            <MenuItem onClick={() => handleMobileSortSelect('created_at', 'desc')}>创建时间: 降序</MenuItem>
+                            <MenuItem onClick={() => handleMobileSortSelect('created_at', 'asc')}>创建时间: 升序</MenuItem>
+                            <MenuItem onClick={() => handleMobileSortSelect('user_name', 'asc')}>客户名称: 升序</MenuItem>
+                            <MenuItem onClick={() => handleMobileSortSelect('user_name', 'desc')}>客户名称: 降序</MenuItem>
+                            <MenuItem onClick={() => handleMobileSortSelect('location', 'asc')}>位置: 升序</MenuItem>
+                            <MenuItem onClick={() => handleMobileSortSelect('location', 'desc')}>位置: 降序</MenuItem>
+                            <MenuItem onClick={() => handleMobileSortSelect('current_year_contract_amount', 'asc')}>签约电量: 升序</MenuItem>
+                            <MenuItem onClick={() => handleMobileSortSelect('current_year_contract_amount', 'desc')}>签约电量: 降序</MenuItem>
+                        </Menu>
                     </Box>
                 ) : null}
 
@@ -782,10 +847,35 @@ export const CustomerManagementPage: React.FC = () => {
                                     }}>
                                         <TableHead>
                                             <TableRow>
-                                                <TableCell>客户名称</TableCell>
-                                                <TableCell>位置</TableCell>
+                                                <TableCell>
+                                                    <TableSortLabel
+                                                        active={orderBy === 'user_name'}
+                                                        direction={orderBy === 'user_name' ? order : 'asc'}
+                                                        onClick={() => handleRequestSort('user_name')}
+                                                    >
+                                                        客户名称
+                                                    </TableSortLabel>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <TableSortLabel
+                                                        active={orderBy === 'location'}
+                                                        direction={orderBy === 'location' ? order : 'asc'}
+                                                        onClick={() => handleRequestSort('location')}
+                                                    >
+                                                        位置
+                                                    </TableSortLabel>
+                                                </TableCell>
                                                 <TableCell>标签</TableCell>
                                                 <TableCell>资产统计</TableCell>
+                                                <TableCell>
+                                                    <TableSortLabel
+                                                        active={orderBy === 'current_year_contract_amount'}
+                                                        direction={orderBy === 'current_year_contract_amount' ? order : 'asc'}
+                                                        onClick={() => handleRequestSort('current_year_contract_amount')}
+                                                    >
+                                                        当年签约电量(万度)
+                                                    </TableSortLabel>
+                                                </TableCell>
                                                 <TableCell align="right">操作</TableCell>
                                             </TableRow>
                                         </TableHead>
@@ -821,6 +911,7 @@ export const CustomerManagementPage: React.FC = () => {
                                                         <TableCell>
                                                             户:{customer.account_count} 表:{customer.meter_count} 点:{customer.mp_count}
                                                         </TableCell>
+                                                        <TableCell>{customer.current_year_contract_amount || '-'}</TableCell>
                                                         <TableCell align="right" sx={{ pr: 1 }}>{renderTableActions(customer)}</TableCell>
                                                     </TableRow>
                                                 ))

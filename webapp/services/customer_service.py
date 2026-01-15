@@ -131,7 +131,7 @@ class CustomerService:
 
         return self._convert_to_dict(customer)
 
-    def list(self, filters: Dict[str, Optional[str]], page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+    def list(self, filters: Dict[str, Optional[str]], page: int = 1, page_size: int = 20, sort_field: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
         """
         获取客户列表 (v2)
 
@@ -139,6 +139,8 @@ class CustomerService:
             filters: 筛选条件
             page: 页码
             page_size: 每页大小
+            sort_field: 排序字段 (created_at, user_name, short_name, location)
+            sort_order: 排序顺序 (asc/desc)
 
         Returns:
             客户列表响应
@@ -165,16 +167,75 @@ class CustomerService:
         # 计算总数
         total = self.collection.count_documents(query)
 
-        # 分页查询
+        # 排序处理
+        direction = -1 if sort_order == "desc" else 1
+        collation = {"locale": "zh"}
+        
+        # 准备聚合管道
+        current_year = datetime.now().year
+        start_of_year = datetime(current_year, 1, 1)
+        end_of_year = datetime(current_year, 12, 31, 23, 59, 59)
+        
+        pipeline = [
+            {"$match": query},
+            # 关联 retail_contracts 计算当年电量
+            {
+                "$lookup": {
+                    "from": "retail_contracts",
+                    "let": {"cid_str": {"$toString": "$_id"}},
+                    "pipeline": [
+                        {
+                            "$match": {
+                                "$expr": {
+                                    "$and": [
+                                        {"$eq": ["$customer_id", "$$cid_str"]},
+                                        {"$gte": ["$purchase_start_month", start_of_year]},
+                                        {"$lte": ["$purchase_start_month", end_of_year]}
+                                    ]
+                                }
+                            }
+                        },
+                        {
+                            "$group": {
+                                "_id": None,
+                                "total_quantity": {"$sum": "$purchasing_electricity_quantity"}
+                            }
+                        }
+                    ],
+                    "as": "contract_stats"
+                }
+            },
+            # 提取计算结果并转换单位
+            {
+                "$addFields": {
+                    "current_year_contract_amount": {
+                        "$divide": [
+                            {"$ifNull": [{"$arrayElemAt": ["$contract_stats.total_quantity", 0]}, 0]},
+                            10000
+                        ]
+                    }
+                }
+            }
+        ]
+
+        # 添加排序阶段
+        allowed_sort_fields = ["created_at", "user_name", "short_name", "location", "current_year_contract_amount"]
+        if sort_field not in allowed_sort_fields:
+            sort_field = "created_at"
+        
         skip = (page - 1) * page_size
-        cursor = self.collection.find(query).sort("created_at", -1).skip(skip).limit(page_size)
+        pipeline.append({"$sort": {sort_field: direction}})
+        pipeline.append({"$skip": skip})
+        pipeline.append({"$limit": page_size})
+
+        # 执行聚合查询
+        cursor = self.collection.aggregate(pipeline, collation=collation)
+        customer_docs = list(cursor)
 
         # 转换为列表项格式
         items = []
-        customer_docs = list(cursor)
-
         for doc in customer_docs:
-            # 计算资产统计 (v2 结构使用 accounts)
+            # 计算资产统计
             accounts = doc.get("accounts", [])
             account_count = len(accounts)
             meter_count = 0
@@ -196,7 +257,8 @@ class CustomerService:
                 meter_count=meter_count,
                 mp_count=mp_count,
                 created_at=doc.get("created_at", datetime.utcnow()),
-                updated_at=doc.get("updated_at", datetime.utcnow())
+                updated_at=doc.get("updated_at", datetime.utcnow()),
+                current_year_contract_amount=doc.get("current_year_contract_amount", 0.0)
             )
             items.append(item.model_dump())
 

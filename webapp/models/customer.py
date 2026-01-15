@@ -133,6 +133,7 @@ class CustomerListItem(BaseModel):
     account_count: int = Field(0, description="户号数量")
     meter_count: int = Field(0, description="电表数量")
     mp_count: int = Field(0, description="计量点数量")
+    current_year_contract_amount: float = Field(0.0, description="当年签约电量(万度)")
     created_at: datetime = Field(..., description="创建时间")
     updated_at: datetime = Field(..., description="更新时间")
 
