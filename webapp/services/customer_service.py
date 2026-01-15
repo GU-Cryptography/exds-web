@@ -6,7 +6,7 @@ from bson import ObjectId
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
-from webapp.models.customer import Customer, CustomerCreate, CustomerUpdate, CustomerListItem
+from webapp.models.customer import Customer, CustomerCreate, CustomerUpdate, CustomerListItem, SyncCandidate
 from webapp.tools.mongo import DATABASE
 
 
@@ -21,29 +21,27 @@ class CustomerService:
 
     def __init__(self, db: Database) -> None:
         self.db = db
-        self.collection = self.db.customers
+        # 使用 customer_archives 集合 (v2 数据结构)
+        self.collection = self.db.customer_archives
         self._ensure_indexes()
 
     def _ensure_indexes(self) -> None:
         """确保数据库索引存在"""
         try:
-            # 要创建的索引列表
+            # v2 索引列表
             indexes = [
                 # 1. 基础查询索引
                 ([('user_name', 1)], {'name': 'idx_user_name'}),
                 ([('short_name', 1)], {'name': 'idx_short_name'}),
-                ([('status', 1)], {'name': 'idx_status'}),
+                ([('location', 1)], {'name': 'idx_location'}),
 
-                # 2. 组合查询索引（用于列表筛选）
-                ([('status', 1), ('created_at', -1)], {'name': 'idx_status_created_at'}),
-                ([('status', 1), ('user_type', 1), ('created_at', -1)], {'name': 'idx_status_user_type'}),
-                ([('status', 1), ('industry', 1), ('created_at', -1)], {'name': 'idx_status_industry'}),
-                ([('status', 1), ('region', 1), ('created_at', -1)], {'name': 'idx_status_region'}),
+                # 2. 标签查询索引
+                ([('tags.name', 1)], {'name': 'idx_tags_name'}),
 
                 # 3. 嵌套数据索引（用于户号和计量点查询）
-                ([('utility_accounts.account_id', 1)], {'name': 'idx_account_id'}),
-                ([('utility_accounts.metering_points.metering_point_id', 1)], {'name': 'idx_metering_point_id'}),
-                ([('utility_accounts.metering_points.meter.meter_id', 1)], {'name': 'idx_meter_id'}),
+                ([('accounts.account_id', 1)], {'name': 'idx_account_id'}),
+                ([('accounts.meters.meter_id', 1)], {'name': 'idx_meter_id'}),
+                ([('accounts.metering_points.mp_no', 1)], {'name': 'idx_mp_no'}),
 
                 # 4. 时间索引
                 ([('created_at', -1)], {'name': 'idx_created_at'}),
@@ -135,7 +133,7 @@ class CustomerService:
 
     def list(self, filters: Dict[str, Optional[str]], page: int = 1, page_size: int = 20) -> Dict[str, Any]:
         """
-        获取客户列表
+        获取客户列表 (v2)
 
         Args:
             filters: 筛选条件
@@ -145,31 +143,24 @@ class CustomerService:
         Returns:
             客户列表响应
         """
-        # 构建查询条件（移除了deleted状态的过滤，因为新状态体系中没有deleted）
+        # 构建查询条件 (v2 结构，不再有 status 字段)
         query = {}
 
-        # 添加筛选条件
+        # 关键词搜索 (客户名称或户号)
         if filters.get("keyword"):
             keyword = filters["keyword"]
             query["$or"] = [
                 {"user_name": {"$regex": keyword, "$options": "i"}},
-                {"short_name": {"$regex": keyword, "$options": "i"}}
+                {"short_name": {"$regex": keyword, "$options": "i"}},
+                {"accounts.account_id": {"$regex": keyword, "$options": "i"}}
             ]
 
-        if filters.get("user_type"):
-            query["user_type"] = filters["user_type"]
-
-        if filters.get("industry"):
-            query["industry"] = filters["industry"]
-
-        if filters.get("voltage"):
-            query["voltage"] = filters["voltage"]
-
-        if filters.get("region"):
-            query["region"] = filters["region"]
-
-        if filters.get("status"):
-            query["status"] = filters["status"]
+        # 标签筛选 (tags 参数可能是逗号分隔的字符串或列表)
+        tags_filter = filters.get("tags")
+        if tags_filter:
+            tag_list = tags_filter if isinstance(tags_filter, list) else [tags_filter]
+            if tag_list:
+                query["tags.name"] = {"$in": tag_list}
 
         # 计算总数
         total = self.collection.count_documents(query)
@@ -182,58 +173,30 @@ class CustomerService:
         items = []
         customer_docs = list(cursor)
 
-        # 批量查询合同数据以获取签约电量
-        customer_ids = [str(doc["_id"]) for doc in customer_docs]
-        contracts_collection = self.db.retail_contracts
-
-        # 获取当前月份的起始时间（用于判断合同状态）
-        current_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
-        # 聚合每个客户的签约电量
-        # 只统计未过期的合同（purchase_end_month >= 当前月份）
-        contract_agg_pipeline = [
-            {
-                "$match": {
-                    "customer_id": {"$in": customer_ids},
-                    "purchase_end_month": {"$gte": current_month}
-                }
-            },
-            {
-                "$group": {
-                    "_id": "$customer_id",
-                    "total_contracted": {"$sum": "$purchasing_electricity_quantity"}
-                }
-            }
-        ]
-
-        contract_results = list(contracts_collection.aggregate(contract_agg_pipeline))
-        # 构建客户ID到签约电量的映射
-        contracted_capacity_map = {
-            result["_id"]: result["total_contracted"]
-            for result in contract_results
-        }
-
         for doc in customer_docs:
-            # 计算计量点总数
-            metering_point_count = 0
-            for account in doc.get("utility_accounts", []):
-                metering_point_count += len(account.get("metering_points", []))
+            # 计算资产统计 (v2 结构使用 accounts)
+            accounts = doc.get("accounts", [])
+            account_count = len(accounts)
+            meter_count = 0
+            mp_count = 0
+            for account in accounts:
+                meter_count += len(account.get("meters", []))
+                mp_count += len(account.get("metering_points", []))
 
-            # 从合同数据中获取签约电量
-            customer_id = str(doc["_id"])
-            contracted_capacity = contracted_capacity_map.get(customer_id)
+            # 构建标签列表
+            tags_data = doc.get("tags", [])
 
             item = CustomerListItem(
-                id=customer_id,
+                id=str(doc["_id"]),
                 user_name=doc.get("user_name", ""),
-                user_type=doc.get("user_type"),
-                industry=doc.get("industry"),
-                region=doc.get("region"),
-                status=doc.get("status", "active"),
-                metering_point_count=metering_point_count,
-                contracted_capacity=contracted_capacity,
-                created_at=doc.get("created_at"),
-                updated_at=doc.get("updated_at")
+                short_name=doc.get("short_name"),
+                location=doc.get("location"),
+                tags=tags_data,
+                account_count=account_count,
+                meter_count=meter_count,
+                mp_count=mp_count,
+                created_at=doc.get("created_at", datetime.utcnow()),
+                updated_at=doc.get("updated_at", datetime.utcnow())
             )
             items.append(item.model_dump())
 
@@ -243,6 +206,7 @@ class CustomerService:
             "page_size": page_size,
             "items": items
         }
+
 
     def update(self, customer_id: str, customer_data: Dict[str, Any], operator: str) -> Dict[str, Any]:
         """
@@ -1044,6 +1008,154 @@ class CustomerService:
 
         updated_customer = self.collection.find_one({"_id": ObjectId(customer_id)})
         return self._convert_to_dict(updated_customer)
+
+    # ==================== 数据同步方法 ====================
+
+    def preview_sync_data(self) -> List[SyncCandidate]:
+        """
+        预览待同步数据
+        从 raw_mp_data 获取所有计量点，排除已在 customer_archives 中存在的
+        """
+        # 1. 聚合原始数据
+        pipeline = [
+            {"$group": {
+                "_id": "$mp_id",
+                "customer_name": {"$first": "$meta.customer_name"},
+                "account_id": {"$first": "$meta.account_id"}
+            }}
+        ]
+        raw_results = list(DATABASE.raw_mp_data.aggregate(pipeline))
+
+        # 2. 获取现有计量点编号
+        # 注意: accounts 是数组，accounts.metering_points 也是数组
+        # 使用 distinct 获取所有已存在的计量点编号
+        raw_existing = self.collection.distinct("accounts.metering_points.mp_no")
+        # 确保转换为字符串并去除空格
+        existing_mp_nos = {str(x).strip() for x in raw_existing if x}
+        
+        logger.info(f"Found {len(existing_mp_nos)} existing metering points for sync filter.")
+
+        # 3. 过滤出不存在的
+        candidates = []
+        for item in raw_results:
+            raw_mp_no = item["_id"]
+            if not raw_mp_no:
+                continue
+                
+            mp_no = str(raw_mp_no).strip()
+            if mp_no and mp_no not in existing_mp_nos:
+                candidates.append(SyncCandidate(
+                    mp_no=mp_no,
+                    customer_name=item["customer_name"] or "未命名客户",
+                    account_id=item["account_id"] or "未知户号"
+                ))
+        
+        logger.info(f"Sync preview found {len(candidates)} candidates after filtering.")
+        return candidates
+
+    def sync_customers(self, candidates: List[SyncCandidate], operator: str) -> Dict[str, int]:
+        """
+        批量同步客户数据
+        """
+        created_count = 0
+        updated_count = 0
+        
+        for cand in candidates:
+            # 1. 尝试按户号查找现有客户 (最强匹配)
+            # 注意: 需要查找包含该户号的客户
+            customer = self.collection.find_one({"accounts.account_id": cand.account_id})
+            
+            if customer:
+                # 客户存在，且户号存在 -> 检查计量点是否需要添加
+                accounts = customer.get("accounts", [])
+                updated = False
+                for acc in accounts:
+                    if acc.get("account_id") == cand.account_id:
+                        # 检查计量点是否存在
+                        mp_exists = any(mp.get("mp_no") == cand.mp_no for mp in acc.get("metering_points", []))
+                        if not mp_exists:
+                            acc["metering_points"].append({
+                                "mp_no": cand.mp_no,
+                                "mp_name": "同步导入"
+                            })
+                            updated = True
+                        break
+                
+                if updated:
+                    self.collection.update_one(
+                        {"_id": customer["_id"]},
+                        {"$set": {"accounts": accounts, "updated_at": datetime.utcnow(), "updated_by": operator}}
+                    )
+                    updated_count += 1
+                continue
+
+            # 2. 尝试按客户名查找 (次级匹配)
+            customer = self.collection.find_one({"user_name": cand.customer_name})
+            
+            if customer:
+                # 客户存在 -> 添加新户号 (或合并到现有户号)
+                accounts = customer.get("accounts", [])
+                
+                # 特殊情况: 刚刚按户号没查到，但这里也许户号已存在但未索引到? (不太可能，distinct逻辑已覆盖)
+                # 还是直接添加新户号吧
+                
+                # 再次检查是否有同名户号 (防卫性)
+                target_acc = next((a for a in accounts if a.get("account_id") == cand.account_id), None)
+                if target_acc:
+                     target_acc["metering_points"].append({
+                        "mp_no": cand.mp_no,
+                        "mp_name": "同步导入"
+                    })
+                else:
+                    accounts.append({
+                        "account_id": cand.account_id,
+                        "meters": [],
+                        "metering_points": [{
+                            "mp_no": cand.mp_no,
+                            "mp_name": "同步导入"
+                        }]
+                    })
+                
+                self.collection.update_one(
+                    {"_id": customer["_id"]},
+                    {"$set": {"accounts": accounts, "updated_at": datetime.utcnow(), "updated_by": operator}}
+                )
+                updated_count += 1
+                continue
+
+            # 3. 都不存在 -> 创建新客户
+            new_customer = CustomerCreate(
+                user_name=cand.customer_name,
+                short_name=cand.customer_name[:4], # 默认简称
+                accounts=[{
+                    "account_id": cand.account_id,
+                    "meters": [],
+                    "metering_points": [{
+                        "mp_no": cand.mp_no,
+                        "mp_name": "同步导入"
+                    }]
+                }]
+            )
+            
+            # 使用现有 create 逻辑太重(有重名检查等)，这里手动插入更灵活且安全(因为是批量)
+            # 但为了保持一致性，还是手动构造文档插入
+            doc = new_customer.model_dump(by_alias=True)
+            doc["created_at"] = datetime.utcnow()
+            doc["updated_at"] = datetime.utcnow()
+            doc["created_by"] = operator
+            doc["updated_by"] = operator
+            # 确保 tags 字段存在
+            if "tags" not in doc:
+                doc["tags"] = []
+                
+            try:
+                self.collection.insert_one(doc)
+                created_count += 1
+            except DuplicateKeyError:
+                # 极小概率并发冲突，忽略
+                pass
+                
+        return {"created": created_count, "updated": updated_count}
 
     # ==================== 辅助方法 ====================
 

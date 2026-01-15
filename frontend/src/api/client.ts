@@ -9,6 +9,19 @@ const apiClient = axios.create({
     headers: {
         'Content-Type': 'application/json',
     },
+    // 自定义参数序列化，支持 tags=a&tags=b 格式
+    paramsSerializer: (params) => {
+        const searchParams = new URLSearchParams();
+        for (const key in params) {
+            const value = params[key];
+            if (Array.isArray(value)) {
+                value.forEach(v => searchParams.append(key, v));
+            } else if (value !== undefined && value !== null) {
+                searchParams.append(key, value.toString());
+            }
+        }
+        return searchParams.toString();
+    },
 });
 
 // --- 请求拦截器 ---

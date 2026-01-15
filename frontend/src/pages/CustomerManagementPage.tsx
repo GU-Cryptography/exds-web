@@ -1,3 +1,8 @@
+/**
+ * 客户档案管理页面 (v2 - 与零售合同管理风格一致)
+ * 桌面端：表格布局
+ * 移动端：卡片布局 + 可折叠筛选
+ */
 import React, { useState, useEffect } from 'react';
 import {
     Box,
@@ -5,10 +10,6 @@ import {
     Paper,
     Button,
     TextField,
-    FormControl,
-    InputLabel,
-    Select,
-    MenuItem,
     CircularProgress,
     Alert,
     Table,
@@ -20,32 +21,27 @@ import {
     TablePagination,
     IconButton,
     Chip,
-    InputAdornment,
     Tooltip,
-    Collapse,
-    useTheme
+    Snackbar,
+    useTheme,
+    useMediaQuery
 } from '@mui/material';
-import useMediaQuery from '@mui/material/useMediaQuery';
 import {
     Edit as EditIcon,
     Delete as DeleteIcon,
-    ContentCopy as CopyIcon,
-    Search as SearchIcon,
     ArrowBack as ArrowBackIcon,
-    FilterList as FilterListIcon,
     ExpandMore as ExpandMoreIcon,
     ExpandLess as ExpandLessIcon,
-    CheckCircle as CheckCircleIcon,
-    Cancel as CancelIcon,
-    PlayArrow as PlayArrowIcon,
-    Pause as PauseIcon,
-    Stop as StopIcon,
-    Description as DescriptionIcon,
+    FilterList as FilterListIcon,
+    Visibility as VisibilityIcon,
+    Sync as SyncIcon
 } from '@mui/icons-material';
 import { useParams, useNavigate, useLocation, matchPath } from 'react-router-dom';
-import { Customer, CustomerListItem, CustomerListParams, PaginatedResponse } from '../api/customer';
+import { Customer, CustomerListItem, CustomerListParams, PaginatedResponse, Tag, SyncCandidate, getSyncPreview } from '../api/customer';
 import { CustomerEditorDialog } from '../components/CustomerEditorDialog';
 import { CustomerDetailsDialog } from '../components/CustomerDetailsDialog';
+import { TagFilter, DeleteConfirmDialog } from '../components/customer';
+import { SyncConfirmDialog } from '../components/SyncConfirmDialog';
 import customerApi from '../api/customer';
 
 export const CustomerManagementPage: React.FC = () => {
@@ -63,13 +59,11 @@ export const CustomerManagementPage: React.FC = () => {
     const createMatch = matchPath('/customer/profiles/create', location.pathname);
     const viewMatch = matchPath('/customer/profiles/view/:customerId', location.pathname);
     const editMatch = matchPath('/customer/profiles/edit/:customerId', location.pathname);
-    const copyMatch = matchPath('/customer/profiles/copy/:customerId', location.pathname);
 
     // 根据当前路由确定状态
     const isCreateView = !!createMatch;
     const isDetailView = !!viewMatch;
     const isEditView = !!editMatch;
-    const isCopyView = !!copyMatch;
     const currentCustomerId = params.customerId;
 
     // 列表数据状态
@@ -79,72 +73,87 @@ export const CustomerManagementPage: React.FC = () => {
 
     // 分页状态
     const [page, setPage] = useState(0);
-    const [rowsPerPage, setRowsPerPage] = useState(10);
-    const [totalCount, setTotalCount] = useState(0);
+    const [pageSize, setPageSize] = useState(10);
+    const [total, setTotal] = useState(0);
 
-    // 查询参数状态
-    const [searchParams, setSearchParams] = useState<CustomerListParams>({
+    // 查询区域折叠状态
+    const [isFilterExpanded, setIsFilterExpanded] = useState(false);
+
+    // 查询参数状态 (v2 结构)
+    const [filters, setFilters] = useState<CustomerListParams>({
         keyword: '',
-        user_type: '',
-        industry: '',
-        region: '',
-        status: undefined
+        tags: []
     });
 
-    // 编辑对话框状态 (仅桌面端使用)
-    const [dialogOpen, setDialogOpen] = useState(false);
-    const [dialogMode, setDialogMode] = useState<'create' | 'edit' | 'view' | 'copy'>('create');
-    const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+    // 检查是否有活跃的筛选条件
+    const hasActiveFilters = Boolean(
+        filters.keyword ||
+        (filters.tags && filters.tags.length > 0)
+    );
 
-    // 客户详情对话框状态 (仅桌面端使用)
-    const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
+    // 编辑对话框状态 (仅桌面端使用)
+    const [isEditorOpen, setIsEditorOpen] = useState(false);
+    const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
+    const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
     const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+    const [editorMode, setEditorMode] = useState<'create' | 'edit'>('create');
 
     // 移动端客户详情状态
     const [mobileCustomerData, setMobileCustomerData] = useState<Customer | null>(null);
     const [mobileCustomerLoading, setMobileCustomerLoading] = useState(false);
     const [mobileCustomerError, setMobileCustomerError] = useState<string | null>(null);
 
-    // 移动端筛选折叠状态
-    const [isFilterExpanded, setIsFilterExpanded] = useState(false);
+    // 删除确认对话框状态
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+    const [customerToDelete, setCustomerToDelete] = useState<CustomerListItem | null>(null);
 
-    // 检查是否有激活的筛选条件
-    const hasActiveFilters = Boolean(
-        searchParams.keyword ||
-        searchParams.user_type ||
-        searchParams.industry ||
-        searchParams.region ||
-        searchParams.status
-    );
+    // 同步对话框状态
+    const [syncDialogOpen, setSyncDialogOpen] = useState(false);
+    const [syncCandidates, setSyncCandidates] = useState<SyncCandidate[]>([]);
+
+    // Snackbar状态
+    const [snackbar, setSnackbar] = useState<{
+        open: boolean;
+        message: string;
+        severity: 'success' | 'error' | 'info' | 'warning';
+    }>({
+        open: false,
+        message: '',
+        severity: 'success'
+    });
+
+    // Snackbar辅助函数
+    const showSnackbar = (message: string, severity: 'success' | 'error' | 'info' | 'warning' = 'success') => {
+        setSnackbar({ open: true, message, severity });
+    };
+
+    const handleSnackbarClose = () => {
+        setSnackbar(prev => ({ ...prev, open: false }));
+    };
 
     // 加载客户列表
-    const loadCustomers = async () => {
+    const fetchCustomers = async () => {
         setLoading(true);
         setError(null);
 
         try {
-            // 构造API参数，使用当前状态
-            const params = {
-                keyword: searchParams.keyword,
-                user_type: searchParams.user_type,
-                industry: searchParams.industry,
-                region: searchParams.region,
-                status: searchParams.status,
-                page: page + 1, // API is 1-indexed
-                page_size: rowsPerPage, // 后端使用page_size而不是size
-            };
-
-            const response = await customerApi.getCustomers(params);
+            const response = await customerApi.getCustomers({
+                keyword: filters.keyword,
+                tags: filters.tags,
+                page: page + 1,
+                page_size: pageSize
+            });
             const data: PaginatedResponse<CustomerListItem> = response.data;
 
             setCustomers(data.items);
-            setTotalCount(data.total);
+            setTotal(data.total);
         } catch (err: any) {
             console.error('加载客户列表失败:', err);
             const errorMessage = err.response?.data?.detail || err.message || '加载客户列表失败';
             setError(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
+            showSnackbar(errorMessage, 'error');
             setCustomers([]);
-            setTotalCount(0);
+            setTotal(0);
         } finally {
             setLoading(false);
         }
@@ -168,534 +177,301 @@ export const CustomerManagementPage: React.FC = () => {
 
     // 根据路由参数加载移动端客户数据
     useEffect(() => {
-        if (currentCustomerId && (isDetailView || isEditView || isCopyView)) {
+        if (currentCustomerId && (isDetailView || isEditView)) {
             loadMobileCustomerData(currentCustomerId);
         } else {
             setMobileCustomerData(null);
             setMobileCustomerError(null);
         }
-    }, [currentCustomerId, isDetailView, isEditView, isCopyView]);
+    }, [currentCustomerId, isDetailView, isEditView]);
 
     // 监听搜索参数变化自动重新加载
     useEffect(() => {
-        loadCustomers();
-    }, [searchParams, page, rowsPerPage]);
+        fetchCustomers();
+    }, [filters, page, pageSize]);
 
-    // 分页处理函数
-    const handleChangePage = (event: unknown, newPage: number) => {
-        setPage(newPage);
-        const newParams = {
-            ...searchParams,
-            page: newPage + 1, // Material-UI pagination is 0-based
-            size: rowsPerPage // 保持当前的每页行数
-        };
-        setSearchParams(newParams);
-    };
-
-    const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const newSize = parseInt(event.target.value, 10);
-        setRowsPerPage(newSize);
-        setPage(0);
-        const newParams = {
-            ...searchParams,
-            page: 1,
-            size: newSize
-        };
-        setSearchParams(newParams);
-    };
-
-  
-    // 处理筛选条件变化（自动查询）
-    const handleFilterChange = (field: keyof CustomerListParams, value: string | undefined) => {
-        const newParams = {
-            ...searchParams,
-            [field]: value,
-        };
-        setSearchParams(newParams);
-        setPage(0); // Material-UI pagination is 0-based，重置到第一页
-    };
-
-    // 搜索函数
-    const handleSearch = () => {
-        setPage(0); // Ensure search starts from the first page
-        loadCustomers();
-    };
-
-    // 打开客户对话框
-    const handleOpenDialog = async (mode: 'create' | 'edit' | 'view' | 'copy', customer?: CustomerListItem) => {
-        if (isMobile) {
-            // 移动端使用路由导航
-            if (mode === 'create') {
-                // 移动端新增也使用独立路由
-                navigate('/customer/profiles/create');
-            } else if (customer && (mode === 'view' || mode === 'edit' || mode === 'copy')) {
-                let route = `/customer/profiles`;
-                if (mode === 'view') {
-                    route += `/view/${customer.id}`;
-                } else if (mode === 'edit') {
-                    route += `/edit/${customer.id}`;
-                } else if (mode === 'copy') {
-                    route += `/copy/${customer.id}`;
-                }
-                navigate(route);
-            }
-            return;
+    // 监听location.state变化，处理移动端返回后的刷新
+    useEffect(() => {
+        if ((location.state as any)?.refresh) {
+            fetchCustomers();
+            navigate('/customer/profiles', { replace: true, state: {} });
         }
-
-        // 桌面端使用对话框
-        if (mode === 'view' && customer) {
-            // 查看模式使用新的详情对话框
-            setSelectedCustomerId(customer.id);
-            setDetailsDialogOpen(true);
-            return;
-        }
-
-        // 其他模式使用编辑对话框
-        setDialogMode(mode);
-
-        if (mode === 'create') {
-            // 创建模式不需要客户数据
-            setSelectedCustomer(null);
-            setDialogOpen(true);
-        } else if (customer) {
-            // 编辑、复制模式需要获取完整的客户数据
-            try {
-                const response = await customerApi.getCustomer(customer.id);
-                setSelectedCustomer(response.data);
-                setDialogOpen(true);
-            } catch (err: any) {
-                console.error('获取客户详情失败:', err);
-                const errorMessage = err.response?.data?.detail || err.message || '获取客户详情失败';
-                setError(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
-            }
-        }
-    };
-
-    // 关闭编辑对话框
-    const handleCloseDialog = () => {
-        setDialogOpen(false);
-        setSelectedCustomer(null);
-    };
-
-    // 关闭详情对话框
-    const handleCloseDetailsDialog = () => {
-        setDetailsDialogOpen(false);
-        setSelectedCustomerId(null);
-    };
-
-    // 从详情对话框处理编辑
-    const handleEditFromDetails = (customerId: string) => {
-        if (isMobile) {
-            // 移动端使用路由导航
-            navigate(`/customer/profiles/edit/${customerId}`);
-        } else {
-            // 桌面端关闭详情对话框，打开编辑对话框
-            setDetailsDialogOpen(false);
-            setSelectedCustomerId(null);
-
-            // 获取客户数据并打开编辑对话框
-            customerApi.getCustomer(customerId)
-                .then(response => {
-                    setSelectedCustomer(response.data);
-                    setDialogMode('edit');
-                    setDialogOpen(true);
-                })
-                .catch(err => {
-                    console.error('获取客户详情失败:', err);
-                    const errorMessage = err.response?.data?.detail || err.message || '获取客户详情失败';
-                    setError(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
-                });
-        }
-    };
-
-    // 从详情对话框处理复制
-    const handleCopyFromDetails = (customerId: string) => {
-        if (isMobile) {
-            // 移动端使用路由导航
-            navigate(`/customer/profiles/copy/${customerId}`);
-        } else {
-            // 桌面端关闭详情对话框，打开复制对话框
-            setDetailsDialogOpen(false);
-            setSelectedCustomerId(null);
-
-            // 获取客户数据并打开复制对话框
-            customerApi.getCustomer(customerId)
-                .then(response => {
-                    setSelectedCustomer(response.data);
-                    setDialogMode('copy');
-                    setDialogOpen(true);
-                })
-                .catch(err => {
-                    console.error('获取客户详情失败:', err);
-                    const errorMessage = err.response?.data?.detail || err.message || '获取客户详情失败';
-                    setError(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
-                });
-        }
-    };
+    }, [location.state]);
 
     // 移动端返回列表
     const handleBackToList = () => {
         navigate('/customer/profiles');
     };
 
-    // 重置筛选条件
-    const handleResetFilters = () => {
-        const resetParams: CustomerListParams = {
-            keyword: '',
-            user_type: '',
-            industry: '',
-            region: '',
-            status: undefined
-        };
-        setSearchParams(resetParams);
-        setPage(0); // 重置页码
-        loadCustomers();
+    // 操作处理
+    const handleCreate = () => {
+        if (isMobile) {
+            navigate('/customer/profiles/create');
+        } else {
+            setSelectedCustomer(null);
+            setEditorMode('create');
+            setIsEditorOpen(true);
+        }
+    };
+
+    const handleView = (customer: CustomerListItem) => {
+        if (isMobile) {
+            navigate(`/customer/profiles/view/${customer.id}`);
+        } else {
+            setSelectedCustomerId(customer.id);
+            setIsDetailsDialogOpen(true);
+        }
+    };
+
+    const handleEdit = async (customer: CustomerListItem) => {
+        if (isMobile) {
+            navigate(`/customer/profiles/edit/${customer.id}`);
+        } else {
+            try {
+                const response = await customerApi.getCustomer(customer.id);
+                setSelectedCustomer(response.data);
+                setEditorMode('edit');
+                setIsEditorOpen(true);
+            } catch (err: any) {
+                console.error('加载客户详情失败:', err);
+                showSnackbar(err.response?.data?.detail || err.message || '加载客户详情失败', 'error');
+            }
+        }
+    };
+
+    const handleDeleteClick = (customer: CustomerListItem) => {
+        setCustomerToDelete(customer);
+        setDeleteDialogOpen(true);
+    };
+
+    const handleDeleteConfirm = async (password: string) => {
+        if (!customerToDelete) return;
+
+        await customerApi.deleteCustomer(customerToDelete.id, password);
+        setDeleteDialogOpen(false);
+        setCustomerToDelete(null);
+        fetchCustomers();
+        showSnackbar('客户删除成功', 'success');
+    };
+
+    // Note: handleSearch is technically redundant due to useEffect, removed for clarity in this version or could call setPage(0)
+    // Actually needed if we want manual triggering, but the filter effect handles it.
+    // Keeping utility functions for resetting.
+    const handleReset = () => {
+        setFilters({ keyword: '', tags: [] });
+        setPage(0);
+    };
+
+    // 标签筛选变化处理
+    const handleTagsChange = (tags: string[]) => {
+        setFilters(prev => ({ ...prev, tags }));
+        setPage(0);
+    };
+
+    // 详情对话框处理函数
+    const handleCloseDetailsDialog = () => {
+        setIsDetailsDialogOpen(false);
+        setSelectedCustomerId(null);
+    };
+
+    // 从详情对话框处理编辑
+    const handleEditFromDetails = (customerId: string) => {
+        if (isMobile) {
+            navigate(`/customer/profiles/edit/${customerId}`);
+        } else {
+            setIsDetailsDialogOpen(false);
+            setSelectedCustomerId(null);
+
+            customerApi.getCustomer(customerId)
+                .then(response => {
+                    setSelectedCustomer(response.data);
+                    setEditorMode('edit');
+                    setIsEditorOpen(true);
+                })
+                .catch(err => {
+                    console.error('获取客户详情失败:', err);
+                    showSnackbar(err.response?.data?.detail || err.message || '获取客户详情失败', 'error');
+                });
+        }
     };
 
     // 保存成功后的回调
     const handleSaveSuccess = () => {
         if (isMobile && isCreateView) {
-            // 移动端新增成功后返回列表
-            navigate('/customer/profiles');
-        } else if (isMobile && (isEditView || isCopyView)) {
-            // 移动端编辑/复制成功后返回详情页
+            navigate('/customer/profiles', { state: { refresh: true } });
+        } else if (isMobile && isEditView) {
             if (currentCustomerId) {
                 navigate(`/customer/profiles/view/${currentCustomerId}`);
             } else {
                 navigate('/customer/profiles');
             }
         } else {
-            // 桌面端成功后关闭对话框并重新加载列表
-            handleCloseDialog();
-            loadCustomers(); // 重新加载列表
+            setIsEditorOpen(false);
+            setSelectedCustomer(null);
+            fetchCustomers();
+            showSnackbar(
+                editorMode === 'create' ? '客户创建成功' : '客户更新成功',
+                'success'
+            );
         }
     };
 
-    // 删除客户
-    const handleDeleteCustomer = async (customer: CustomerListItem) => {
-        if (!window.confirm(`确定要删除客户"${customer.user_name}"吗？此操作不可撤销。`)) {
-            return;
-        }
+    // 获取标签颜色
+    const getTagColor = (tag: Tag) => {
+        return tag.source === 'AUTO' ? 'secondary' : 'primary';
+    };
 
+    // 渲染标签列表 (最多显示3个)
+    const renderTags = (tags: Tag[]) => {
+        const maxDisplay = 3;
+        const displayTags = tags.slice(0, maxDisplay);
+        const remaining = tags.length - maxDisplay;
+
+        return (
+            <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                {displayTags.map((tag, index) => (
+                    <Chip
+                        key={index}
+                        label={tag.name}
+                        size="small"
+                        color={getTagColor(tag)}
+                        variant="filled"
+                    />
+                ))}
+                {remaining > 0 && (
+                    <Chip
+                        label={`+${remaining}`}
+                        size="small"
+                        variant="outlined"
+                    />
+                )}
+            </Box>
+        );
+    };
+
+    // 同步处理
+    const handleOpenSync = async () => {
+        setLoading(true);
         try {
-            await customerApi.deleteCustomer(customer.id);
-            loadCustomers(); // 重新加载列表
+            const response = await getSyncPreview();
+            setSyncCandidates(response.data);
+            setSyncDialogOpen(true);
         } catch (err: any) {
-            console.error('删除客户失败:', err);
-            const errorMessage = err.response?.data?.detail || err.message || '删除客户失败';
-        setError(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
+            console.error('Failed to get sync preview:', err);
+            showSnackbar(err.response?.data?.detail || '获取同步数据失败', 'error');
+        } finally {
+            setLoading(false);
         }
     };
 
-    // 状态转换操作
-    const handleSignContract = async (customer: CustomerListItem) => {
-        if (!window.confirm(`确定要将客户"${customer.user_name}"标记为已签约吗？`)) {
-            return;
-        }
-        try {
-            await customerApi.signContract(customer.id);
-            loadCustomers();
-        } catch (err: any) {
-            const errorMessage = err.response?.data?.detail || err.message || '签约操作失败';
-            setError(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
-        }
+    const handleSyncSuccess = (created: number, updated: number) => {
+        showSnackbar(`同步成功: 新增 ${created} 条, 更新 ${updated} 条`, 'success');
+        fetchCustomers();
     };
 
-    const handleActivate = async (customer: CustomerListItem) => {
-        if (!window.confirm(`确定要将客户"${customer.user_name}"的合同标记为生效吗？`)) {
-            return;
-        }
-        try {
-            await customerApi.activate(customer.id);
-            loadCustomers();
-        } catch (err: any) {
-            const errorMessage = err.response?.data?.detail || err.message || '生效操作失败';
-            setError(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
-        }
-    };
 
-    const handleSuspend = async (customer: CustomerListItem) => {
-        const reason = window.prompt(`请输入暂停客户"${customer.user_name}"的原因：`);
-        if (reason === null) return; // 用户取消
-        try {
-            await customerApi.suspend(customer.id, reason || undefined);
-            loadCustomers();
-        } catch (err: any) {
-            const errorMessage = err.response?.data?.detail || err.message || '暂停操作失败';
-            setError(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
-        }
-    };
-
-    const handleResume = async (customer: CustomerListItem) => {
-        if (!window.confirm(`确定要恢复客户"${customer.user_name}"的服务吗？`)) {
-            return;
-        }
-        try {
-            await customerApi.resume(customer.id);
-            loadCustomers();
-        } catch (err: any) {
-            const errorMessage = err.response?.data?.detail || err.message || '恢复操作失败';
-            setError(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
-        }
-    };
-
-    const handleTerminate = async (customer: CustomerListItem) => {
-        const reason = window.prompt(`请输入终止客户"${customer.user_name}"的原因：`);
-        if (reason === null) return; // 用户取消
-        if (!window.confirm('确定要终止该客户吗？终止后将无法再编辑。')) {
-            return;
-        }
-        try {
-            await customerApi.terminate(customer.id, reason || undefined);
-            loadCustomers();
-        } catch (err: any) {
-            const errorMessage = err.response?.data?.detail || err.message || '终止操作失败';
-            setError(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
-        }
-    };
-
-    const handleCancelContract = async (customer: CustomerListItem) => {
-        const reason = window.prompt(`请输入撤销客户"${customer.user_name}"合同的原因：`);
-        if (reason === null) return; // 用户取消
-        if (!window.confirm('确定要撤销该客户的合同吗？撤销后客户将标记为已终止。')) {
-            return;
-        }
-        try {
-            await customerApi.cancelContract(customer.id, reason || undefined);
-            loadCustomers();
-        } catch (err: any) {
-            const errorMessage = err.response?.data?.detail || err.message || '撤销操作失败';
-            setError(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
-        }
-    };
-
-    // 获取状态颜色
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case 'prospect':
-                return 'default';     // 意向客户 - 灰色
-            case 'pending':
-                return 'info';        // 待生效 - 蓝色
-            case 'active':
-                return 'success';     // 执行中 - 绿色
-            case 'suspended':
-                return 'warning';     // 已暂停 - 橙色
-            case 'terminated':
-                return 'error';       // 已终止 - 红色
-            default:
-                return 'default';
-        }
-    };
-
-    // 获取状态文本
-    const getStatusText = (status: string) => {
-        switch (status) {
-            case 'prospect':
-                return '意向客户';
-            case 'pending':
-                return '待生效';
-            case 'active':
-                return '执行中';
-            case 'suspended':
-                return '已暂停';
-            case 'terminated':
-                return '已终止';
-            default:
-                return status;
-        }
-    };
-
-    // 权限判断函数（根据状态机规则）
-    // 编辑权限：只有terminated不可编辑
-    const canEdit = (status: string) => status !== 'terminated';
-    // 删除权限：只有prospect可以删除
-    const canDelete = (status: string) => status === 'prospect';
-
-    // 获取每个状态下可用的操作
-    const getAvailableActions = (status: string) => {
-        const actions = {
-            canSignContract: false,    // 签约
-            canCancelContract: false,  // 撤销
-            canActivate: false,        // 生效
-            canSuspend: false,         // 暂停
-            canResume: false,          // 恢复
-            canTerminate: false,       // 终止
-        };
-
-        switch (status) {
-            case 'prospect':
-                actions.canSignContract = true;  // 意向客户可以签约
-                break;
-            case 'pending':
-                actions.canCancelContract = true; // 待生效可以撤销
-                actions.canActivate = true;       // 待生效可以生效
-                break;
-            case 'active':
-                actions.canSuspend = true;        // 执行中可以暂停
-                actions.canTerminate = true;      // 执行中可以终止
-                break;
-            case 'suspended':
-                actions.canResume = true;         // 已暂停可以恢复
-                actions.canTerminate = true;      // 已暂停可以终止
-                break;
-            case 'terminated':
-                // 已终止无可用操作
-                break;
-        }
-
-        return actions;
-    };
-
-    // 渲染移动端卡片布局
+    // ========== 移动端卡片布局 ==========
     const renderMobileCards = () => (
         <Box>
             {customers.map((customer) => (
                 <Paper key={customer.id} variant="outlined" sx={{ p: 2, mb: 2 }}>
-                    {/* 客户名称（可点击） */}
+                    {/* 客户名称（作为卡片标题，可点击） */}
                     <Typography
-                        variant="subtitle1"
+                        variant="h6"
                         gutterBottom
                         sx={{
                             cursor: 'pointer',
                             color: 'primary.main',
                             '&:hover': { textDecoration: 'underline' },
-                            fontWeight: 'bold'
+                            fontWeight: 'bold',
+                            fontSize: '1.1rem',
+                            mb: 2
                         }}
-                        onClick={() => handleOpenDialog('view', customer)}
+                        onClick={() => handleView(customer)}
                     >
-                        {customer.user_name}
+                        {customer.user_name || '未命名客户'}
                     </Typography>
 
-                    {/* 基本信息 */}
-                    <Box sx={{ mb: 1 }}>
-                        <Typography variant="body2" color="text.secondary">用户类型:</Typography>
-                        <Typography variant="body2" sx={{ mb: 1 }}>{customer.user_type || '-'}</Typography>
-
-                        <Typography variant="body2" color="text.secondary">行业:</Typography>
-                        <Typography variant="body2" sx={{ mb: 1 }}>{customer.industry || '-'}</Typography>
-                    </Box>
-
-                    {/* 详细信息（两列布局） */}
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 2 }}>
-                        <Box sx={{ flex: '1 1 45%' }}>
-                            <Typography variant="body2" color="text.secondary">地市:</Typography>
-                            <Typography variant="body2">{customer.region || '-'}</Typography>
+                    {/* 信息行1：简称和气象区域 */}
+                    <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+                        <Box sx={{ flex: 1 }}>
+                            <Typography variant="body2" color="text.secondary">客户简称:</Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 'medium', mb: 1 }}>
+                                {customer.short_name || '-'}
+                            </Typography>
                         </Box>
-                        <Box sx={{ flex: '1 1 45%' }}>
-                            <Typography variant="body2" color="text.secondary">计量点数:</Typography>
-                            <Typography variant="body2">{customer.metering_point_count}</Typography>
-                        </Box>
-                        <Box sx={{ flex: '1 1 45%' }}>
-                            <Typography variant="body2" color="text.secondary">签约电量:</Typography>
-                            <Typography variant="body2">
-                                {customer.contracted_capacity ? `${customer.contracted_capacity.toLocaleString()} kWh` : '/'}
+                        <Box sx={{ flex: 1 }}>
+                            <Typography variant="body2" color="text.secondary">位置:</Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 'medium', mb: 1 }}>
+                                {customer.location || '-'}
                             </Typography>
                         </Box>
                     </Box>
 
-                    {/* 状态和操作区域 */}
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Typography variant="body2" color="text.secondary">状态:</Typography>
-                            <Chip
-                                label={getStatusText(customer.status)}
-                                color={getStatusColor(customer.status) as any}
-                                size="small"
-                            />
+                    {/* 信息行2：资产统计和标签 */}
+                    <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+                        <Box sx={{ flex: 1 }}>
+                            <Typography variant="body2" color="text.secondary">资产统计:</Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 'medium' }}>
+                                户:{customer.account_count} 表:{customer.meter_count} 点:{customer.mp_count}
+                            </Typography>
                         </Box>
-
-                        {/* 操作按钮 */}
-                        <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                            {/* 基础操作 */}
-                            {canEdit(customer.status) && (
-                                <Tooltip title="编辑客户">
-                                    <IconButton
-                                        size="small"
-                                        onClick={() => handleOpenDialog('edit', customer)}
-                                    >
-                                        <EditIcon fontSize="small" />
-                                    </IconButton>
-                                </Tooltip>
-                            )}
-                            <Tooltip title="复制客户">
-                                <IconButton size="small" onClick={() => handleOpenDialog('copy', customer)}>
-                                    <CopyIcon fontSize="small" />
-                                </IconButton>
-                            </Tooltip>
-                            {canDelete(customer.status) && (
-                                <Tooltip title="删除客户">
-                                    <IconButton
-                                        size="small"
-                                        onClick={() => handleDeleteCustomer(customer)}
-                                        color="error"
-                                    >
-                                        <DeleteIcon fontSize="small" />
-                                    </IconButton>
-                                </Tooltip>
-                            )}
-
-                            {/* 状态转换操作 */}
-                            {(() => {
-                                const actions = getAvailableActions(customer.status);
-                                return (
-                                    <>
-                                        {actions.canSignContract && (
-                                            <Tooltip title="签约">
-                                                <IconButton size="small" color="primary" onClick={() => handleSignContract(customer)}>
-                                                    <DescriptionIcon fontSize="small" />
-                                                </IconButton>
-                                            </Tooltip>
-                                        )}
-                                        {actions.canActivate && (
-                                            <Tooltip title="生效">
-                                                <IconButton size="small" color="success" onClick={() => handleActivate(customer)}>
-                                                    <PlayArrowIcon fontSize="small" />
-                                                </IconButton>
-                                            </Tooltip>
-                                        )}
-                                        {actions.canCancelContract && (
-                                            <Tooltip title="撤销">
-                                                <IconButton size="small" color="warning" onClick={() => handleCancelContract(customer)}>
-                                                    <CancelIcon fontSize="small" />
-                                                </IconButton>
-                                            </Tooltip>
-                                        )}
-                                        {actions.canSuspend && (
-                                            <Tooltip title="暂停">
-                                                <IconButton size="small" color="warning" onClick={() => handleSuspend(customer)}>
-                                                    <PauseIcon fontSize="small" />
-                                                </IconButton>
-                                            </Tooltip>
-                                        )}
-                                        {actions.canResume && (
-                                            <Tooltip title="恢复">
-                                                <IconButton size="small" color="success" onClick={() => handleResume(customer)}>
-                                                    <CheckCircleIcon fontSize="small" />
-                                                </IconButton>
-                                            </Tooltip>
-                                        )}
-                                        {actions.canTerminate && (
-                                            <Tooltip title="终止">
-                                                <IconButton size="small" color="error" onClick={() => handleTerminate(customer)}>
-                                                    <StopIcon fontSize="small" />
-                                                </IconButton>
-                                            </Tooltip>
-                                        )}
-                                    </>
-                                );
-                            })()}
+                        <Box sx={{ flex: 1 }}>
+                            <Typography variant="body2" color="text.secondary">标签:</Typography>
+                            {renderTags(customer.tags || [])}
                         </Box>
+                    </Box>
+
+                    {/* 操作按钮区域 */}
+                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.5 }}>
+                        <Tooltip title="查看">
+                            <IconButton size="small" onClick={() => handleView(customer)}>
+                                <VisibilityIcon fontSize="small" />
+                            </IconButton>
+                        </Tooltip>
+                        <Tooltip title="编辑">
+                            <IconButton size="small" onClick={() => handleEdit(customer)}>
+                                <EditIcon fontSize="small" />
+                            </IconButton>
+                        </Tooltip>
+                        <Tooltip title="删除">
+                            <IconButton size="small" onClick={() => handleDeleteClick(customer)} color="error">
+                                <DeleteIcon fontSize="small" />
+                            </IconButton>
+                        </Tooltip>
                     </Box>
                 </Paper>
             ))}
         </Box>
     );
 
+    // ========== 桌面端表格操作按钮 ==========
+    const renderTableActions = (customer: CustomerListItem) => (
+        <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+            <Tooltip title="查看">
+                <IconButton size="small" onClick={() => handleView(customer)}>
+                    <VisibilityIcon fontSize="small" />
+                </IconButton>
+            </Tooltip>
+            <Tooltip title="编辑">
+                <IconButton size="small" onClick={() => handleEdit(customer)}>
+                    <EditIcon fontSize="small" />
+                </IconButton>
+            </Tooltip>
+            <Tooltip title="删除">
+                <IconButton size="small" onClick={() => handleDeleteClick(customer)}>
+                    <DeleteIcon fontSize="small" color="error" />
+                </IconButton>
+            </Tooltip>
+        </Box>
+    );
+
+    // ========== 移动端路由视图 ==========
+
     // 移动端：渲染新增页面
     if (isMobile && isCreateView) {
         return (
             <Box sx={{ width: '100%' }}>
-                {/* 返回按钮和标题 */}
                 <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 }, mb: 2 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <IconButton onClick={handleBackToList} size="small">
@@ -705,7 +481,6 @@ export const CustomerManagementPage: React.FC = () => {
                     </Box>
                 </Paper>
 
-                {/* 客户新增内容 */}
                 <CustomerEditorDialog
                     open={true}
                     mode="create"
@@ -721,7 +496,6 @@ export const CustomerManagementPage: React.FC = () => {
     if (isMobile && isDetailView) {
         return (
             <Box sx={{ width: '100%' }}>
-                {/* 返回按钮和标题 */}
                 <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 }, mb: 2 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <IconButton onClick={handleBackToList} size="small">
@@ -731,44 +505,49 @@ export const CustomerManagementPage: React.FC = () => {
                     </Box>
                 </Paper>
 
-                {/* 客户详情内容 */}
                 {mobileCustomerLoading ? (
                     <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
                         <CircularProgress />
+                        <Typography variant="body2" sx={{ ml: 2 }}>正在加载客户详情...</Typography>
                     </Box>
                 ) : mobileCustomerError ? (
                     <Alert severity="error">{mobileCustomerError}</Alert>
                 ) : mobileCustomerData ? (
                     <CustomerDetailsDialog
                         open={true}
-                        customerId={mobileCustomerData.id}
+                        customerId={currentCustomerId || null}
                         onClose={handleBackToList}
-                        onEdit={handleEditFromDetails}
-                        onCopy={handleCopyFromDetails}
+                        onEdit={(customerId) => navigate(`/customer/profiles/edit/${customerId}`)}
                     />
-                ) : null}
+                ) : currentCustomerId ? (
+                    <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+                        <CircularProgress />
+                        <Typography variant="body2" sx={{ ml: 2 }}>正在加载客户数据...</Typography>
+                    </Box>
+                ) : (
+                    <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+                        <Typography variant="body2" color="text.secondary">
+                            未找到客户信息
+                        </Typography>
+                    </Box>
+                )}
             </Box>
         );
     }
 
     // 移动端：渲染编辑页面
-    if (isMobile && (isEditView || isCopyView)) {
-        const mode = isEditView ? 'edit' : 'copy';
+    if (isMobile && isEditView) {
         return (
             <Box sx={{ width: '100%' }}>
-                {/* 返回按钮和标题 */}
                 <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 }, mb: 2 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <IconButton onClick={handleBackToList} size="small">
                             <ArrowBackIcon />
                         </IconButton>
-                        <Typography variant="h6">
-                            {mode === 'edit' ? '编辑客户' : '复制客户'}
-                        </Typography>
+                        <Typography variant="h6">编辑客户</Typography>
                     </Box>
                 </Paper>
 
-                {/* 客户编辑内容 */}
                 {mobileCustomerLoading ? (
                     <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
                         <CircularProgress />
@@ -778,7 +557,7 @@ export const CustomerManagementPage: React.FC = () => {
                 ) : mobileCustomerData ? (
                     <CustomerEditorDialog
                         open={true}
-                        mode={mode}
+                        mode="edit"
                         customer={mobileCustomerData}
                         onClose={handleBackToList}
                         onSave={handleSaveSuccess}
@@ -788,6 +567,7 @@ export const CustomerManagementPage: React.FC = () => {
         );
     }
 
+    // ========== 主列表视图 ==========
     return (
         <Box sx={{ width: '100%' }}>
             {/* 移动端面包屑标题 */}
@@ -804,146 +584,134 @@ export const CustomerManagementPage: React.FC = () => {
                 </Typography>
             )}
 
-            {/* 查询筛选区域 */}
-            <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 }, mb: 2 }}>
-                {/* 移动端折叠标题 */}
+            {/* 查询区域 */}
+            <Paper variant="outlined" sx={{ mb: 2 }}>
+                {/* 移动端折叠标题栏 */}
                 {isMobile ? (
                     <Box
-                        onClick={() => setIsFilterExpanded(!isFilterExpanded)}
                         sx={{
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
+                            p: 1.5,
                             cursor: 'pointer',
-                            py: 1
+                            '&:hover': { backgroundColor: 'action.hover' }
                         }}
+                        onClick={() => setIsFilterExpanded(!isFilterExpanded)}
                     >
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <FilterListIcon />
-                            <Typography variant="subtitle1">筛选条件</Typography>
+                            <FilterListIcon sx={{ color: 'primary.main' }} />
+                            <Typography variant="subtitle1" sx={{ fontWeight: 'medium' }}>
+                                筛选条件
+                            </Typography>
                             {hasActiveFilters && (
                                 <Chip
-                                    label="已筛选"
                                     size="small"
+                                    label="已筛选"
                                     color="primary"
                                     variant="outlined"
                                 />
                             )}
                         </Box>
-                        {isFilterExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                        {isFilterExpanded ? (
+                            <ExpandLessIcon sx={{ color: 'text.secondary' }} />
+                        ) : (
+                            <ExpandMoreIcon sx={{ color: 'text.secondary' }} />
+                        )}
                     </Box>
                 ) : null}
 
-                {/* 桌面端始终显示，移动端折叠显示 */}
-                <Collapse in={!isMobile || isFilterExpanded}>
-                    <Box sx={{
-                        display: 'flex',
-                        gap: 2,
-                        flexWrap: 'wrap',
-                        alignItems: 'center',
-                        mt: isMobile ? 1 : 0
-                    }}>
-                        <TextField
-                            label="客户名称"
-                            variant="outlined"
-                            size="small"
-                            value={searchParams.keyword || ''}
-                            onChange={(e) => handleFilterChange('keyword', e.target.value)}
-                            InputProps={{
-                                startAdornment: (
-                                    <InputAdornment position="start">
-                                        <SearchIcon />
-                                    </InputAdornment>
-                                ),
-                            }}
-                            sx={{ width: { xs: '100%', sm: '200px' } }}
-                        />
-                        <FormControl variant="outlined" size="small" sx={{ width: { xs: '100%', sm: '150px' } }}>
-                            <InputLabel>用户类型</InputLabel>
-                            <Select
-                                value={searchParams.user_type || ''}
-                                label="用户类型"
-                                onChange={(e) => handleFilterChange('user_type', e.target.value)}
-                            >
-                                <MenuItem value="">全部</MenuItem>
-                                {customerApi.USER_TYPES.map((type) => (
-                                    <MenuItem key={type} value={type}>
-                                        {type}
-                                    </MenuItem>
-                                ))}
-                            </Select>
-                        </FormControl>
-                        <FormControl variant="outlined" size="small" sx={{ width: { xs: '100%', sm: '150px' } }}>
-                            <InputLabel>行业</InputLabel>
-                            <Select
-                                value={searchParams.industry || ''}
-                                label="行业"
-                                onChange={(e) => handleFilterChange('industry', e.target.value)}
-                            >
-                                <MenuItem value="">全部</MenuItem>
-                                {customerApi.INDUSTRIES.map((industry) => (
-                                    <MenuItem key={industry} value={industry}>
-                                        {industry}
-                                    </MenuItem>
-                                ))}
-                            </Select>
-                        </FormControl>
-                        <FormControl variant="outlined" size="small" sx={{ width: { xs: '100%', sm: '150px' } }}>
-                            <InputLabel>地市</InputLabel>
-                            <Select
-                                value={searchParams.region || ''}
-                                label="地市"
-                                onChange={(e) => handleFilterChange('region', e.target.value)}
-                            >
-                                <MenuItem value="">全部</MenuItem>
-                                {customerApi.REGIONS.map((region) => (
-                                    <MenuItem key={region} value={region}>
-                                        {region}
-                                    </MenuItem>
-                                ))}
-                            </Select>
-                        </FormControl>
-                        <FormControl variant="outlined" size="small" sx={{ width: { xs: '100%', sm: '150px' } }}>
-                            <InputLabel>状态</InputLabel>
-                            <Select
-                                value={searchParams.status || ''}
-                                label="状态"
-                                onChange={(e) => {
-                                    const targetValue = e.target.value as string;
-                                    if (targetValue === '') {
-                                        handleFilterChange('status', undefined);
-                                    } else {
-                                        handleFilterChange('status', targetValue as 'prospect' | 'pending' | 'active' | 'suspended' | 'terminated');
-                                    }
-                                }}
-                            >
-                                <MenuItem value="">所有</MenuItem>
-                                <MenuItem value="prospect">意向客户</MenuItem>
-                                <MenuItem value="pending">待生效</MenuItem>
-                                <MenuItem value="active">执行中</MenuItem>
-                                <MenuItem value="suspended">已暂停</MenuItem>
-                                <MenuItem value="terminated">已终止</MenuItem>
-                            </Select>
-                        </FormControl>
-                        <Button variant="contained" onClick={handleSearch} disabled={loading}>刷新</Button>
-                        <Button variant="outlined" onClick={handleResetFilters}>重置</Button>
-                    </Box>
-                </Collapse>
-            </Paper>
+                {/* 桌面端始终显示，移动端展开时显示 */}
+                {(!isMobile || isFilterExpanded) && (
+                    <Box sx={{ p: { xs: isMobile ? 1 : 2, sm: 2 } }}>
+                        <Box sx={{
+                            display: 'flex',
+                            gap: 2,
+                            flexWrap: 'wrap',
+                            alignItems: isMobile ? 'stretch' : 'center',
+                            flexDirection: isMobile ? 'column' : 'row'
+                        }}>
+                            {/* 搜索字段 */}
+                            <Box sx={{
+                                display: 'flex',
+                                gap: 2,
+                                flexWrap: 'wrap',
+                                width: isMobile ? '100%' : 'auto'
+                            }}>
+                                <TextField
+                                    label="客户名称/户号"
+                                    variant="outlined"
+                                    size="small"
+                                    value={filters.keyword || ''}
+                                    onChange={(e) => setFilters({ ...filters, keyword: e.target.value })}
+                                    sx={{ width: { xs: '100%', sm: '200px' } }}
+                                    placeholder="输入关键词搜索"
+                                />
 
-            {/* 错误提示 */}
-            {error && (
-                <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
-                    {error}
-                </Alert>
-            )}
+                                {/* 标签筛选 */}
+                                <TagFilter
+                                    selectedTags={filters.tags || []}
+                                    onChange={handleTagsChange}
+                                    onReset={() => setFilters(prev => ({ ...prev, tags: [] }))}
+                                />
+                            </Box>
+
+                            {/* 操作按钮 */}
+                            <Box sx={{
+                                display: 'flex',
+                                gap: 1,
+                                justifyContent: isMobile ? 'stretch' : 'flex-start',
+                                width: isMobile ? '100%' : 'auto',
+                                mt: isMobile ? 1 : 0
+                            }}>
+                                <Button
+                                    variant="outlined"
+                                    onClick={handleReset}
+                                    sx={{ width: isMobile ? '100%' : 'auto' }}
+                                >
+                                    重置
+                                </Button>
+                            </Box>
+                        </Box>
+
+                        {/* 移动端展开时添加关闭按钮 */}
+                        {isMobile && (
+                            <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
+                                <Button
+                                    variant="text"
+                                    onClick={() => setIsFilterExpanded(false)}
+                                    startIcon={<ExpandLessIcon />}
+                                    sx={{ color: 'text.secondary' }}
+                                >
+                                    收起筛选
+                                </Button>
+                            </Box>
+                        )}
+                    </Box>
+                )}
+            </Paper>
 
             {/* 列表区域 */}
             <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 } }}>
-                <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Button variant="contained" color="primary" onClick={() => handleOpenDialog('create')}>
+                {/* 工具栏 */}
+                <Box sx={{ mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    <Button
+                        variant="contained"
+                        color="primary"
+                        onClick={handleCreate}
+                    >
                         + 新增
                     </Button>
+                    <Tooltip title="同步交易平台48点测量点数据里的客户档案信息">
+                        <Button
+                            variant="outlined"
+                            startIcon={<SyncIcon />}
+                            onClick={handleOpenSync}
+                            disabled={loading}
+                        >
+                            同步数据
+                        </Button>
+                    </Tooltip>
                 </Box>
 
                 {/* 根据设备类型显示不同的布局 */}
@@ -961,219 +729,175 @@ export const CustomerManagementPage: React.FC = () => {
                                 </Typography>
                             </Box>
                         ) : (
-                            renderMobileCards()
+                            <>
+                                {renderMobileCards()}
+                                {/* 移动端分页 */}
+                                <TablePagination
+                                    rowsPerPageOptions={[10, 20]}
+                                    component="div"
+                                    count={total}
+                                    rowsPerPage={pageSize}
+                                    page={page}
+                                    onPageChange={(e, newPage) => setPage(newPage)}
+                                    onRowsPerPageChange={(e) => {
+                                        const newSize = parseInt(e.target.value, 10);
+                                        setPageSize(newSize);
+                                        setPage(0);
+                                    }}
+                                    labelRowsPerPage="行数:"
+                                    labelDisplayedRows={({ from, to, count }) => `${from}-${to}/${count}`}
+                                    sx={{
+                                        '& .MuiTablePagination-toolbar': {
+                                            paddingLeft: { xs: 1, sm: 2 },
+                                            paddingRight: { xs: 1, sm: 2 },
+                                        },
+                                        '& .MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows': {
+                                            fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                                        },
+                                        '& .MuiTablePagination-input': {
+                                            fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                                        }
+                                    }}
+                                />
+                            </>
                         )}
                     </Box>
                 ) : (
                     // 桌面端表格布局
-                    <TableContainer sx={{ overflowX: 'auto' }}>
-                        <Table
-                            sx={{
-                                '& .MuiTableCell-root': {
-                                    fontSize: { xs: '0.75rem', sm: '0.875rem' },
-                                    px: { xs: 0.5, sm: 2 },
-                                }
-                            }}
-                            aria-label="客户列表"
-                        >
-                            <TableHead>
-                                <TableRow>
-                                    <TableCell sx={{ minWidth: 120 }}>客户名称</TableCell>
-                                    <TableCell sx={{ minWidth: 100 }}>用户类型</TableCell>
-                                    <TableCell sx={{ minWidth: 100 }}>行业</TableCell>
-                                    <TableCell sx={{ minWidth: 100 }}>地市</TableCell>
-                                    <TableCell sx={{ minWidth: 80 }}>计量点数</TableCell>
-                                    <TableCell sx={{ minWidth: 100 }}>签约电量(kWh)</TableCell>
-                                    <TableCell sx={{ minWidth: 80 }}>状态</TableCell>
-                                    <TableCell sx={{ minWidth: 120 }}>操作</TableCell>
-                                </TableRow>
-                            </TableHead>
-                            <TableBody>
-                                {loading ? (
-                                    <TableRow>
-                                        <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
-                                            <CircularProgress />
-                                        </TableCell>
-                                    </TableRow>
-                                ) : customers.length === 0 ? (
-                                    <TableRow>
-                                        <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
-                                            <Typography color="text.secondary">
-                                                暂无数据
-                                            </Typography>
-                                        </TableCell>
-                                    </TableRow>
-                                ) : (
-                                    customers.map((customer) => (
-                                        <TableRow key={customer.id} hover>
-                                            <TableCell>
-                                                <Typography
-                                                    sx={{
-                                                        cursor: 'pointer',
-                                                        color: 'primary.main',
-                                                        '&:hover': { textDecoration: 'underline' }
-                                                    }}
-                                                    onClick={() => handleOpenDialog('view', customer)}
-                                                >
-                                                    {customer.user_name}
-                                                </Typography>
-                                            </TableCell>
-                                            <TableCell>{customer.user_type || '-'}</TableCell>
-                                            <TableCell>{customer.industry || '-'}</TableCell>
-                                            <TableCell>{customer.region || '-'}</TableCell>
-                                            <TableCell align="center">
-                                                <Chip
-                                                    label={customer.metering_point_count}
-                                                    size="small"
-                                                    color="primary"
-                                                    variant="outlined"
-                                                />
-                                            </TableCell>
-                                            <TableCell align="center">
-                                                {customer.contracted_capacity ? customer.contracted_capacity.toLocaleString() : '/'}
-                                            </TableCell>
-                                            <TableCell>
-                                                <Chip
-                                                    label={getStatusText(customer.status)}
-                                                    color={getStatusColor(customer.status) as any}
-                                                    size="small"
-                                                />
-                                            </TableCell>
-                                            <TableCell align="right">
-                                                <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                                                    {/* 基础操作 */}
-                                                    {canEdit(customer.status) && (
-                                                        <Tooltip title="编辑客户">
-                                                            <IconButton
-                                                                size="small"
-                                                                onClick={() => handleOpenDialog('edit', customer)}
+                    <>
+                        {loading ? (
+                            <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+                                <CircularProgress />
+                            </Box>
+                        ) : error ? (
+                            <Alert severity="error">{error}</Alert>
+                        ) : (
+                            <>
+                                <TableContainer sx={{ overflowX: 'auto' }}>
+                                    <Table sx={{
+                                        '& .MuiTableCell-root': {
+                                            fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                                            px: { xs: 0.5, sm: 2 },
+                                        }
+                                    }}>
+                                        <TableHead>
+                                            <TableRow>
+                                                <TableCell>客户名称</TableCell>
+                                                <TableCell>位置</TableCell>
+                                                <TableCell>标签</TableCell>
+                                                <TableCell>资产统计</TableCell>
+                                                <TableCell align="right">操作</TableCell>
+                                            </TableRow>
+                                        </TableHead>
+                                        <TableBody>
+                                            {customers.length === 0 ? (
+                                                <TableRow>
+                                                    <TableCell colSpan={5} sx={{ textAlign: 'center', py: 3 }}>
+                                                        <Typography variant="body2" color="text.secondary">暂无数据</Typography>
+                                                    </TableCell>
+                                                </TableRow>
+                                            ) : (
+                                                customers.map((customer) => (
+                                                    <TableRow key={customer.id}>
+                                                        <TableCell>
+                                                            <Typography
+                                                                sx={{
+                                                                    cursor: 'pointer',
+                                                                    color: 'primary.main',
+                                                                    '&:hover': { textDecoration: 'underline' }
+                                                                }}
+                                                                onClick={() => handleView(customer)}
                                                             >
-                                                                <EditIcon fontSize="small" />
-                                                            </IconButton>
-                                                        </Tooltip>
-                                                    )}
-                                                    <Tooltip title="复制客户">
-                                                        <IconButton size="small" onClick={() => handleOpenDialog('copy', customer)}>
-                                                            <CopyIcon fontSize="small" />
-                                                        </IconButton>
-                                                    </Tooltip>
-                                                    {canDelete(customer.status) && (
-                                                        <Tooltip title="删除客户">
-                                                            <IconButton
-                                                                size="small"
-                                                                onClick={() => handleDeleteCustomer(customer)}
-                                                                color="error"
-                                                            >
-                                                                <DeleteIcon fontSize="small" />
-                                                            </IconButton>
-                                                        </Tooltip>
-                                                    )}
+                                                                {customer.user_name || '未命名客户'}
+                                                            </Typography>
+                                                            {customer.short_name && (
+                                                                <Typography variant="caption" color="text.secondary" display="block">
+                                                                    ({customer.short_name})
+                                                                </Typography>
+                                                            )}
+                                                        </TableCell>
+                                                        <TableCell>{customer.location || '-'}</TableCell>
+                                                        <TableCell>{renderTags(customer.tags || [])}</TableCell>
+                                                        <TableCell>
+                                                            户:{customer.account_count} 表:{customer.meter_count} 点:{customer.mp_count}
+                                                        </TableCell>
+                                                        <TableCell align="right" sx={{ pr: 1 }}>{renderTableActions(customer)}</TableCell>
+                                                    </TableRow>
+                                                ))
+                                            )}
+                                        </TableBody>
+                                    </Table>
+                                </TableContainer>
 
-                                                    {/* 状态转换操作 */}
-                                                    {(() => {
-                                                        const actions = getAvailableActions(customer.status);
-                                                        return (
-                                                            <>
-                                                                {actions.canSignContract && (
-                                                                    <Tooltip title="签约">
-                                                                        <IconButton size="small" color="primary" onClick={() => handleSignContract(customer)}>
-                                                                            <DescriptionIcon fontSize="small" />
-                                                                        </IconButton>
-                                                                    </Tooltip>
-                                                                )}
-                                                                {actions.canActivate && (
-                                                                    <Tooltip title="生效">
-                                                                        <IconButton size="small" color="success" onClick={() => handleActivate(customer)}>
-                                                                            <PlayArrowIcon fontSize="small" />
-                                                                        </IconButton>
-                                                                    </Tooltip>
-                                                                )}
-                                                                {actions.canCancelContract && (
-                                                                    <Tooltip title="撤销">
-                                                                        <IconButton size="small" color="warning" onClick={() => handleCancelContract(customer)}>
-                                                                            <CancelIcon fontSize="small" />
-                                                                        </IconButton>
-                                                                    </Tooltip>
-                                                                )}
-                                                                {actions.canSuspend && (
-                                                                    <Tooltip title="暂停">
-                                                                        <IconButton size="small" color="warning" onClick={() => handleSuspend(customer)}>
-                                                                            <PauseIcon fontSize="small" />
-                                                                        </IconButton>
-                                                                    </Tooltip>
-                                                                )}
-                                                                {actions.canResume && (
-                                                                    <Tooltip title="恢复">
-                                                                        <IconButton size="small" color="success" onClick={() => handleResume(customer)}>
-                                                                            <CheckCircleIcon fontSize="small" />
-                                                                        </IconButton>
-                                                                    </Tooltip>
-                                                                )}
-                                                                {actions.canTerminate && (
-                                                                    <Tooltip title="终止">
-                                                                        <IconButton size="small" color="error" onClick={() => handleTerminate(customer)}>
-                                                                            <StopIcon fontSize="small" />
-                                                                        </IconButton>
-                                                                    </Tooltip>
-                                                                )}
-                                                            </>
-                                                        );
-                                                    })()}
-                                                </Box>
-                                            </TableCell>
-                                        </TableRow>
-                                    ))
-                                )}
-                            </TableBody>
-                        </Table>
-                    </TableContainer>
+                                {/* 分页 */}
+                                <TablePagination
+                                    component="div"
+                                    count={total}
+                                    page={page}
+                                    onPageChange={(e, newPage) => setPage(newPage)}
+                                    rowsPerPage={pageSize}
+                                    onRowsPerPageChange={(e) => {
+                                        setPageSize(parseInt(e.target.value, 10));
+                                        setPage(0);
+                                    }}
+                                    rowsPerPageOptions={[10, 25, 50]}
+                                    labelRowsPerPage="每页行数:"
+                                />
+                            </>
+                        )}
+                    </>
                 )}
-
-                {/* 分页 */}
-                <TablePagination
-                    rowsPerPageOptions={isMobile ? [10, 20] : [5, 10, 20]}
-                    component="div"
-                    count={totalCount}
-                    rowsPerPage={rowsPerPage || 10}
-                    page={page || 0}
-                    onPageChange={handleChangePage}
-                    onRowsPerPageChange={handleChangeRowsPerPage}
-                    labelRowsPerPage={isMobile ? "行数:" : "每页行数:"}
-                    labelDisplayedRows={({ from, to, count }) =>
-                        isMobile ? `${from}-${to}/${count}` : `${from}-${to} 共 ${count} 条`
-                    }
-                    sx={{
-                        '& .MuiTablePagination-toolbar': {
-                            paddingLeft: { xs: 1, sm: 2 },
-                            paddingRight: { xs: 1, sm: 2 },
-                        },
-                        '& .MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows': {
-                            fontSize: { xs: '0.75rem', sm: '0.875rem' },
-                        },
-                        '& .MuiTablePagination-input': {
-                            fontSize: { xs: '0.75rem', sm: '0.875rem' },
-                        }
-                    }}
-                />
             </Paper>
 
-            {/* 客户编辑对话框 */}
+            {/* 桌面端对话框 */}
             <CustomerEditorDialog
-                open={dialogOpen}
-                mode={dialogMode}
+                open={isEditorOpen}
+                mode={editorMode}
                 customer={selectedCustomer}
-                onClose={handleCloseDialog}
+                onClose={() => {
+                    setIsEditorOpen(false);
+                    setSelectedCustomer(null);
+                }}
                 onSave={handleSaveSuccess}
             />
 
-            {/* 客户详情对话框 */}
             <CustomerDetailsDialog
-                open={detailsDialogOpen}
+                open={isDetailsDialogOpen}
                 customerId={selectedCustomerId}
                 onClose={handleCloseDetailsDialog}
                 onEdit={handleEditFromDetails}
-                onCopy={handleCopyFromDetails}
             />
+
+            <DeleteConfirmDialog
+                open={deleteDialogOpen}
+                customerName={customerToDelete?.user_name}
+                onClose={() => {
+                    setDeleteDialogOpen(false);
+                    setCustomerToDelete(null);
+                }}
+                onConfirm={handleDeleteConfirm}
+            />
+
+            <SyncConfirmDialog
+                open={syncDialogOpen}
+                candidates={syncCandidates}
+                onClose={() => setSyncDialogOpen(false)}
+                onSyncSuccess={handleSyncSuccess}
+            />
+
+            {/* Snackbar */}
+            <Snackbar
+                open={snackbar.open}
+                autoHideDuration={3000}
+                onClose={handleSnackbarClose}
+                anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+            >
+                <Alert onClose={handleSnackbarClose} severity={snackbar.severity} sx={{ width: '100%' }}>
+                    {snackbar.message}
+                </Alert>
+            </Snackbar>
         </Box>
     );
 };
+
+export default CustomerManagementPage;

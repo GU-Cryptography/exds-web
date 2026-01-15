@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from typing import Optional, List
+from datetime import datetime
 from webapp.models.customer import (
     Customer, CustomerCreate, CustomerUpdate, CustomerListResponse,
-    MeterInfo, SyncUpdateRequest
+    MeterInfo, SyncUpdateRequest, SyncCandidate, SyncRequest
 )
 from webapp.services.customer_service import CustomerService
 from webapp.tools.mongo import DATABASE
@@ -38,33 +39,46 @@ async def create_customer(
             )
 
 
+@router.get("/sync-preview", response_model=List[SyncCandidate])
+async def preview_sync_data(
+    current_user: User = Depends(get_current_active_user)
+):
+    """预览从原始数据同步的客户"""
+    service = CustomerService(DATABASE)
+    return service.preview_sync_data()
+
+
+@router.post("/sync", response_model=dict)
+async def sync_customers(
+    request: SyncRequest,
+    current_user: User = Depends(get_current_active_user)
+):
+    """批量同步客户数据"""
+    service = CustomerService(DATABASE)
+    result = service.sync_customers(request.candidates, current_user.username)
+    return result
+
+
 @router.get("", response_model=CustomerListResponse)
 async def list_customers(
-    keyword: Optional[str] = Query(None, description="搜索关键词（客户全称或简称）"),
-    user_type: Optional[str] = Query(None, description="客户类型"),
-    industry: Optional[str] = Query(None, description="行业"),
-    voltage: Optional[str] = Query(None, description="电压等级"),
-    region: Optional[str] = Query(None, description="地区"),
-    status: Optional[str] = Query(None, description="状态"),
+    keyword: Optional[str] = Query(None, description="搜索关键词（客户全称、简称或户号）"),
+    tags: Optional[List[str]] = Query(None, description="标签筛选（多选）"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
     current_user: User = Depends(get_current_active_user)
 ):
-    """获取客户列表"""
+    """获取客户列表 (v2)"""
     service = CustomerService(DATABASE)
     result = service.list(
         filters={
             "keyword": keyword,
-            "user_type": user_type,
-            "industry": industry,
-            "voltage": voltage,
-            "region": region,
-            "status": status
+            "tags": tags
         },
         page=page,
         page_size=page_size
     )
     return result
+
 
 
 @router.get("/{customer_id}", response_model=dict)
@@ -121,9 +135,20 @@ async def update_customer(
 @router.delete("/{customer_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_customer(
     customer_id: str,
+    password: str = Body(..., embed=True, description="当前用户登录密码"),
     current_user: User = Depends(get_current_active_user)
 ):
-    """删除客户（软删除）"""
+    """删除客户（需密码确认）"""
+    # 验证密码
+    from webapp.tools.security import verify_password, get_user
+    from webapp.tools.mongo import DATABASE as db_instance
+    user_in_db = get_user(db_instance, current_user.username)
+    if not user_in_db or not verify_password(password, user_in_db.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="密码验证失败"
+        )
+
     service = CustomerService(DATABASE)
     try:
         service.delete(customer_id)
@@ -133,6 +158,8 @@ async def delete_customer(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
+
+
 
 
 # 户号管理接口
@@ -556,3 +583,100 @@ async def terminate(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=error_msg
             )
+
+
+# ==================== 客户标签管理接口 ====================
+
+@router.get("/customer-tags", response_model=List[dict])
+async def get_customer_tags(
+    current_user: User = Depends(get_current_active_user)
+):
+    """获取所有可用的客户标签"""
+    from webapp.tools.mongo import DATABASE
+    tags_collection = DATABASE.customer_tags
+    
+    # 获取所有标签
+    tags = list(tags_collection.find({}).sort("name", 1))
+    
+    # 转换 _id 为字符串
+    result = []
+    for tag in tags:
+        result.append({
+            "_id": str(tag["_id"]),
+            "name": tag.get("name", ""),
+            "category": tag.get("category"),
+            "description": tag.get("description")
+        })
+    
+    return result
+
+
+@router.post("/customer-tags", response_model=dict)
+async def create_customer_tag(
+    tag_data: dict = Body(...),
+    current_user: User = Depends(get_current_active_user)
+):
+    """创建新的客户标签"""
+    from webapp.tools.mongo import DATABASE
+    from bson import ObjectId
+    
+    tags_collection = DATABASE.customer_tags
+    
+    # 检查标签名称是否已存在
+    existing = tags_collection.find_one({"name": tag_data.get("name")})
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"标签 '{tag_data.get('name')}' 已存在"
+        )
+    
+    # 创建新标签
+    new_tag = {
+        "name": tag_data.get("name"),
+        "category": tag_data.get("category"),
+        "description": tag_data.get("description"),
+        "created_by": current_user.username,
+        "created_at": datetime.utcnow()
+    }
+    
+    result = tags_collection.insert_one(new_tag)
+    
+    return {
+        "_id": str(result.inserted_id),
+        "name": new_tag["name"],
+        "category": new_tag.get("category"),
+        "description": new_tag.get("description")
+    }
+
+
+# ==================== 客户关联合同查询接口 ====================
+
+@router.get("/{customer_id}/contracts", response_model=List[dict])
+async def get_customer_contracts(
+    customer_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    """获取客户关联的零售合同"""
+    from webapp.tools.mongo import DATABASE
+    from bson import ObjectId
+    
+    contracts_collection = DATABASE.retail_contracts
+    
+    # 查询该客户的所有合同
+    contracts = list(contracts_collection.find(
+        {"customer_id": customer_id}
+    ).sort("purchase_start_month", -1))
+    
+    # 转换数据格式
+    result = []
+    for contract in contracts:
+        result.append({
+            "_id": str(contract["_id"]),
+            "contract_name": contract.get("contract_name", ""),
+            "package_name": contract.get("package_name"),
+            "start_date": contract.get("purchase_start_month").isoformat() if contract.get("purchase_start_month") else None,
+            "end_date": contract.get("purchase_end_month").isoformat() if contract.get("purchase_end_month") else None,
+            "contracted_quantity": contract.get("purchasing_electricity_quantity")
+        })
+    
+    return result

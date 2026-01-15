@@ -2,7 +2,7 @@
 
 本文档详细描述了 "电力交易辅助决策系统" 项目中主要数据集（MongoDB 集合）的结构、字段含义及索引信息。
 
-## 1. `customers` - 客户档案
+## 1. `customer_archives` - 客户档案
 
 该集合存储所有客户的详细档案信息。
 
@@ -15,44 +15,35 @@
 | `_id` | `ObjectId` | 客户唯一ID |
 | `user_name` | `String` | 客户全称 |
 | `short_name` | `String` | 客户简称 |
-| `user_type` | `String` | 客户类型 |
-| `industry` | `String` | 所属行业 |
-| `voltage` | `String` | 电压等级 |
-| `region` | `String` | 地区 |
-| `district` | `String` | 区县 |
-| `address` | `String` | 详细地址 |
-| `location` | `Object` | 地理位置信息 |
-| `location.type` | `String` | 类型，固定为 "Point" |
-| `location.coordinates`| `Array` | 经纬度坐标 [longitude, latitude] |
-| `contact_person` | `String` | 联系人 |
-| `contact_phone` | `String` | 联系电话 |
-| `utility_accounts`| `Array` | 户号列表 |
-| `utility_accounts.account_id` | `String` | 户号 |
-| `utility_accounts.meters` | `Array` | 挂载在该户号下的电表列表 |
-| `utility_accounts.meters.meter_id` | `String` | 电表资产号 |
-| `utility_accounts.meters.multiplier` | `Number` | 倍率 |
-| `utility_accounts.meters.allocation_ratio` | `Number` | 结算分配系数，范围 0-1.0。**默认为空 (null)**，非空表示该电表已通过 RPA 校验。 |
-| `status` | `String` | 客户状态，枚举值: "prospect", "pending", "active", "suspended", "terminated" |
-| `created_at` | `DateTime` | 创建时间 |
-| `updated_at` | `DateTime` | 更新时间 |
-| `created_by` | `String` | 创建人 |
-| `updated_by` | `String` | 更新人 |
+| `location` | `String` | 地理位置信息,关联`weather_location` 集合 `name` 字段 |
+| `source` | `String` | 客户来源（自营开发、居间代理A、居间代理B） |
+| `manager` | `String` | 客户经理 |
+| `accounts`| `Array` | 用电户号列表 |
+| `accounts.account_id` | `String` | 用电户号 |
+| `accounts.meters` | `Array` | 挂载在该户号下的电表列表 |
+| `accounts.meters.meter_id` | `String` | 电表资产号 |
+| `accounts.meters.multiplier` | `Number` | 倍率 |
+| `accounts.meters.allocation_ratio` | `Number` | 分配系数，范围 0-1.0。**默认为空 (null)**，非空表示该电表已通过 RPA 校验。 |
+| `accounts.metering_points` | `Array` | 挂载在该户号下的计量点列表 |
+| `accounts.metering_points.mp_no` | `String` | 计量点编号 |
+| `accounts.metering_points.mp_name` | `String` | 计量点名称 |
+| `tags` | `Array` | 标签集合 |
+| `tags.name` | `String` | 标签名/值 (核心字符串，如 "计划停产", "VIP") |
+| `tags.source` | `String` | 来源 (AUTO:算法, MANUAL:人工) |
+| `tags.expire` | `Date` | 失效时间 (用于临时标签，过期自动忽略) |
+| `tags.reason` | `String` | 原因/备注 (解释为什么打这个标，存数值也可以放这里) |
+
+
+
+
 
 ### 1.2. 索引信息
 
 - `_id_` (默认)
 - `user_name`
 - `short_name`
-- `status`
-- `status`, `created_at` (复合索引)
-- `status`, `user_type`, `created_at` (复合索引)
-- `status`, `industry`, `created_at` (复合索引)
-- `status`, `region`, `created_at` (复合索引)
-- `utility_accounts.account_id` (嵌套文档索引)
-- `utility_accounts.metering_points.metering_point_id` (嵌套文档索引)
-- `utility_accounts.metering_points.meter.meter_id` (嵌套文档索引)
-- `created_at`
-- `updated_at`
+- `tags.name`
+- `tags.expire`
 
 ---
 
@@ -273,3 +264,71 @@
 - `customer_id`, `datetime` (唯一复合索引)
 - `datetime` (时序查询优化)
 - `customer_name` (检索优化)
+- `source` (统计分析优化)
+
+---
+
+## 9. `customer_tags` - 客户标签定义
+
+该集合用于统一管理客户标签，定义标签的分类、来源和判定规则。
+
+**模型文件**: `webapp/models/customer_tag.py`
+
+### 9.1. 字段说明
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `_id` | `ObjectId` | 唯一ID |
+| `name` | `String` | 标签名称 (唯一主键，如 "计划停产") |
+| `category` | `String` | 业务分类 (如 "风险", "生产") |
+| `source_type` | `String` | 来源类型 (AUTO:仅算法, MANUAL:仅人工, HYBRID:混合) |
+| `description` | `String` | 含义/判定规则描述 (用于鼠标悬停提示) |
+| `is_active` | `Boolean` | 是否启用 (下架旧标签用) |
+
+### 9.3. 预设标签枚举
+
+以下是系统初始支持的标签库，实际使用中可动态通过管理后台增删。
+
+| 业务分类 | 标签名称 | 来源类型 | 说明 |
+| :--- | :--- | :--- | :--- |
+| **用电特性** | `基荷稳定型` | AUTO | 负荷曲线平稳，波动小 |
+| | `负荷波动` | AUTO | 用电负荷忽高忽低，波动率大 |
+| | `全年无休` | AUTO | 节假日及周末保持正常用电 |
+| | `周末双休` | AUTO | 周末负荷明显下降 |
+| | `周末单休` | AUTO | 只有周六或周日负荷极低 |
+| | `日间单班` | AUTO | 仅有白班生产，夜间负荷极低 |
+| | `全天生产` | AUTO | 24小时连续生产，负荷率高 |
+| | `午间填谷型` | AUTO | 午间用电量大，适合消纳光伏 |
+| | `避峰生产` | AUTO | 主动避开高峰电价时段用电 |
+| | `夏季气温敏感` | AUTO | 夏季负荷与气温强相关 (空调负荷大) |
+| | `冬季气温敏感` | AUTO | 冬季负荷与气温强相关 (取暖负荷大) |
+| **资源设施** | `具备光伏` | MANUAL | 厂区内安装了光伏发电设施 |
+| | `疑似光伏` | AUTO | 算法检测出明显的“鸭子曲线”特征 |
+| | `具备储能` | MANUAL | 厂区内配置了储能设备 |
+| | `自备电厂` | MANUAL | 拥有自备燃煤/燃气发电机组 |
+| **经营风险** | `产能下滑` | HYBRID | 用电量同比/环比持续显著下降 |
+| | `关停风险` | HYBRID | 长期极低负荷或零负荷运行 |
+
+| **生产状态** | `正常生产` | HYBRID | 系统默认状态，用电行为符合基线或人工确认正常 |
+| | `节假日生产` | AUTO | 节假日负荷不降反升，或保持高位 |
+| | `停产检修` | HYBRID | 负荷显著低于平时，或客户申报检修 |
+| | `计划停产` | MANUAL | 客户提前告知的计划性停产 |
+| | `季节性生产` | AUTO | 算法识别出明显的季节性用电特征 |
+| | `产能爬坡` | HYBRID | 用电量呈持续上升趋势 |
+| | `产能扩张期` | MANUAL | 企业正在扩建或新增产线，用电量预期增长 |
+| | `订单爆满` | MANUAL | 企业反馈订单充足，预计保持满负荷生产 |
+| **客户管理** | `VIP客户` | MANUAL | 战略大客户，享受高优先级服务 |
+| | `关系户` | MANUAL | 需特殊维护的重要关系客户 |
+| | `沉默客户` | MANUAL | 长期无互动反馈，需要激活 |
+| | `纠纷敏感` | MANUAL | 曾发生过服务纠纷或投诉 |
+| | `价格敏感` | MANUAL | 对电价波动极其敏感，容易流失 |
+| | `信用优质` | MANUAL | 历史缴费记录良好，无违约 |
+| | `欠费高危` | MANUAL | 近期有逾期或缴费延迟记录 |
+
+
+### 9.2. 索引信息
+
+- `_id_` (默认)
+- `name` (唯一索引)
+- `category`
+- `is_active`
