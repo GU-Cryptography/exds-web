@@ -221,19 +221,62 @@ def get_weather_actuals_summary(
     location_id: str = Query(..., description="站点ID"),
     date: str = Query(..., description="日期 YYYY-MM-DD")
 ):
-    """获取指定日期的天气概览（天气类型、最高最低温度）"""
+    """
+    获取指定日期的天气概览（天气类型、最高最低温度）
+    - 过去日期：返回历史实况数据
+    - 今天或未来日期：返回最新预测数据
+    """
     try:
         target_date = datetime.strptime(date, "%Y-%m-%d")
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         start_time = target_date.replace(hour=0, minute=0, second=0)
         end_time = target_date.replace(hour=23, minute=59, second=59)
         
-        query = {
-            "location_id": location_id,
-            "timestamp": {"$gte": start_time, "$lte": end_time}
-        }
-        
-        docs = list(WEATHER_ACTUALS.find(query, {'_id': 0}))
-        return calculate_daily_summary(docs, date)
+        # 判断是否为今天或未来日期
+        if target_date >= today:
+            # 查询预测数据：查找最新的 forecast_date 的预测
+            # 获取最新的预测发布日期
+            latest_forecast = WEATHER_FORECASTS.find_one(
+                {
+                    "location_id": location_id,
+                    "target_timestamp": {"$gte": start_time, "$lte": end_time}
+                },
+                {"forecast_date": 1},
+                sort=[("forecast_date", -1)]
+            )
+            
+            if latest_forecast:
+                forecast_date = latest_forecast["forecast_date"]
+                query = {
+                    "location_id": location_id,
+                    "forecast_date": forecast_date,
+                    "target_timestamp": {"$gte": start_time, "$lte": end_time}
+                }
+                docs = list(WEATHER_FORECASTS.find(query, {'_id': 0}))
+                summary = calculate_daily_summary(docs, date)
+                summary["data_source"] = "forecast"
+                summary["forecast_date"] = forecast_date.strftime("%Y-%m-%d") if isinstance(forecast_date, datetime) else str(forecast_date)
+                return summary
+            else:
+                # 没有预测数据，返回空
+                return {
+                    "date": date,
+                    "weather_type": "无数据",
+                    "weather_icon": "❓",
+                    "min_temp": None,
+                    "max_temp": None,
+                    "data_source": "none"
+                }
+        else:
+            # 历史日期：查询实况数据
+            query = {
+                "location_id": location_id,
+                "timestamp": {"$gte": start_time, "$lte": end_time}
+            }
+            docs = list(WEATHER_ACTUALS.find(query, {'_id': 0}))
+            summary = calculate_daily_summary(docs, date)
+            summary["data_source"] = "actuals"
+            return summary
 
     except ValueError:
         raise HTTPException(status_code=400, detail="日期格式无效")

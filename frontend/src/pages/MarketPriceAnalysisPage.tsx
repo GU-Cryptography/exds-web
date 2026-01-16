@@ -1,10 +1,10 @@
 
-import React, { useState } from 'react';
-import { Box, Tabs, Tab, Typography, Paper, useMediaQuery, useTheme, IconButton } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { Box, Tabs, Tab, Typography, Paper, useMediaQuery, useTheme, IconButton, Divider, CircularProgress } from '@mui/material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { zhCN } from 'date-fns/locale';
-import { addDays } from 'date-fns';
+import { addDays, format } from 'date-fns';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import TodayIcon from '@mui/icons-material/Today';
 import TimelineIcon from '@mui/icons-material/Timeline';
@@ -17,6 +17,11 @@ import { RealTimeAnalysisTab } from '../components/RealTimeAnalysisTab';
 import { SpreadAnalysisTab } from '../components/SpreadAnalysisTab';
 import { PriceCurveComparisonTab } from '../components/PriceCurveComparisonTab';
 import { TimeslotAnalysisTab } from '../components/TimeslotAnalysisTab';
+import { getWeatherActualsSummary, DailyWeatherSummary } from '../api/weather';
+import { WeatherIcon } from '../components/WeatherIcon';
+
+// 南昌站点ID
+const NANCHANG_LOCATION_ID = 'nanchang';
 
 interface TabPanelProps {
     children?: React.ReactNode;
@@ -49,6 +54,10 @@ export const MarketPriceAnalysisPage: React.FC = () => {
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
 
+    // 天气数据状态
+    const [weatherData, setWeatherData] = useState<DailyWeatherSummary | null>(null);
+    const [weatherLoading, setWeatherLoading] = useState(false);
+
     const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
         setTabIndex(newValue);
     };
@@ -58,6 +67,25 @@ export const MarketPriceAnalysisPage: React.FC = () => {
         const newDate = addDays(selectedDate, days);
         setSelectedDate(newDate);
     };
+
+    // 获取天气数据
+    useEffect(() => {
+        const fetchWeather = async () => {
+            if (!selectedDate) return;
+            setWeatherLoading(true);
+            try {
+                const dateStr = format(selectedDate, 'yyyy-MM-dd');
+                const data = await getWeatherActualsSummary(NANCHANG_LOCATION_ID, dateStr);
+                setWeatherData(data);
+            } catch (err) {
+                console.error('获取天气数据失败:', err);
+                setWeatherData(null);
+            } finally {
+                setWeatherLoading(false);
+            }
+        };
+        fetchWeather();
+    }, [selectedDate]);
 
     // Tab 配置：图标 + 完整标题 + 移动端简化标题
     const tabsConfig = [
@@ -84,25 +112,53 @@ export const MarketPriceAnalysisPage: React.FC = () => {
                     </Typography>
                 )}
 
-                {/* 日期选择器 */}
-                <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <IconButton onClick={() => handleShiftDate(-1)} size="small">
-                        <ArrowLeftIcon />
-                    </IconButton>
-                    <DatePicker
-                        label="选择日期"
-                        value={selectedDate}
-                        onChange={(date) => setSelectedDate(date)}
-                        slotProps={{
-                            textField: {
-                                size: "small",
-                                sx: { width: { xs: '150px', sm: '200px' } }
-                            }
-                        }}
-                    />
-                    <IconButton onClick={() => handleShiftDate(1)} size="small">
-                        <ArrowRightIcon />
-                    </IconButton>
+                {/* 日期选择器 + 天气信息 */}
+                <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', gap: { xs: 1, sm: 2 }, alignItems: 'center', flexWrap: 'wrap', justifyContent: { xs: 'center', sm: 'flex-start' } }}>
+                    {/* 日期选择器 */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+                        <IconButton onClick={() => handleShiftDate(-1)} size="small">
+                            <ArrowLeftIcon />
+                        </IconButton>
+                        <DatePicker
+                            label="选择日期"
+                            value={selectedDate}
+                            onChange={(date) => setSelectedDate(date)}
+                            slotProps={{
+                                textField: {
+                                    size: "small",
+                                    sx: { width: { xs: '150px', sm: '200px' } }
+                                }
+                            }}
+                        />
+                        <IconButton onClick={() => handleShiftDate(1)} size="small">
+                            <ArrowRightIcon />
+                        </IconButton>
+                    </Box>
+
+                    {/* 分隔线 */}
+                    <Divider orientation="vertical" flexItem sx={{ display: { xs: 'none', sm: 'block' } }} />
+
+                    {/* 南昌天气信息 */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 1 } }}>
+                        {weatherLoading ? (
+                            <CircularProgress size={20} />
+                        ) : weatherData ? (
+                            <>
+                                <WeatherIcon type={weatherData.weather_type} size={28} />
+                                <Typography variant="body2" fontWeight="bold" sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>
+                                    {weatherData.weather_type}
+                                </Typography>
+                                <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+                                <Typography variant="body2" sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>
+                                    🌡️ {weatherData.min_temp}~{weatherData.max_temp}°C
+                                </Typography>
+                            </>
+                        ) : (
+                            <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.75rem', sm: '0.8rem' } }}>
+                                无天气数据
+                            </Typography>
+                        )}
+                    </Box>
                 </Paper>
 
                 <Paper variant="outlined" sx={{ borderColor: 'divider' }}>
