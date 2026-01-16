@@ -48,6 +48,7 @@ interface DailySummaryTabProps {
     error: string | null;
     dateStr: string;
     selectedBenchmark: 'day_ahead' | 'real_time';
+    onDateShift?: (days: number) => void;
 }
 
 // 蓝色渐变消息提示框组件
@@ -105,7 +106,8 @@ const PriceChart: React.FC<{
     curvesByType: { [key: string]: CurvePoint[] };
     dateStr: string;
     selectedBenchmark: 'day_ahead' | 'real_time';
-}> = ({ contractCurves, spotCurves, curvesByType, dateStr, selectedBenchmark }) => {
+    onDateShift?: (days: number) => void;
+}> = ({ contractCurves, spotCurves, curvesByType, dateStr, selectedBenchmark, onDateShift }) => {
     const chartRef = useRef<HTMLDivElement>(null);
     const [selectedType, setSelectedType] = React.useState<string>('整体');
     const theme = useTheme();
@@ -158,9 +160,11 @@ const PriceChart: React.FC<{
         : null;
 
     // 全屏功能
-    const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle } = useChartFullscreen({
+    const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, NavigationButtons } = useChartFullscreen({
         chartRef,
-        title: `${dateStr} ${selectedType}合同价格曲线`
+        title: `${dateStr} ${selectedType}合同价格曲线`,
+        onPrevious: onDateShift ? () => onDateShift(-1) : undefined,
+        onNext: onDateShift ? () => onDateShift(1) : undefined
     });
 
     // 获取曲线颜色
@@ -229,6 +233,7 @@ const PriceChart: React.FC<{
                 <FullscreenEnterButton />
                 <FullscreenExitButton />
                 <FullscreenTitle />
+                <NavigationButtons />
 
                 {chartData.length === 0 ? (
                     <Box sx={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
@@ -482,7 +487,8 @@ export const DailySummaryTab: React.FC<DailySummaryTabProps> = ({
     loading,
     error,
     dateStr,
-    selectedBenchmark
+    selectedBenchmark,
+    onDateShift
 }) => {
     // 首次加载显示完整loading
 
@@ -534,6 +540,7 @@ export const DailySummaryTab: React.FC<DailySummaryTabProps> = ({
                 curvesByType={data.curves_by_type || {}}
                 dateStr={dateStr}
                 selectedBenchmark={selectedBenchmark}
+                onDateShift={onDateShift}
             />
 
 

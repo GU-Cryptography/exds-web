@@ -220,6 +220,7 @@ export const ContractPriceDailyPage: React.FC = () => {
                         error={summaryError}
                         dateStr={dateStr}
                         selectedBenchmark={selectedBenchmark}
+                        onDateShift={handleShiftDate}
                     />
                 </TabPanel>
 
@@ -230,6 +231,7 @@ export const ContractPriceDailyPage: React.FC = () => {
                         error={summaryError}
                         dateStr={dateStr}
                         selectedBenchmark={selectedBenchmark}
+                        onDateShift={handleShiftDate}
                     />
                 </TabPanel>
                 <TabPanel value={tabIndex} index={2}>
@@ -238,6 +240,7 @@ export const ContractPriceDailyPage: React.FC = () => {
                         loading={summaryLoading}
                         error={summaryError}
                         dateStr={dateStr}
+                        onDateShift={handleShiftDate}
                     />
                 </TabPanel>
 

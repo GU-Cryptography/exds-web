@@ -48,10 +48,11 @@ const DataDimensionChart = React.memo<{
     FullscreenEnterButton: any;
     FullscreenExitButton: any;
     FullscreenTitle: any;
+    NavigationButtons?: any;
     chartRef: React.RefObject<HTMLDivElement | null>;
     syncedIndex: number | null;
     onMouseMove: (index: number | null) => void;
-}>(({ data, deviationType, dateStr, isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, chartRef, syncedIndex, onMouseMove }) => {
+}>(({ data, deviationType, dateStr, isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, NavigationButtons, chartRef, syncedIndex, onMouseMove }) => {
 
     // 获取偏差类型的显示名称
     const deviationLabel = deviationTypeOptions.find(opt => opt.value === deviationType)?.label || '数据';
@@ -122,6 +123,7 @@ const DataDimensionChart = React.memo<{
                 <FullscreenEnterButton />
                 <FullscreenExitButton />
                 <FullscreenTitle />
+                {NavigationButtons && <NavigationButtons />}
 
                 {!data || data.length === 0 ? (
                     <Box sx={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
@@ -202,9 +204,10 @@ const DataDimensionChart = React.memo<{
 
 interface SpreadAnalysisTabProps {
     selectedDate: Date | null;
+    onDateShift?: (days: number) => void;
 }
 
-export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDate }) => {
+export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDate, onDateShift }) => {
     const [selectedDeviationType, setSelectedDeviationType] = useState<string>('total_volume_deviation');
     const [loading, setLoading] = useState(false);
     const [analysisData, setAnalysisData] = useState<{ time_series: any[], systematic_bias: any[], price_distribution: any[] }>({
@@ -231,8 +234,16 @@ export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDa
 
     const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
 
-    const { isFullscreen: isFs3, FullscreenEnterButton: FSEnter3, FullscreenExitButton: FSExit3, FullscreenTitle: FSTitle3, NavigationButtons: FSNav3 } = useChartFullscreen({ chartRef: chart3Ref, title: `核心偏差归因 (${dateStr})` });
-    const { isFullscreen: isFs4, FullscreenEnterButton: FSEnter4, FullscreenExitButton: FSExit4, FullscreenTitle: FSTitle4 } = useChartFullscreen({ chartRef: chart4Ref, title: `${deviationTypeOptions.find(opt => opt.value === selectedDeviationType)?.label} (${dateStr})` });
+    const { isFullscreen: isFs3, FullscreenEnterButton: FSEnter3, FullscreenExitButton: FSExit3, FullscreenTitle: FSTitle3, NavigationButtons: FSNav3 } = useChartFullscreen({
+        chartRef: chart3Ref, title: `核心偏差归因 (${dateStr})`,
+        onPrevious: onDateShift ? () => onDateShift(-1) : undefined,
+        onNext: onDateShift ? () => onDateShift(1) : undefined
+    });
+    const { isFullscreen: isFs4, FullscreenEnterButton: FSEnter4, FullscreenExitButton: FSExit4, FullscreenTitle: FSTitle4, NavigationButtons: FSNav4 } = useChartFullscreen({
+        chartRef: chart4Ref, title: `${deviationTypeOptions.find(opt => opt.value === selectedDeviationType)?.label} (${dateStr})`,
+        onPrevious: onDateShift ? () => onDateShift(-1) : undefined,
+        onNext: onDateShift ? () => onDateShift(1) : undefined
+    });
 
     useEffect(() => {
         if (!selectedDate) return;
@@ -460,6 +471,7 @@ export const SpreadAnalysisTab: React.FC<SpreadAnalysisTabProps> = ({ selectedDa
                 FullscreenEnterButton={FSEnter4}
                 FullscreenExitButton={FSExit4}
                 FullscreenTitle={FSTitle4}
+                NavigationButtons={FSNav4}
                 chartRef={chart4Ref}
                 syncedIndex={syncedIndex}
                 onMouseMove={setSyncedIndex}

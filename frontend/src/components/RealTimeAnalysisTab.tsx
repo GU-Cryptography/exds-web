@@ -27,9 +27,10 @@ const processApiData = (data: any[]) => {
 // Props接口
 interface RealTimeAnalysisTabProps {
     selectedDate: Date | null;
+    onDateShift?: (days: number) => void;
 }
 
-export const RealTimeAnalysisTab: React.FC<RealTimeAnalysisTabProps> = ({ selectedDate }) => {
+export const RealTimeAnalysisTab: React.FC<RealTimeAnalysisTabProps> = ({ selectedDate, onDateShift }) => {
     const [loading, setLoading] = useState(false);
     const [chartData, setChartData] = useState<any[]>([]);
     const [correlation, setCorrelation] = useState<number | null>(null);
@@ -50,18 +51,26 @@ export const RealTimeAnalysisTab: React.FC<RealTimeAnalysisTabProps> = ({ select
         ? `${dateStr} 实时价格与市场竞价空间（相关性:${correlation}%）`
         : `${dateStr} 实时价格与市场竞价空间`;
 
-    // 全屏Hooks(移除导航按钮)
-    const { isFullscreen: isFs1, FullscreenEnterButton: FSEnter1, FullscreenExitButton: FSExit1, FullscreenTitle: FSTitle1 } = useChartFullscreen({
-        chartRef: priceVolumeChartRef, title: priceSpaceTitle
+    // 全屏Hooks(带导航按钮)
+    const { isFullscreen: isFs1, FullscreenEnterButton: FSEnter1, FullscreenExitButton: FSExit1, FullscreenTitle: FSTitle1, NavigationButtons: Nav1 } = useChartFullscreen({
+        chartRef: priceVolumeChartRef, title: priceSpaceTitle,
+        onPrevious: onDateShift ? () => onDateShift(-1) : undefined,
+        onNext: onDateShift ? () => onDateShift(1) : undefined
     });
-    const { isFullscreen: isFs2, FullscreenEnterButton: FSEnter2, FullscreenExitButton: FSExit2, FullscreenTitle: FSTitle2 } = useChartFullscreen({
-        chartRef: supplyStackChartRef, title: `${dateStr} 现货供给堆栈`
+    const { isFullscreen: isFs2, FullscreenEnterButton: FSEnter2, FullscreenExitButton: FSExit2, FullscreenTitle: FSTitle2, NavigationButtons: Nav2 } = useChartFullscreen({
+        chartRef: supplyStackChartRef, title: `${dateStr} 现货供给堆栈`,
+        onPrevious: onDateShift ? () => onDateShift(-1) : undefined,
+        onNext: onDateShift ? () => onDateShift(1) : undefined
     });
-    const { isFullscreen: isFs3, FullscreenEnterButton: FSEnter3, FullscreenExitButton: FSExit3, FullscreenTitle: FSTitle3 } = useChartFullscreen({
-        chartRef: supplyCurveChartRef, title: `${dateStr} 现货供给曲线`
+    const { isFullscreen: isFs3, FullscreenEnterButton: FSEnter3, FullscreenExitButton: FSExit3, FullscreenTitle: FSTitle3, NavigationButtons: Nav3 } = useChartFullscreen({
+        chartRef: supplyCurveChartRef, title: `${dateStr} 现货供给曲线`,
+        onPrevious: onDateShift ? () => onDateShift(-1) : undefined,
+        onNext: onDateShift ? () => onDateShift(1) : undefined
     });
-    const { isFullscreen: isFs4, FullscreenEnterButton: FSEnter4, FullscreenExitButton: FSExit4, FullscreenTitle: FSTitle4 } = useChartFullscreen({
-        chartRef: volatilityChartRef, title: `${dateStr} 现货价格波动`
+    const { isFullscreen: isFs4, FullscreenEnterButton: FSEnter4, FullscreenExitButton: FSExit4, FullscreenTitle: FSTitle4, NavigationButtons: Nav4 } = useChartFullscreen({
+        chartRef: volatilityChartRef, title: `${dateStr} 现货价格波动`,
+        onPrevious: onDateShift ? () => onDateShift(-1) : undefined,
+        onNext: onDateShift ? () => onDateShift(1) : undefined
     });
 
     const { TouPeriodAreas } = useTouPeriodBackground(chartData);
@@ -112,7 +121,7 @@ export const RealTimeAnalysisTab: React.FC<RealTimeAnalysisTabProps> = ({ select
         fetchData(selectedDate);
     }, [selectedDate, cachedDate, cachedData]);
 
-    const renderChartContainer = (ref: React.RefObject<HTMLDivElement | null>, isFullscreen: boolean, title: string, enter: React.ReactElement, exit: React.ReactElement, fsTitle: React.ReactElement, chart: React.ReactElement) => (
+    const renderChartContainer = (ref: React.RefObject<HTMLDivElement | null>, isFullscreen: boolean, title: string, enter: React.ReactElement, exit: React.ReactElement, fsTitle: React.ReactElement, nav: React.ReactElement, chart: React.ReactElement) => (
         <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
             <Typography variant="h6" gutterBottom>{title}</Typography>
             <Box
@@ -126,7 +135,7 @@ export const RealTimeAnalysisTab: React.FC<RealTimeAnalysisTabProps> = ({ select
                     ...(isFullscreen && { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1400 })
                 }}
             >
-                {enter}{exit}{fsTitle}
+                {enter}{exit}{fsTitle}{nav}
                 {loading ? (
                     <Box sx={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}><CircularProgress /></Box>
                 ) : !chartData || chartData.length === 0 ? (
@@ -145,7 +154,7 @@ export const RealTimeAnalysisTab: React.FC<RealTimeAnalysisTabProps> = ({ select
                 correlation !== null
                     ? `实时价格与市场竞价空间（相关性:${correlation}%）`
                     : '实时价格与市场竞价空间',
-                FSEnter1(), FSExit1(), FSTitle1(),
+                FSEnter1(), FSExit1(), FSTitle1(), Nav1(),
                 <ComposedChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="time_str" interval={11} tick={{ fontSize: 12 }} />
@@ -159,7 +168,7 @@ export const RealTimeAnalysisTab: React.FC<RealTimeAnalysisTabProps> = ({ select
                 </ComposedChart>
             )}
 
-            {renderChartContainer(supplyStackChartRef, isFs2, '现货供给堆栈', FSEnter2(), FSExit2(), FSTitle2(),
+            {renderChartContainer(supplyStackChartRef, isFs2, '现货供给堆栈', FSEnter2(), FSExit2(), FSTitle2(), Nav2(),
                 <ComposedChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="time_str" interval={11} tick={{ fontSize: 12 }} />
@@ -174,7 +183,7 @@ export const RealTimeAnalysisTab: React.FC<RealTimeAnalysisTabProps> = ({ select
                 </ComposedChart>
             )}
 
-            {renderChartContainer(volatilityChartRef, isFs4, '实时价格波动', FSEnter4(), FSExit4(), FSTitle4(),
+            {renderChartContainer(volatilityChartRef, isFs4, '实时价格波动', FSEnter4(), FSExit4(), FSTitle4(), Nav4(),
                 <ComposedChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="time_str" interval={11} tick={{ fontSize: 12 }} />
@@ -190,7 +199,7 @@ export const RealTimeAnalysisTab: React.FC<RealTimeAnalysisTabProps> = ({ select
                 </ComposedChart>
             )}
 
-            {renderChartContainer(supplyCurveChartRef, isFs3, '现货供给曲线', FSEnter3(), FSExit3(), FSTitle3(),
+            {renderChartContainer(supplyCurveChartRef, isFs3, '现货供给曲线', FSEnter3(), FSExit3(), FSTitle3(), Nav3(),
                 <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
                     <CartesianGrid />
                     <XAxis

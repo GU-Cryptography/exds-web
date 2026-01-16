@@ -27,9 +27,10 @@ const processApiData = (data: any[]) => {
 // Props接口
 interface DayAheadAnalysisTabProps {
     selectedDate: Date | null;
+    onDateShift?: (days: number) => void;
 }
 
-export const DayAheadAnalysisTab: React.FC<DayAheadAnalysisTabProps> = ({ selectedDate }) => {
+export const DayAheadAnalysisTab: React.FC<DayAheadAnalysisTabProps> = ({ selectedDate, onDateShift }) => {
     const [loading, setLoading] = useState(false);
     const [chartData, setChartData] = useState<any[]>([]);
     const [correlation, setCorrelation] = useState<number | null>(null);
@@ -50,15 +51,21 @@ export const DayAheadAnalysisTab: React.FC<DayAheadAnalysisTabProps> = ({ select
         ? `${dateStr} 日前价格与市场竞价空间（相关性:${correlation}%）`
         : `${dateStr} 日前价格与市场竞价空间`;
 
-    // 为每个图表独立设置全屏Hook(移除导航按钮)
-    const { isFullscreen: isPriceVolumeFullscreen, FullscreenEnterButton: FSEnter1, FullscreenExitButton: FSExit1, FullscreenTitle: FSTitle1 } = useChartFullscreen({
-        chartRef: priceVolumeChartRef, title: priceSpaceTitle
+    // 为每个图表独立设置全屏Hook(带导航按钮)
+    const { isFullscreen: isPriceVolumeFullscreen, FullscreenEnterButton: FSEnter1, FullscreenExitButton: FSExit1, FullscreenTitle: FSTitle1, NavigationButtons: Nav1 } = useChartFullscreen({
+        chartRef: priceVolumeChartRef, title: priceSpaceTitle,
+        onPrevious: onDateShift ? () => onDateShift(-1) : undefined,
+        onNext: onDateShift ? () => onDateShift(1) : undefined
     });
-    const { isFullscreen: isSupplyStackFullscreen, FullscreenEnterButton: FSEnter2, FullscreenExitButton: FSExit2, FullscreenTitle: FSTitle2 } = useChartFullscreen({
-        chartRef: supplyStackChartRef, title: `${dateStr} 日前供给堆栈`
+    const { isFullscreen: isSupplyStackFullscreen, FullscreenEnterButton: FSEnter2, FullscreenExitButton: FSExit2, FullscreenTitle: FSTitle2, NavigationButtons: Nav2 } = useChartFullscreen({
+        chartRef: supplyStackChartRef, title: `${dateStr} 日前供给堆栈`,
+        onPrevious: onDateShift ? () => onDateShift(-1) : undefined,
+        onNext: onDateShift ? () => onDateShift(1) : undefined
     });
-    const { isFullscreen: isSupplyCurveFullscreen, FullscreenEnterButton: FSEnter3, FullscreenExitButton: FSExit3, FullscreenTitle: FSTitle3 } = useChartFullscreen({
-        chartRef: supplyCurveChartRef, title: `${dateStr} 日前供给曲线`
+    const { isFullscreen: isSupplyCurveFullscreen, FullscreenEnterButton: FSEnter3, FullscreenExitButton: FSExit3, FullscreenTitle: FSTitle3, NavigationButtons: Nav3 } = useChartFullscreen({
+        chartRef: supplyCurveChartRef, title: `${dateStr} 日前供给曲线`,
+        onPrevious: onDateShift ? () => onDateShift(-1) : undefined,
+        onNext: onDateShift ? () => onDateShift(1) : undefined
     });
 
     // 时段背景Hook
@@ -110,7 +117,7 @@ export const DayAheadAnalysisTab: React.FC<DayAheadAnalysisTabProps> = ({ select
         fetchData(selectedDate);
     }, [selectedDate, cachedDate, cachedData]);
 
-    const renderChartContainer = (ref: React.RefObject<HTMLDivElement | null>, isFullscreen: boolean, title: string, enter: React.ReactElement, exit: React.ReactElement, fsTitle: React.ReactElement, chart: React.ReactElement) => (
+    const renderChartContainer = (ref: React.RefObject<HTMLDivElement | null>, isFullscreen: boolean, title: string, enter: React.ReactElement, exit: React.ReactElement, fsTitle: React.ReactElement, nav: React.ReactElement, chart: React.ReactElement) => (
         <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
             <Typography variant="h6" gutterBottom>{title}</Typography>
             <Box
@@ -125,7 +132,7 @@ export const DayAheadAnalysisTab: React.FC<DayAheadAnalysisTabProps> = ({ select
                     })
                 }}
             >
-                {enter}{exit}{fsTitle}
+                {enter}{exit}{fsTitle}{nav}
                 {loading ? (
                     <Box sx={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}><CircularProgress /></Box>
                 ) : !chartData || chartData.length === 0 ? (
@@ -140,7 +147,7 @@ export const DayAheadAnalysisTab: React.FC<DayAheadAnalysisTabProps> = ({ select
     return (
         <Box>
 
-            {renderChartContainer(priceVolumeChartRef, isPriceVolumeFullscreen, correlation !== null ? `日前价格与市场竞价空间（相关性:${correlation}%）` : '日前价格与市场竞价空间', FSEnter1(), FSExit1(), FSTitle1(),
+            {renderChartContainer(priceVolumeChartRef, isPriceVolumeFullscreen, correlation !== null ? `日前价格与市场竞价空间（相关性:${correlation}%）` : '日前价格与市场竞价空间', FSEnter1(), FSExit1(), FSTitle1(), Nav1(),
                 <ComposedChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="time_str" interval={11} tick={{ fontSize: 12 }} />
@@ -154,7 +161,7 @@ export const DayAheadAnalysisTab: React.FC<DayAheadAnalysisTabProps> = ({ select
                 </ComposedChart>
             )}
 
-            {renderChartContainer(supplyStackChartRef, isSupplyStackFullscreen, '日前供给堆栈', FSEnter2(), FSExit2(), FSTitle2(),
+            {renderChartContainer(supplyStackChartRef, isSupplyStackFullscreen, '日前供给堆栈', FSEnter2(), FSExit2(), FSTitle2(), Nav2(),
                 <ComposedChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="time_str" interval={11} tick={{ fontSize: 12 }} />
@@ -169,7 +176,7 @@ export const DayAheadAnalysisTab: React.FC<DayAheadAnalysisTabProps> = ({ select
                 </ComposedChart>
             )}
 
-            {renderChartContainer(supplyCurveChartRef, isSupplyCurveFullscreen, '日前供给曲线', FSEnter3(), FSExit3(), FSTitle3(),
+            {renderChartContainer(supplyCurveChartRef, isSupplyCurveFullscreen, '日前供给曲线', FSEnter3(), FSExit3(), FSTitle3(), Nav3(),
                 <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
                     <CartesianGrid />
                     <XAxis type="number" dataKey="total_clearing_power" name="电量" unit="MWh" label={{ value: '电量 (MWh)', position: 'insideBottom', offset: -10 }} />

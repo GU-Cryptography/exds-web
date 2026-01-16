@@ -195,16 +195,16 @@ export const MarketPriceAnalysisPage: React.FC = () => {
                     </Tabs>
                 </Paper>
                 <TabPanel value={tabIndex} index={0}>
-                    <MarketDashboardTab selectedDate={selectedDate} />
+                    <MarketDashboardTab selectedDate={selectedDate} onDateShift={handleShiftDate} />
                 </TabPanel>
                 <TabPanel value={tabIndex} index={1}>
-                    <DayAheadAnalysisTab selectedDate={selectedDate} />
+                    <DayAheadAnalysisTab selectedDate={selectedDate} onDateShift={handleShiftDate} />
                 </TabPanel>
                 <TabPanel value={tabIndex} index={2}>
-                    <RealTimeAnalysisTab selectedDate={selectedDate} />
+                    <RealTimeAnalysisTab selectedDate={selectedDate} onDateShift={handleShiftDate} />
                 </TabPanel>
                 <TabPanel value={tabIndex} index={3}>
-                    <SpreadAnalysisTab selectedDate={selectedDate} />
+                    <SpreadAnalysisTab selectedDate={selectedDate} onDateShift={handleShiftDate} />
                 </TabPanel>
                 {/* <TabPanel value={tabIndex} index={4}>
                 <TimeslotAnalysisTab />

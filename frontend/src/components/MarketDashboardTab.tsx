@@ -336,7 +336,7 @@ const CustomTooltipContent: React.FC<any> = ({ active, payload, label, unit }) =
 
 
 // 价格曲线图组件
-const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string }> = ({ data, dateStr }) => {
+const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onDateShift?: (days: number) => void }> = ({ data, dateStr, onDateShift }) => {
     const chartRef = useRef<HTMLDivElement>(null);
 
     // 计算Y轴范围
@@ -364,10 +364,12 @@ const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string }> = ({ da
 
     const { TouPeriodAreas } = useTouPeriodBackground(data);
 
-    // 全屏功能(移除导航按钮)
-    const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle } = useChartFullscreen({
+    // 全屏功能(带导航按钮)
+    const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, NavigationButtons } = useChartFullscreen({
         chartRef,
-        title: `${dateStr} 价格曲线`
+        title: `${dateStr} 价格曲线`,
+        onPrevious: onDateShift ? () => onDateShift(-1) : undefined,
+        onNext: onDateShift ? () => onDateShift(1) : undefined
     });
 
     return (
@@ -394,6 +396,7 @@ const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string }> = ({ da
                     <FullscreenEnterButton />
                     <FullscreenExitButton />
                     <FullscreenTitle />
+                    <NavigationButtons />
 
                     <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
@@ -517,12 +520,14 @@ const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string }> = ({ da
 };
 
 // 价格偏差主图组件
-const PriceSpreadChart: React.FC<{ data: any[]; dateStr: string }> = ({ data, dateStr }) => {
+const PriceSpreadChart: React.FC<{ data: any[]; dateStr: string; onDateShift?: (days: number) => void }> = ({ data, dateStr, onDateShift }) => {
     const chartRef = useRef<HTMLDivElement>(null);
 
-    const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle } = useChartFullscreen({
+    const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, NavigationButtons } = useChartFullscreen({
         chartRef,
-        title: `${dateStr} 价格偏差主图`
+        title: `${dateStr} 价格偏差主图`,
+        onPrevious: onDateShift ? () => onDateShift(-1) : undefined,
+        onNext: onDateShift ? () => onDateShift(1) : undefined
     });
 
     return (
@@ -549,6 +554,7 @@ const PriceSpreadChart: React.FC<{ data: any[]; dateStr: string }> = ({ data, da
                     <FullscreenEnterButton />
                     <FullscreenExitButton />
                     <FullscreenTitle />
+                    <NavigationButtons />
 
                     {!data || data.length === 0 ? (
                         <Box sx={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
@@ -577,12 +583,14 @@ const PriceSpreadChart: React.FC<{ data: any[]; dateStr: string }> = ({ data, da
 };
 
 // 价差分布直方图组件
-const PriceDistributionChart: React.FC<{ data: any[]; dateStr: string }> = ({ data, dateStr }) => {
+const PriceDistributionChart: React.FC<{ data: any[]; dateStr: string; onDateShift?: (days: number) => void }> = ({ data, dateStr, onDateShift }) => {
     const chartRef = useRef<HTMLDivElement>(null);
 
-    const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle } = useChartFullscreen({
+    const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, NavigationButtons } = useChartFullscreen({
         chartRef,
-        title: `${dateStr} 价差分布直方图`
+        title: `${dateStr} 价差分布直方图`,
+        onPrevious: onDateShift ? () => onDateShift(-1) : undefined,
+        onNext: onDateShift ? () => onDateShift(1) : undefined
     });
 
     return (
@@ -609,6 +617,7 @@ const PriceDistributionChart: React.FC<{ data: any[]; dateStr: string }> = ({ da
                     <FullscreenEnterButton />
                     <FullscreenExitButton />
                     <FullscreenTitle />
+                    <NavigationButtons />
 
                     {!data || data.length === 0 ? (
                         <Box sx={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
@@ -799,10 +808,11 @@ const PeriodPriceAnalysisTable: React.FC<{
 // Props接口
 interface MarketDashboardTabProps {
     selectedDate: Date | null;
+    onDateShift?: (days: number) => void;
 }
 
 // 主组件
-export const MarketDashboardTab: React.FC<MarketDashboardTabProps> = ({ selectedDate }) => {
+export const MarketDashboardTab: React.FC<MarketDashboardTabProps> = ({ selectedDate, onDateShift }) => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [data, setData] = useState<DashboardData | null>(null);
@@ -948,15 +958,15 @@ export const MarketDashboardTab: React.FC<MarketDashboardTabProps> = ({ selected
                     <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mt: 2 }}>
                         {/* 价格曲线图 */}
                         <Grid size={{ xs: 12 }}>
-                            <PriceChart data={data.time_series} dateStr={selectedDate ? format(selectedDate, 'yyyy-MM-dd') : ''} />
+                            <PriceChart data={data.time_series} dateStr={selectedDate ? format(selectedDate, 'yyyy-MM-dd') : ''} onDateShift={onDateShift} />
                         </Grid>
 
                         {/* 价格偏差主图和价差分布直方图 */}
                         <Grid size={{ xs: 12, md: 6 }}>
-                            <PriceSpreadChart data={spreadData.time_series} dateStr={selectedDate ? format(selectedDate, 'yyyy-MM-dd') : ''} />
+                            <PriceSpreadChart data={spreadData.time_series} dateStr={selectedDate ? format(selectedDate, 'yyyy-MM-dd') : ''} onDateShift={onDateShift} />
                         </Grid>
                         <Grid size={{ xs: 12, md: 6 }}>
-                            <PriceDistributionChart data={spreadData.price_distribution} dateStr={selectedDate ? format(selectedDate, 'yyyy-MM-dd') : ''} />
+                            <PriceDistributionChart data={spreadData.price_distribution} dateStr={selectedDate ? format(selectedDate, 'yyyy-MM-dd') : ''} onDateShift={onDateShift} />
                         </Grid>
 
                         {/* 时段价格分析表格 */}

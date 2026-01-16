@@ -38,6 +38,7 @@ interface QuantityStructureTabProps {
     loading: boolean;
     error: string | null;
     dateStr: string;
+    onDateShift?: (days: number) => void;
 }
 
 // 颜色配置
@@ -96,13 +97,16 @@ const StackedBarChart: React.FC<{
     typeSummary: { contract_type: string; contract_period: string; daily_total_quantity: number }[];
     colorMode: ColorMode;
     dateStr: string;
-}> = ({ curvesByPeriod, typeSummary, colorMode, dateStr }) => {
+    onDateShift?: (days: number) => void;
+}> = ({ curvesByPeriod, typeSummary, colorMode, dateStr, onDateShift }) => {
     const chartRef = useRef<HTMLDivElement>(null);
 
-    const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle } =
+    const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, NavigationButtons } =
         useChartFullscreen({
             chartRef,
-            title: `电量结构 (${dateStr})`
+            title: `电量结构 (${dateStr})`,
+            onPrevious: onDateShift ? () => onDateShift(-1) : undefined,
+            onNext: onDateShift ? () => onDateShift(1) : undefined
         });
 
     // 构建堆叠图表数据
@@ -192,6 +196,7 @@ const StackedBarChart: React.FC<{
             <FullscreenEnterButton />
             <FullscreenExitButton />
             <FullscreenTitle />
+            <NavigationButtons />
 
             {!hasData ? (
                 <Box sx={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
@@ -301,7 +306,8 @@ export const QuantityStructureTab: React.FC<QuantityStructureTabProps> = ({
     data,
     loading,
     error,
-    dateStr
+    dateStr,
+    onDateShift
 }) => {
     const [colorMode, setColorMode] = useState<ColorMode>('period');
 
@@ -442,6 +448,7 @@ export const QuantityStructureTab: React.FC<QuantityStructureTabProps> = ({
                     typeSummary={data.type_summary || []}
                     colorMode={colorMode}
                     dateStr={dateStr}
+                    onDateShift={onDateShift}
                 />
             </Paper>
 

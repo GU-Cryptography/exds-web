@@ -35,6 +35,7 @@ interface CurveCompareTabProps {
     error: string | null;
     dateStr: string;
     selectedBenchmark: 'day_ahead' | 'real_time';
+    onDateShift?: (days: number) => void;
 }
 
 // 曲线定义
@@ -195,14 +196,17 @@ const MultiCurveChart: React.FC<{
     selectedCurves: string[];
     selectedBenchmark: 'day_ahead' | 'real_time';
     dateStr: string;
-}> = ({ curvesByPeriod, spotCurves, selectedCurves, selectedBenchmark, dateStr }) => {
+    onDateShift?: (days: number) => void;
+}> = ({ curvesByPeriod, spotCurves, selectedCurves, selectedBenchmark, dateStr, onDateShift }) => {
     const chartRef = useRef<HTMLDivElement>(null);
     const spotLabel = selectedBenchmark === 'day_ahead' ? '日前现货' : '实时现货';
 
-    const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle } =
+    const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, NavigationButtons } =
         useChartFullscreen({
             chartRef,
-            title: `曲线对比 (${dateStr})`
+            title: `曲线对比 (${dateStr})`,
+            onPrevious: onDateShift ? () => onDateShift(-1) : undefined,
+            onNext: onDateShift ? () => onDateShift(1) : undefined
         });
 
     // 合并所有曲线数据
@@ -285,6 +289,7 @@ const MultiCurveChart: React.FC<{
                 <FullscreenEnterButton />
                 <FullscreenExitButton />
                 <FullscreenTitle />
+                <NavigationButtons />
 
                 {!hasData ? (
                     <Box sx={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
@@ -357,7 +362,8 @@ export const CurveCompareTab: React.FC<CurveCompareTabProps> = ({
     loading,
     error,
     dateStr,
-    selectedBenchmark
+    selectedBenchmark,
+    onDateShift
 }) => {
     const [selectedCurves, setSelectedCurves] = useState<string[]>(['市场化-月内']);
 
@@ -420,6 +426,7 @@ export const CurveCompareTab: React.FC<CurveCompareTabProps> = ({
                 selectedCurves={selectedCurves.filter(k => availableCurves.includes(k))}
                 selectedBenchmark={selectedBenchmark}
                 dateStr={dateStr}
+                onDateShift={onDateShift}
             />
         </Box>
     );
