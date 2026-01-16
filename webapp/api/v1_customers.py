@@ -59,6 +59,25 @@ async def sync_customers(
     return result
 
 
+@router.get("/field-options", response_model=dict)
+async def get_field_options(
+    current_user: User = Depends(get_current_active_user)
+):
+    """获取客户字段可选值（从现有数据聚合）"""
+    # 聚合现有的 source 和 manager 值
+    sources = DATABASE.customer_archives.distinct("source")
+    managers = DATABASE.customer_archives.distinct("manager")
+    
+    # 过滤掉 None 和空字符串
+    sources = [s for s in sources if s]
+    managers = [m for m in managers if m]
+    
+    return {
+        "sources": sorted(sources),
+        "managers": sorted(managers)
+    }
+
+
 @router.get("", response_model=CustomerListResponse)
 async def list_customers(
     keyword: Optional[str] = Query(None, description="搜索关键词（客户全称、简称或户号）"),
@@ -650,6 +669,125 @@ async def create_customer_tag(
         "name": new_tag["name"],
         "category": new_tag.get("category"),
         "description": new_tag.get("description")
+    }
+
+
+@router.put("/customer-tags/{tag_id}", response_model=dict)
+async def update_customer_tag(
+    tag_id: str,
+    tag_data: dict = Body(...),
+    current_user: User = Depends(get_current_active_user)
+):
+    """更新客户标签"""
+    from webapp.tools.mongo import DATABASE
+    from bson import ObjectId
+    
+    if not ObjectId.is_valid(tag_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="无效的标签ID"
+        )
+    
+    tags_collection = DATABASE.customer_tags
+    customers_collection = DATABASE.customer_archives
+    
+    # 检查标签是否存在
+    existing_tag = tags_collection.find_one({"_id": ObjectId(tag_id)})
+    if not existing_tag:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="标签不存在"
+        )
+    
+    old_name = existing_tag.get("name")
+    new_name = tag_data.get("name", old_name)
+    
+    # 检查新名称是否与其他标签重复
+    if new_name != old_name:
+        duplicate = tags_collection.find_one({
+            "name": new_name,
+            "_id": {"$ne": ObjectId(tag_id)}
+        })
+        if duplicate:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"标签名称 '{new_name}' 已存在"
+            )
+    
+    # 更新标签
+    update_data = {
+        "name": new_name,
+        "category": tag_data.get("category", existing_tag.get("category")),
+        "description": tag_data.get("description", existing_tag.get("description")),
+        "updated_by": current_user.username,
+        "updated_at": datetime.utcnow()
+    }
+    
+    tags_collection.update_one(
+        {"_id": ObjectId(tag_id)},
+        {"$set": update_data}
+    )
+    
+    # 同步更新 customer_archives 中使用该标签的文档
+    updated_customers_count = 0
+    if new_name != old_name:
+        result = customers_collection.update_many(
+            {"tags.name": old_name},
+            {"$set": {"tags.$.name": new_name}}
+        )
+        updated_customers_count = result.modified_count
+    
+    return {
+        "_id": tag_id,
+        "name": new_name,
+        "category": update_data.get("category"),
+        "description": update_data.get("description"),
+        "updated_customers_count": updated_customers_count
+    }
+
+
+@router.delete("/customer-tags/{tag_id}", response_model=dict)
+async def delete_customer_tag(
+    tag_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    """删除客户标签"""
+    from webapp.tools.mongo import DATABASE
+    from bson import ObjectId
+    
+    if not ObjectId.is_valid(tag_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="无效的标签ID"
+        )
+    
+    tags_collection = DATABASE.customer_tags
+    customers_collection = DATABASE.customer_archives
+    
+    # 检查标签是否存在
+    existing_tag = tags_collection.find_one({"_id": ObjectId(tag_id)})
+    if not existing_tag:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="标签不存在"
+        )
+    
+    tag_name = existing_tag.get("name")
+    
+    # 从 customer_archives 中移除该标签
+    result = customers_collection.update_many(
+        {"tags.name": tag_name},
+        {"$pull": {"tags": {"name": tag_name}}}
+    )
+    affected_customers_count = result.modified_count
+    
+    # 删除标签
+    tags_collection.delete_one({"_id": ObjectId(tag_id)})
+    
+    return {
+        "deleted": True,
+        "tag_name": tag_name,
+        "affected_customers_count": affected_customers_count
     }
 
 

@@ -161,6 +161,16 @@ export interface CustomerTag {
 }
 
 /**
+ * 获取客户字段可选值（从现有数据聚合）
+ */
+export const getFieldOptions = () => {
+  return apiClient.get<{
+    sources: string[];
+    managers: string[];
+  }>('/api/v1/customers/field-options');
+};
+
+/**
  * 获取所有可用标签 (从 customer_tags 集合)
  */
 export const getCustomerTags = () => {
@@ -172,6 +182,30 @@ export const getCustomerTags = () => {
  */
 export const createCustomerTag = (tag: { name: string; category?: string }) => {
   return apiClient.post<CustomerTag>('/api/v1/customer-tags', tag);
+};
+
+/**
+ * 更新标签
+ */
+export const updateCustomerTag = (tagId: string, data: { name?: string; category?: string; description?: string }) => {
+  return apiClient.put<{
+    _id: string;
+    name: string;
+    category?: string;
+    description?: string;
+    updated_customers_count: number;
+  }>(`/api/v1/customers/customer-tags/${tagId}`, data);
+};
+
+/**
+ * 删除标签
+ */
+export const deleteCustomerTag = (tagId: string) => {
+  return apiClient.delete<{
+    deleted: boolean;
+    tag_name: string;
+    affected_customers_count: number;
+  }>(`/api/v1/customers/customer-tags/${tagId}`);
 };
 
 // ==================== 气象区域 API (复用 weather 模块) ====================

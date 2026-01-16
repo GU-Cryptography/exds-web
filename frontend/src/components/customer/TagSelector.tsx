@@ -18,7 +18,9 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import SearchIcon from '@mui/icons-material/Search';
+import SettingsIcon from '@mui/icons-material/Settings';
 import { Tag, CustomerTag, getCustomerTags, createCustomerTag } from '../../api/customer';
+import { TagManagementDialog } from './TagManagementDialog';
 
 interface TagSelectorProps {
     tags: Tag[];
@@ -41,24 +43,31 @@ const TagSelector: React.FC<TagSelectorProps> = ({ tags, onChange, readonly = fa
     const [allTags, setAllTags] = useState<CustomerTag[]>([]);
     const [searchText, setSearchText] = useState('');
     const [creating, setCreating] = useState(false);
+    const [managementOpen, setManagementOpen] = useState(false);
 
     const open = Boolean(anchorEl);
 
     // 加载所有可用标签
+    const loadTags = async () => {
+        setLoading(true);
+        try {
+            const response = await getCustomerTags();
+            setAllTags(response.data || []);
+        } catch (error) {
+            console.error('加载标签失败:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     useEffect(() => {
-        const loadTags = async () => {
-            setLoading(true);
-            try {
-                const response = await getCustomerTags();
-                setAllTags(response.data || []);
-            } catch (error) {
-                console.error('加载标签失败:', error);
-            } finally {
-                setLoading(false);
-            }
-        };
         loadTags();
     }, []);
+
+    // 标签管理变更后刷新
+    const handleTagsChanged = () => {
+        loadTags();
+    };
 
     // 按分类分组
     const groupedTags: TagGroup[] = React.useMemo(() => {
@@ -178,6 +187,24 @@ const TagSelector: React.FC<TagSelectorProps> = ({ tags, onChange, readonly = fa
                         <Typography variant="caption" sx={{ ml: 0.5 }}>添加</Typography>
                     </IconButton>
                 )}
+
+                {!readonly && (
+                    <Tooltip title="管理标签">
+                        <IconButton
+                            size="small"
+                            onClick={() => setManagementOpen(true)}
+                            sx={{
+                                border: '1px dashed',
+                                borderColor: 'divider',
+                                borderRadius: 1,
+                                px: 1,
+                                ml: 0.5
+                            }}
+                        >
+                            <SettingsIcon fontSize="small" />
+                        </IconButton>
+                    </Tooltip>
+                )}
             </Box>
 
             {/* 标签选择弹窗 */}
@@ -281,6 +308,13 @@ const TagSelector: React.FC<TagSelectorProps> = ({ tags, onChange, readonly = fa
                     </>
                 )}
             </Popover>
+
+            {/* 标签管理对话框 */}
+            <TagManagementDialog
+                open={managementOpen}
+                onClose={() => setManagementOpen(false)}
+                onTagsChanged={handleTagsChanged}
+            />
         </Box>
     );
 };

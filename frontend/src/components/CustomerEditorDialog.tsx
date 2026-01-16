@@ -33,7 +33,8 @@ import {
     AccordionDetails,
     useMediaQuery,
     useTheme,
-    Tooltip
+    Tooltip,
+    Autocomplete
 } from '@mui/material';
 import {
     Close as CloseIcon,
@@ -51,7 +52,7 @@ import {
     MeteringPoint,
     Tag,
     WeatherLocation,
-    CUSTOMER_SOURCES
+    getFieldOptions
 } from '../api/customer';
 import customerApi from '../api/customer';
 import TagSelector from './customer/TagSelector';
@@ -96,6 +97,9 @@ export const CustomerEditorDialog: React.FC<CustomerEditorDialogProps> = ({
     const [weatherLocations, setWeatherLocations] = useState<WeatherLocation[]>([]);
     const [loadingLocations, setLoadingLocations] = useState(false);
 
+    // 字段可选值 (来源、客户经理)
+    const [fieldOptions, setFieldOptions] = useState<{ sources: string[]; managers: string[] }>({ sources: [], managers: [] });
+
     // 账户编辑临时状态
     const [editingAccountIndex, setEditingAccountIndex] = useState<number | null>(null);
     const [editingAccountId, setEditingAccountId] = useState('');
@@ -108,7 +112,7 @@ export const CustomerEditorDialog: React.FC<CustomerEditorDialogProps> = ({
     const [editingMP, setEditingMP] = useState<{ accountIndex: number, mpIndex: number | null } | null>(null);
     const [editingMPData, setEditingMPData] = useState<MeteringPoint>({ mp_no: '', mp_name: null });
 
-    // 加载气象区域列表
+    // 加载气象区域列表和字段选项
     useEffect(() => {
         const loadWeatherLocations = async () => {
             setLoadingLocations(true);
@@ -121,8 +125,19 @@ export const CustomerEditorDialog: React.FC<CustomerEditorDialogProps> = ({
                 setLoadingLocations(false);
             }
         };
+
+        const loadFieldOptions = async () => {
+            try {
+                const response = await getFieldOptions();
+                setFieldOptions(response.data);
+            } catch (err) {
+                console.error('加载字段选项失败:', err);
+            }
+        };
+
         if (open) {
             loadWeatherLocations();
+            loadFieldOptions();
         }
     }, [open]);
 
@@ -415,30 +430,27 @@ export const CustomerEditorDialog: React.FC<CustomerEditorDialogProps> = ({
                             />
                         </Grid>
                         <Grid size={{ xs: 12, md: 6 }}>
-                            <FormControl fullWidth>
-                                <InputLabel>客户来源</InputLabel>
-                                <Select
-                                    value={formData.source || ''}
-                                    label="客户来源"
-                                    onChange={(e) => handleFieldChange('source', e.target.value || null)}
-                                >
-                                    <MenuItem value="">
-                                        <em>未选择</em>
-                                    </MenuItem>
-                                    {CUSTOMER_SOURCES.map((source) => (
-                                        <MenuItem key={source} value={source}>
-                                            {source}
-                                        </MenuItem>
-                                    ))}
-                                </Select>
-                            </FormControl>
+                            <Autocomplete
+                                freeSolo
+                                options={fieldOptions.sources}
+                                value={formData.source || ''}
+                                onChange={(_, value) => handleFieldChange('source', value || null)}
+                                onInputChange={(_, value) => handleFieldChange('source', value || null)}
+                                renderInput={(params) => (
+                                    <TextField {...params} label="客户来源" />
+                                )}
+                            />
                         </Grid>
                         <Grid size={{ xs: 12, md: 6 }}>
-                            <TextField
-                                fullWidth
-                                label="客户经理"
+                            <Autocomplete
+                                freeSolo
+                                options={fieldOptions.managers}
                                 value={formData.manager || ''}
-                                onChange={(e) => handleFieldChange('manager', e.target.value || null)}
+                                onChange={(_, value) => handleFieldChange('manager', value || null)}
+                                onInputChange={(_, value) => handleFieldChange('manager', value || null)}
+                                renderInput={(params) => (
+                                    <TextField {...params} label="客户经理" />
+                                )}
                             />
                         </Grid>
                     </Grid>
