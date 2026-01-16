@@ -78,6 +78,11 @@ export const SpotTrendAnalysisPage: React.FC = () => {
     const [rtFactorLoading, setRtFactorLoading] = useState(false);
     const [rtFactorError, setRtFactorError] = useState<string | null>(null);
 
+    // 时段均线数据（用于价格走势Tab）
+    const [timeslotAvgData, setTimeslotAvgData] = useState<CachedData<any>>({ data: null, dateRange: '' });
+    const [timeslotAvgLoading, setTimeslotAvgLoading] = useState(false);
+    const [timeslotAvgError, setTimeslotAvgError] = useState<string | null>(null);
+
     // 获取当前日期区间标识
     const getCurrentDateRange = (): string => {
         if (!startDate || !endDate) return '';
@@ -108,6 +113,29 @@ export const SpotTrendAnalysisPage: React.FC = () => {
             setTrendError(err.response?.data?.detail || '获取数据失败');
         } finally {
             setTrendLoading(false);
+        }
+    };
+
+    // 加载时段均线数据
+    const fetchTimeslotAvgData = async () => {
+        if (!startDate || !endDate) return;
+
+        const dateRange = getCurrentDateRange();
+        if (timeslotAvgData.data && timeslotAvgData.dateRange === dateRange) return;
+
+        setTimeslotAvgLoading(true);
+        setTimeslotAvgError(null);
+
+        try {
+            const start = format(startDate, 'yyyy-MM-dd');
+            const end = format(endDate, 'yyyy-MM-dd');
+            const response = await trendAnalysisApi.fetchTimeslotAvgPrice({ start_date: start, end_date: end });
+            setTimeslotAvgData({ data: response.data, dateRange });
+        } catch (err: any) {
+            console.error('Error fetching timeslot avg price:', err);
+            setTimeslotAvgError(err.response?.data?.detail || '获取数据失败');
+        } finally {
+            setTimeslotAvgLoading(false);
         }
     };
 
@@ -197,12 +225,16 @@ export const SpotTrendAnalysisPage: React.FC = () => {
         if (rtFactorData.dateRange && rtFactorData.dateRange !== newDateRange) {
             setRtFactorData({ data: null, dateRange: '' });
         }
+        if (timeslotAvgData.dateRange && timeslotAvgData.dateRange !== newDateRange) {
+            setTimeslotAvgData({ data: null, dateRange: '' });
+        }
     }, [startDate, endDate]);
 
     // 根据当前 Tab 懒加载数据
     useEffect(() => {
         if (tabIndex === 0) {
             fetchTrendData();
+            fetchTimeslotAvgData();  // 同时加载时段均线数据
         } else if (tabIndex === 1) {
             fetchTimeSlotData();
         } else if (tabIndex === 2) {
@@ -401,6 +433,8 @@ export const SpotTrendAnalysisPage: React.FC = () => {
                             data={trendData.data}
                             loading={trendLoading}
                             error={trendError}
+                            timeslotAvgData={timeslotAvgData.data}
+                            timeslotAvgLoading={timeslotAvgLoading}
                         />
                     </TabPanel>
                     <TabPanel value={tabIndex} index={1}>

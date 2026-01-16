@@ -1174,6 +1174,91 @@ class TrendAnalysisService:
         
         return correlations
 
+    def get_timeslot_avg_price(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
+        """
+        获取96时段的平均价格
+        
+        计算所选日期区间内，每个时段（00:15-24:00共96个点）的日前/实时平均价格
+        
+        Args:
+            start_date: 开始日期 (包含)
+            end_date: 结束日期 (不包含)
+            
+        Returns:
+            Dict 包含 timeslot_avg 列表，每项包含 time, da_avg, rt_avg
+        """
+        # 查询数据 (使用左开右闭区间以正确包含24:00)
+        query = {"datetime": {"$gt": start_date, "$lte": end_date}}
+        da_docs = list(self.da_collection.find(query))
+        rt_docs = list(self.rt_collection.find(query))
+        
+        logger.info(f"TimeslotAvgPrice: Found {len(da_docs)} DA docs, {len(rt_docs)} RT docs")
+        
+        # 按时段聚合: time_str -> [prices]
+        da_by_slot = defaultdict(list)
+        rt_by_slot = defaultdict(list)
+        
+        # 处理日前数据
+        for doc in da_docs:
+            dt = doc.get('datetime')
+            if not dt:
+                continue
+            
+            # 处理24:00特殊情况：数据库中存储为次日00:00
+            if dt.hour == 0 and dt.minute == 0:
+                time_str = "24:00"
+            else:
+                time_str = dt.strftime("%H:%M")
+            
+            price = doc.get('avg_clearing_price')
+            if price is not None:
+                da_by_slot[time_str].append(price)
+        
+        # 处理实时数据
+        for doc in rt_docs:
+            dt = doc.get('datetime')
+            if not dt:
+                continue
+            
+            if dt.hour == 0 and dt.minute == 0:
+                time_str = "24:00"
+            else:
+                time_str = dt.strftime("%H:%M")
+            
+            price = doc.get('avg_clearing_price')
+            if price is not None:
+                rt_by_slot[time_str].append(price)
+        
+        # 生成96时段的时间标签 (00:15, 00:30, ..., 23:45, 24:00)
+        time_slots = []
+        for hour in range(24):
+            for minute in [15, 30, 45, 0]:
+                if minute == 0:
+                    if hour == 0:
+                        continue  # 跳过00:00，因为它属于前一天的24:00
+                    time_str = f"{hour:02d}:00"
+                else:
+                    time_str = f"{hour:02d}:{minute:02d}"
+                time_slots.append(time_str)
+        time_slots.append("24:00")  # 添加最后一个点
+        
+        # 计算每个时段的平均价格
+        result = []
+        for time_str in time_slots:
+            da_prices = da_by_slot.get(time_str, [])
+            rt_prices = rt_by_slot.get(time_str, [])
+            
+            da_avg = round(statistics.mean(da_prices), 2) if da_prices else None
+            rt_avg = round(statistics.mean(rt_prices), 2) if rt_prices else None
+            
+            result.append({
+                "time": time_str,
+                "da_avg": da_avg,
+                "rt_avg": rt_avg
+            })
+        
+        return {"timeslot_avg": result}
+
     # ========== 私有辅助方法 ==========
 
     def _get_tou_rules(self, query_date: datetime) -> Dict[str, str]:

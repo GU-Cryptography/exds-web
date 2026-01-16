@@ -44,6 +44,11 @@ export const trendAnalysisApi = {
     // 8. 实时因素趋势分析
     fetchRtFactorTrend: (params: PriceTrendParams) => {
         return apiClient.get('/api/v1/trend-analysis/rt-factor-trend', { params });
+    },
+
+    // 9. 96时段平均价格
+    fetchTimeslotAvgPrice: (params: PriceTrendParams) => {
+        return apiClient.get('/api/v1/trend-analysis/timeslot-avg-price', { params });
     }
 };
 

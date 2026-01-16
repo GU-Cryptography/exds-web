@@ -195,3 +195,24 @@ def get_rt_factor_trend(
         logger.error(f"Error in get_rt_factor_trend: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
+@router.get(
+    "/timeslot-avg-price",
+    summary="获取96时段平均价格",
+    description="获取指定日期范围内，每个时段（00:15-24:00共96个点）的日前/实时平均价格"
+)
+def get_timeslot_avg_price(
+    start_date: str = Query(..., description="开始日期 YYYY-MM-DD"),
+    end_date: str = Query(..., description="结束日期 YYYY-MM-DD")
+):
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        
+        service = get_service()
+        return service.get_timeslot_avg_price(start, end)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="日期格式无效")
+    except Exception as e:
+        logger.error(f"Error in get_timeslot_avg_price: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+

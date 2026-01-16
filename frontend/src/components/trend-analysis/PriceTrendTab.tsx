@@ -14,6 +14,8 @@ interface PriceTrendTabProps {
     data: any;
     loading: boolean;
     error: string | null;
+    timeslotAvgData?: any;
+    timeslotAvgLoading?: boolean;
 }
 
 // 趋势分析面板组件
@@ -216,7 +218,9 @@ const DailySpreadCountChart: React.FC<{ data: any[] }> = ({ data }) => {
     );
 };
 
-export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({ data, loading, error }) => {
+export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({
+    data, loading, error, timeslotAvgData, timeslotAvgLoading
+}) => {
     const theme = useTheme();
 
     // Derived values
@@ -224,13 +228,11 @@ export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({ data, loading, err
 
     // Refs for charts
     const priceChartRef = useRef<HTMLDivElement>(null);
-    const spreadChartRef = useRef<HTMLDivElement>(null);
-    const spreadCountChartRef = useRef<HTMLDivElement>(null);
+    const timeslotAvgChartRef = useRef<HTMLDivElement>(null);
 
     // Fullscreen hooks
     const priceFullscreen = useChartFullscreen({ chartRef: priceChartRef, title: '日均价格趋势' });
-    const spreadFullscreen = useChartFullscreen({ chartRef: spreadChartRef, title: '日均价差趋势' });
-    const spreadCountFullscreen = useChartFullscreen({ chartRef: spreadCountChartRef, title: '每日正负价差时段数' });
+    const timeslotAvgFullscreen = useChartFullscreen({ chartRef: timeslotAvgChartRef, title: '时段均线' });
 
     // Series selection hooks
     const priceSeries = useSelectableSeries({ vwap_rt: true, vwap_da: true, trend_line: true });
@@ -367,9 +369,8 @@ export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({ data, loading, err
                     {stats && <TrendSummaryPanel stats={stats} />}
 
                     <Grid container spacing={{ xs: 1, sm: 2 }}>
-                        {/* Row 1: Price Trend & Spread Trend */}
-                        {/* Left: Price Trend */}
-                        <Grid size={{ xs: 12, md: 6 }}>
+                        {/* Row 1: 日均价格趋势 - 独立行 */}
+                        <Grid size={{ xs: 12 }}>
                             <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 } }}>
                                 <Typography variant="h6" gutterBottom>日均价格趋势</Typography>
                                 <Box ref={priceChartRef} sx={{
@@ -399,50 +400,60 @@ export const PriceTrendTab: React.FC<PriceTrendTabProps> = ({ data, loading, err
                             </Paper>
                         </Grid>
 
-                        {/* Right: Spread Trend */}
-                        <Grid size={{ xs: 12, md: 6 }}>
-                            <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 }, height: '100%' }}>
-                                <Typography variant="h6" gutterBottom>日均价差趋势</Typography>
-                                <Box ref={spreadChartRef} sx={{
-                                    height: { xs: 300, sm: 350 },
-                                    position: 'relative',
-                                    bgcolor: spreadFullscreen.isFullscreen ? 'background.paper' : 'transparent',
-                                    p: spreadFullscreen.isFullscreen ? 2 : 0,
-                                    ...(spreadFullscreen.isFullscreen && { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1400 })
-                                }}>
-                                    <spreadFullscreen.FullscreenEnterButton />
-                                    <spreadFullscreen.FullscreenExitButton />
-                                    <spreadFullscreen.FullscreenTitle />
-                                    <ResponsiveContainer>
-                                        <BarChart data={data.daily_trends}>
-                                            <CartesianGrid strokeDasharray="3 3" />
-                                            {renderWeekendReferenceAreas(data.daily_trends)}
-                                            <XAxis dataKey="date" />
-                                            <YAxis label={{ value: '元/MWh', angle: -90, position: 'insideLeft' }} />
-                                            <Tooltip />
-                                            <Legend />
-                                            <ReferenceLine y={0} stroke="#000" />
-                                            <Bar dataKey="vwap_spread" name="价差 (实时-日前)">
-                                                {data.daily_trends.map((entry: any, index: number) => (
-                                                    <Cell key={`cell-${index}`} fill={entry.vwap_spread >= 0 ? '#d32f2f' : '#388e3c'} />
-                                                ))}
-                                            </Bar>
-                                        </BarChart>
-                                    </ResponsiveContainer>
-                                </Box>
+                        {/* Row 2: 时段均线图 - 独立行 */}
+                        <Grid size={{ xs: 12 }}>
+                            <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 } }}>
+                                <Typography variant="h6" gutterBottom>时段均线 (96时段平均价格)</Typography>
+                                {timeslotAvgLoading ? (
+                                    <Box display="flex" justifyContent="center" alignItems="center" height={350}>
+                                        <CircularProgress />
+                                    </Box>
+                                ) : timeslotAvgData?.timeslot_avg ? (
+                                    <Box ref={timeslotAvgChartRef} sx={{
+                                        height: chartHeight,
+                                        position: 'relative',
+                                        bgcolor: timeslotAvgFullscreen.isFullscreen ? 'background.paper' : 'transparent',
+                                        p: timeslotAvgFullscreen.isFullscreen ? 2 : 0,
+                                        ...(timeslotAvgFullscreen.isFullscreen && { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1400 })
+                                    }}>
+                                        <timeslotAvgFullscreen.FullscreenEnterButton />
+                                        <timeslotAvgFullscreen.FullscreenExitButton />
+                                        <timeslotAvgFullscreen.FullscreenTitle />
+                                        <ResponsiveContainer>
+                                            <LineChart data={timeslotAvgData.timeslot_avg}>
+                                                <CartesianGrid strokeDasharray="3 3" />
+                                                <XAxis
+                                                    dataKey="time"
+                                                    interval={11}
+                                                    tick={{ fontSize: 11 }}
+                                                />
+                                                <YAxis label={{ value: '元/MWh', angle: -90, position: 'insideLeft' }} />
+                                                <Tooltip
+                                                    formatter={(value: number) => value ? value.toFixed(2) : '-'}
+                                                    labelFormatter={(label) => `时段: ${label}`}
+                                                />
+                                                <Legend />
+                                                <Line type="monotone" dataKey="da_avg" name="日前均价" stroke="#1976d2" strokeWidth={2} dot={false} />
+                                                <Line type="monotone" dataKey="rt_avg" name="实时均价" stroke="#d32f2f" strokeWidth={2} dot={false} />
+                                            </LineChart>
+                                        </ResponsiveContainer>
+                                    </Box>
+                                ) : (
+                                    <Box display="flex" justifyContent="center" alignItems="center" height={350}>
+                                        <Typography color="text.secondary">无数据</Typography>
+                                    </Box>
+                                )}
                             </Paper>
                         </Grid>
 
-                        {/* Row 2: Daily Spread Count & Spread Distribution */}
-                        {/* Left: Daily Spread Count */}
+                        {/* Row 3: 每日正负价差时段数 & 价差分布直方图 - 并排 */}
                         <Grid size={{ xs: 12, md: 6 }}>
                             <DailySpreadCountChart data={data.daily_trends.map((d: any) => ({
                                 ...d,
-                                negative_spread_count: -d.negative_spread_count // Convert to negative for display
+                                negative_spread_count: -d.negative_spread_count
                             }))} />
                         </Grid>
 
-                        {/* Right: Spread Distribution */}
                         <Grid size={{ xs: 12, md: 6 }}>
                             <PriceDistributionChart data={distributionData} />
                         </Grid>
