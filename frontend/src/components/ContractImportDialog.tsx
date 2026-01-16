@@ -18,14 +18,30 @@ import {
   Paper,
   Chip,
   IconButton,
-  Tooltip
+  Tabs,
+  Tab,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
+  Divider
 } from '@mui/material';
 import {
   Download as DownloadIcon,
   Close as CloseIcon,
-  Description as FileIcon
+  Description as FileIcon,
+  PictureAsPdf as PdfIcon,
+  CheckCircle as CheckCircleIcon,
+  Warning as WarningIcon,
+  Error as ErrorIcon
 } from '@mui/icons-material';
-import { importContracts, ImportResult, ImportError } from '../api/retail-contracts';
+import {
+  importContracts,
+  ImportResult,
+  ImportError,
+  uploadContractPdfs,
+  PdfUploadResult
+} from '../api/retail-contracts';
 
 interface ContractImportDialogProps {
   open: boolean;
@@ -38,20 +54,29 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
   onClose,
   onSuccess
 }) => {
+  // 导入类型：excel 或 pdf
+  const [importType, setImportType] = useState<'excel' | 'pdf'>('excel');
+
+  // Excel导入相关状态
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // PDF导入相关状态
+  const [selectedPdfFiles, setSelectedPdfFiles] = useState<File[]>([]);
+  const [pdfUploadResult, setPdfUploadResult] = useState<PdfUploadResult | null>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
+
+  // Excel文件选择处理
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      // 验证文件类型
       const validTypes = [
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
-        'application/vnd.ms-excel', // .xls
-        'application/octet-stream' // 有时Excel文件会被识别为这种类型
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+        'application/octet-stream'
       ];
 
       if (!validTypes.includes(file.type) && !file.name.match(/\.(xlsx|xls)$/i)) {
@@ -59,7 +84,6 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
         return;
       }
 
-      // 验证文件大小（10MB限制）
       if (file.size > 10 * 1024 * 1024) {
         setError('文件大小不能超过10MB');
         return;
@@ -71,6 +95,34 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
     }
   };
 
+  // PDF文件选择处理
+  const handlePdfFilesSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (files) {
+      const pdfFiles: File[] = [];
+      const invalidFiles: string[] = [];
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (file.name.toLowerCase().endsWith('.pdf')) {
+          pdfFiles.push(file);
+        } else {
+          invalidFiles.push(file.name);
+        }
+      }
+
+      if (invalidFiles.length > 0) {
+        setError(`以下文件不是PDF格式：${invalidFiles.join(', ')}`);
+      } else {
+        setError(null);
+      }
+
+      setSelectedPdfFiles(prev => [...prev, ...pdfFiles]);
+      setPdfUploadResult(null);
+    }
+  };
+
+  // Excel导入处理
   const handleImport = async () => {
     if (!selectedFile) {
       setError('请先选择要导入的Excel文件');
@@ -93,10 +145,46 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
     }
   };
 
+  // PDF上传处理
+  const handlePdfUpload = async () => {
+    if (selectedPdfFiles.length === 0) {
+      setError('请先选择要上传的PDF文件');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const result = await uploadContractPdfs(selectedPdfFiles);
+      setPdfUploadResult(result.data);
+
+      // 如果有匹配成功的，通知父组件刷新
+      if (result.data.matched.length > 0) {
+        // 创建一个模拟的ImportResult通知成功
+        onSuccess({
+          total: result.data.summary.total,
+          success: result.data.summary.matched_count,
+          failed: result.data.summary.pending_count + result.data.summary.error_count,
+          errors: []
+        });
+      }
+    } catch (err: any) {
+      console.error('上传失败:', err);
+      const errorMessage = err.response?.data?.detail || err.message || '上传失败，请重试';
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleClose = () => {
     setSelectedFile(null);
     setImportResult(null);
+    setSelectedPdfFiles([]);
+    setPdfUploadResult(null);
     setError(null);
+    setImportType('excel');
     onClose();
   };
 
@@ -109,13 +197,13 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
     event.preventDefault();
     event.stopPropagation();
 
-    const file = event.dataTransfer.files[0];
-    if (file) {
-      // 模拟文件选择
-      const fakeEvent = {
-        target: { files: [file] }
-      } as any;
+    const files = event.dataTransfer.files;
+    if (importType === 'excel' && files[0]) {
+      const fakeEvent = { target: { files: [files[0]] } } as any;
       handleFileSelect(fakeEvent);
+    } else if (importType === 'pdf') {
+      const fakeEvent = { target: { files } } as any;
+      handlePdfFilesSelect(fakeEvent);
     }
   };
 
@@ -128,6 +216,25 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
     }
   };
 
+  const removePdfFile = (index: number) => {
+    setSelectedPdfFiles(prev => prev.filter((_, i) => i !== index));
+    setPdfUploadResult(null);
+  };
+
+  const clearAllPdfFiles = () => {
+    setSelectedPdfFiles([]);
+    setPdfUploadResult(null);
+    if (pdfInputRef.current) {
+      pdfInputRef.current.value = '';
+    }
+  };
+
+  const handleTabChange = (_: React.SyntheticEvent, newValue: 'excel' | 'pdf') => {
+    setImportType(newValue);
+    setError(null);
+  };
+
+  // 渲染Excel导入结果
   const renderImportResult = () => {
     if (!importResult) return null;
 
@@ -135,26 +242,12 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
 
     return (
       <Box sx={{ mt: 2 }}>
-        {/* 结果统计 */}
         <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
-          <Chip
-            label={`总计: ${total}`}
-            color="default"
-            variant="outlined"
-          />
-          <Chip
-            label={`成功: ${success}`}
-            color="success"
-            variant="outlined"
-          />
-          <Chip
-            label={`失败: ${failed}`}
-            color={failed > 0 ? "error" : "default"}
-            variant="outlined"
-          />
+          <Chip label={`总计: ${total}`} color="default" variant="outlined" />
+          <Chip label={`成功: ${success}`} color="success" variant="outlined" />
+          <Chip label={`失败: ${failed}`} color={failed > 0 ? "error" : "default"} variant="outlined" />
         </Box>
 
-        {/* 错误详情 */}
         {errors.length > 0 && (
           <Box>
             <Typography variant="subtitle2" gutterBottom color="error">
@@ -175,9 +268,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
                     <TableRow key={index}>
                       <TableCell>{error.row}</TableCell>
                       <TableCell>{error.field}</TableCell>
-                      <TableCell sx={{ color: 'error.main' }}>
-                        {error.message}
-                      </TableCell>
+                      <TableCell sx={{ color: 'error.main' }}>{error.message}</TableCell>
                       <TableCell>{error.suggestion || '-'}</TableCell>
                     </TableRow>
                   ))}
@@ -185,25 +276,19 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
               </Table>
               {errors.length > 10 && (
                 <Box sx={{ p: 1, textAlign: 'center', color: 'text.secondary' }}>
-                  <Typography variant="body2">
-                    显示前10条错误，共{errors.length}条错误
-                  </Typography>
+                  <Typography variant="body2">显示前10条错误，共{errors.length}条错误</Typography>
                 </Box>
               )}
             </TableContainer>
           </Box>
         )}
 
-        {/* 成功提示 */}
         {success > 0 && failed === 0 && (
           <Alert severity="success" sx={{ mt: 2 }}>
-            <Typography variant="body2">
-              成功导入 {success} 条合同数据！
-            </Typography>
+            <Typography variant="body2">成功导入 {success} 条合同数据！</Typography>
           </Alert>
         )}
 
-        {/* 部分成功提示 */}
         {success > 0 && failed > 0 && (
           <Alert severity="warning" sx={{ mt: 2 }}>
             <Typography variant="body2">
@@ -214,6 +299,256 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
       </Box>
     );
   };
+
+  // 渲染PDF上传结果
+  const renderPdfUploadResult = () => {
+    if (!pdfUploadResult) return null;
+
+    const { matched, pending, errors, summary } = pdfUploadResult;
+
+    return (
+      <Box sx={{ mt: 2 }}>
+        <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+          <Chip label={`总计: ${summary.total}`} color="default" variant="outlined" />
+          <Chip label={`自动导入: ${summary.matched_count}`} color="success" variant="outlined" />
+          <Chip label={`待确认: ${summary.pending_count}`} color="warning" variant="outlined" />
+          <Chip label={`错误: ${summary.error_count}`} color={summary.error_count > 0 ? "error" : "default"} variant="outlined" />
+        </Box>
+
+        {/* 匹配成功列表 */}
+        {matched.length > 0 && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" gutterBottom color="success.main">
+              自动导入成功 ({matched.length}份):
+            </Typography>
+            <List dense>
+              {matched.map((item, index) => (
+                <ListItem key={index}>
+                  <ListItemIcon><CheckCircleIcon color="success" /></ListItemIcon>
+                  <ListItemText
+                    primary={item.filename}
+                    secondary={`关联合同: ${item.contract_name}`}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          </Box>
+        )}
+
+        {/* 待确认列表 */}
+        {pending.length > 0 && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" gutterBottom color="warning.main">
+              待确认 ({pending.length}份):
+            </Typography>
+            <List dense>
+              {pending.map((item, index) => (
+                <ListItem key={index}>
+                  <ListItemIcon><WarningIcon color="warning" /></ListItemIcon>
+                  <ListItemText
+                    primary={item.filename}
+                    secondary={item.reason}
+                  />
+                </ListItem>
+              ))}
+            </List>
+            <Alert severity="info" sx={{ mt: 1 }}>
+              <Typography variant="body2">
+                待确认的文件需要在合同详情页手动上传关联。
+              </Typography>
+            </Alert>
+          </Box>
+        )}
+
+        {/* 错误列表 */}
+        {errors.length > 0 && (
+          <Box>
+            <Typography variant="subtitle2" gutterBottom color="error">
+              错误 ({errors.length}份):
+            </Typography>
+            <List dense>
+              {errors.map((item, index) => (
+                <ListItem key={index}>
+                  <ListItemIcon><ErrorIcon color="error" /></ListItemIcon>
+                  <ListItemText
+                    primary={item.filename}
+                    secondary={item.error}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          </Box>
+        )}
+      </Box>
+    );
+  };
+
+  // 渲染Excel导入内容
+  const renderExcelContent = () => (
+    <>
+      <Alert severity="info" sx={{ mb: 2 }}>
+        <Typography variant="body2" component="div">
+          <strong>导入说明：</strong><br />
+          • 请上传从交易中心平台下载的标准Excel文件<br />
+          • 必需字段：套餐、购买用户、购买电量、购买时间-开始、购买时间-结束<br />
+          • 系统将自动忽略：序号、代理销售费模型、签章状态字段<br />
+          • 文件大小限制：10MB
+        </Typography>
+      </Alert>
+
+      {!selectedFile && !importResult && (
+        <Box
+          sx={{
+            border: '2px dashed',
+            borderColor: 'grey.300',
+            borderRadius: 1,
+            p: 3,
+            textAlign: 'center',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease-in-out',
+            '&:hover': { borderColor: 'primary.main', backgroundColor: 'action.hover' }
+          }}
+          onClick={() => fileInputRef.current?.click()}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            onChange={handleFileSelect}
+            style={{ display: 'none' }}
+          />
+          <DownloadIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
+          <Typography variant="h6" color="text.secondary" gutterBottom>
+            点击或拖拽文件到此处上传
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            支持 .xlsx 和 .xls 格式
+          </Typography>
+        </Box>
+      )}
+
+      {selectedFile && !importResult && (
+        <Box>
+          <Paper variant="outlined" sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+            <FileIcon color="primary" />
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="body1" fontWeight="medium">{selectedFile.name}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {(selectedFile.size / 1024).toFixed(2)} KB
+              </Typography>
+            </Box>
+            <IconButton onClick={removeFile} size="small" color="error">
+              <CloseIcon />
+            </IconButton>
+          </Paper>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            确认文件无误后，点击"开始导入"按钮进行数据导入。
+          </Typography>
+        </Box>
+      )}
+
+      {importResult && renderImportResult()}
+    </>
+  );
+
+  // 渲染PDF导入内容
+  const renderPdfContent = () => (
+    <>
+      <Alert severity="info" sx={{ mb: 2 }}>
+        <Typography variant="body2" component="div">
+          <strong>上传说明：</strong><br />
+          • 请上传合同原件PDF文件<br />
+          • 文件命名规范：<strong>客户名称-合同描述.pdf</strong><br />
+          • 例如：富联精密科技（赣州）有限公司-26年零售平台电子合同.pdf<br />
+          • 系统将根据文件名自动匹配已有合同记录
+        </Typography>
+      </Alert>
+
+      {selectedPdfFiles.length === 0 && !pdfUploadResult && (
+        <Box
+          sx={{
+            border: '2px dashed',
+            borderColor: 'grey.300',
+            borderRadius: 1,
+            p: 3,
+            textAlign: 'center',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease-in-out',
+            '&:hover': { borderColor: 'primary.main', backgroundColor: 'action.hover' }
+          }}
+          onClick={() => pdfInputRef.current?.click()}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+        >
+          <input
+            ref={pdfInputRef}
+            type="file"
+            accept=".pdf"
+            multiple
+            onChange={handlePdfFilesSelect}
+            style={{ display: 'none' }}
+          />
+          <PdfIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
+          <Typography variant="h6" color="text.secondary" gutterBottom>
+            点击或拖拽PDF文件到此处上传
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            支持批量选择多个PDF文件
+          </Typography>
+        </Box>
+      )}
+
+      {selectedPdfFiles.length > 0 && !pdfUploadResult && (
+        <Box>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+            <Typography variant="subtitle2">已选择 {selectedPdfFiles.length} 个文件:</Typography>
+            <Button size="small" onClick={clearAllPdfFiles} color="error">清空</Button>
+          </Box>
+          <Paper variant="outlined" sx={{ maxHeight: 200, overflow: 'auto' }}>
+            <List dense>
+              {selectedPdfFiles.map((file, index) => (
+                <ListItem
+                  key={index}
+                  secondaryAction={
+                    <IconButton edge="end" size="small" onClick={() => removePdfFile(index)}>
+                      <CloseIcon fontSize="small" />
+                    </IconButton>
+                  }
+                >
+                  <ListItemIcon><PdfIcon color="error" /></ListItemIcon>
+                  <ListItemText
+                    primary={file.name}
+                    secondary={`${(file.size / 1024).toFixed(2)} KB`}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          </Paper>
+          <Button
+            size="small"
+            sx={{ mt: 1 }}
+            onClick={() => pdfInputRef.current?.click()}
+          >
+            继续添加文件
+          </Button>
+          <input
+            ref={pdfInputRef}
+            type="file"
+            accept=".pdf"
+            multiple
+            onChange={handlePdfFilesSelect}
+            style={{ display: 'none' }}
+          />
+        </Box>
+      )}
+
+      {pdfUploadResult && renderPdfUploadResult()}
+    </>
+  );
+
+  const hasResult = importResult !== null || pdfUploadResult !== null;
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
@@ -227,18 +562,13 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
       </DialogTitle>
 
       <DialogContent>
-        <Box sx={{ minHeight: 300 }}>
-          {/* 使用说明 */}
-          <Alert severity="info" sx={{ mb: 2 }}>
-            <Typography variant="body2" component="div">
-              <strong>导入说明：</strong><br />
-              • 请上传从交易中心平台下载的标准Excel文件<br />
-              • 必需字段：套餐、购买用户、购买电量、购买时间-开始、购买时间-结束<br />
-              • 系统将自动忽略：序号、代理销售费模型、签章状态字段<br />
-              • 文件大小限制：10MB
-            </Typography>
-          </Alert>
+        {/* Tab切换 */}
+        <Tabs value={importType} onChange={handleTabChange} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
+          <Tab label="导入订单列表 (Excel)" value="excel" disabled={loading || hasResult} />
+          <Tab label="上传合同原件 (PDF)" value="pdf" disabled={loading || hasResult} />
+        </Tabs>
 
+        <Box sx={{ minHeight: 300 }}>
           {/* 错误提示 */}
           {error && (
             <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
@@ -246,76 +576,15 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
             </Alert>
           )}
 
-          {/* 文件选择区域 */}
-          {!selectedFile && !importResult && (
-            <Box
-              sx={{
-                border: '2px dashed',
-                borderColor: 'grey.300',
-                borderRadius: 1,
-                p: 3,
-                textAlign: 'center',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease-in-out',
-                '&:hover': {
-                  borderColor: 'primary.main',
-                  backgroundColor: 'action.hover'
-                }
-              }}
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={handleDragOver}
-              onDrop={handleDrop}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.xls"
-                onChange={handleFileSelect}
-                style={{ display: 'none' }}
-              />
-              <DownloadIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
-              <Typography variant="h6" color="text.secondary" gutterBottom>
-                点击或拖拽文件到此处上传
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                支持 .xlsx 和 .xls 格式
-              </Typography>
-            </Box>
-          )}
-
-          {/* 已选择文件 */}
-          {selectedFile && !importResult && (
-            <Box>
-              <Paper variant="outlined" sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
-                <FileIcon color="primary" />
-                <Box sx={{ flex: 1 }}>
-                  <Typography variant="body1" fontWeight="medium">
-                    {selectedFile.name}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {(selectedFile.size / 1024).toFixed(2)} KB
-                  </Typography>
-                </Box>
-                <IconButton onClick={removeFile} size="small" color="error">
-                  <CloseIcon />
-                </IconButton>
-              </Paper>
-
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                确认文件无误后，点击"开始导入"按钮进行数据导入。
-              </Typography>
-            </Box>
-          )}
-
-          {/* 导入结果 */}
-          {importResult && renderImportResult()}
+          {/* 根据Tab显示不同内容 */}
+          {importType === 'excel' ? renderExcelContent() : renderPdfContent()}
 
           {/* 加载状态 */}
           {loading && (
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4 }}>
               <CircularProgress size={40} />
               <Typography variant="body2" sx={{ mt: 2 }} color="text.secondary">
-                正在导入数据，请稍候...
+                {importType === 'excel' ? '正在导入数据，请稍候...' : '正在上传文件，请稍候...'}
               </Typography>
             </Box>
           )}
@@ -323,23 +592,34 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
       </DialogContent>
 
       <DialogActions sx={{ p: 2, pt: 0 }}>
-        {!importResult && (
+        {!hasResult && (
           <>
             <Button onClick={handleClose} disabled={loading}>
               取消
             </Button>
-            <Button
-              onClick={handleImport}
-              variant="contained"
-              disabled={!selectedFile || loading}
-              startIcon={loading ? <CircularProgress size={16} /> : <DownloadIcon />}
-            >
-              {loading ? '导入中...' : '开始导入'}
-            </Button>
+            {importType === 'excel' ? (
+              <Button
+                onClick={handleImport}
+                variant="contained"
+                disabled={!selectedFile || loading}
+                startIcon={loading ? <CircularProgress size={16} /> : <DownloadIcon />}
+              >
+                {loading ? '导入中...' : '开始导入'}
+              </Button>
+            ) : (
+              <Button
+                onClick={handlePdfUpload}
+                variant="contained"
+                disabled={selectedPdfFiles.length === 0 || loading}
+                startIcon={loading ? <CircularProgress size={16} /> : <PdfIcon />}
+              >
+                {loading ? '上传中...' : '开始上传'}
+              </Button>
+            )}
           </>
         )}
 
-        {importResult && (
+        {hasResult && (
           <Button onClick={handleClose} variant="contained">
             完成
           </Button>

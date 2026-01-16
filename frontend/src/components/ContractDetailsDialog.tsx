@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
     Dialog,
     DialogTitle,
@@ -15,16 +15,19 @@ import {
     useTheme,
     Alert,
     IconButton,
-    Tooltip
+    Tooltip,
+    Snackbar
 } from '@mui/material';
 import {
     Edit as EditIcon,
-    ContentCopy as CopyIcon,
-    Close as CloseIcon
+    Close as CloseIcon,
+    PictureAsPdf as PdfIcon,
+    Upload as UploadIcon,
+    Visibility as VisibilityIcon
 } from '@mui/icons-material';
 import { format, parseISO } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import { Contract } from '../api/retail-contracts';
+import { Contract, getContractPdf, uploadContractPdf } from '../api/retail-contracts';
 import apiClient from '../api/client';
 import usePricingModels from '../hooks/usePricingModels';
 import { PricingDetails } from './pricing/details/PricingDetails';
@@ -84,6 +87,14 @@ export const ContractDetailsDialog: React.FC<ContractDetailsDialogProps> = ({
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    // PDF相关状态
+    const [hasPdf, setHasPdf] = useState(false);
+    const [pdfViewLoading, setPdfViewLoading] = useState(false);  // 查看PDF的loading
+    const [pdfUploadLoading, setPdfUploadLoading] = useState(false);  // 上传PDF的loading
+    const [snackbarOpen, setSnackbarOpen] = useState(false);
+    const [snackbarMessage, setSnackbarMessage] = useState('');
+    const pdfInputRef = useRef<HTMLInputElement>(null);
+
     // 加载合同详情数据
     const loadContractDetails = async (id: string) => {
         setLoading(true);
@@ -119,8 +130,64 @@ export const ContractDetailsDialog: React.FC<ContractDetailsDialogProps> = ({
             setData(null);
             setPackageData(null);
             setError(null);
+            setHasPdf(false);
         }
     }, [open, contractId]);
+
+    // 当data加载完成时，更新hasPdf状态
+    useEffect(() => {
+        if (data) {
+            setHasPdf(!!(data as any).has_pdf);
+        }
+    }, [data]);
+
+    // 查看PDF
+    const handleViewPdf = async () => {
+        if (!contractId) return;
+        setPdfViewLoading(true);
+        try {
+            const response = await getContractPdf(contractId);
+            const file = new Blob([response.data], { type: 'application/pdf' });
+            const fileURL = URL.createObjectURL(file);
+            window.open(fileURL, '_blank');
+            setTimeout(() => URL.revokeObjectURL(fileURL), 100);
+        } catch (err: any) {
+            console.error('获取PDF失败:', err);
+            setSnackbarMessage('获取PDF失败，请重试');
+            setSnackbarOpen(true);
+        } finally {
+            setPdfViewLoading(false);
+        }
+    };
+
+    // 上传PDF
+    const handleUploadPdf = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file || !contractId) return;
+
+        if (!file.name.toLowerCase().endsWith('.pdf')) {
+            setSnackbarMessage('请选择PDF格式的文件');
+            setSnackbarOpen(true);
+            return;
+        }
+
+        setPdfUploadLoading(true);
+        try {
+            await uploadContractPdf(contractId, file);
+            setHasPdf(true);
+            setSnackbarMessage('PDF上传成功');
+            setSnackbarOpen(true);
+        } catch (err: any) {
+            console.error('上传PDF失败:', err);
+            setSnackbarMessage(err.response?.data?.detail || '上传失败，请重试');
+            setSnackbarOpen(true);
+        } finally {
+            setPdfUploadLoading(false);
+            if (pdfInputRef.current) {
+                pdfInputRef.current.value = '';
+            }
+        }
+    };
 
     // 防误操作：阻止背景点击关闭对话框
     const handleClose = (event: {}, reason: "backdropClick" | "escapeKeyDown") => {
@@ -135,14 +202,6 @@ export const ContractDetailsDialog: React.FC<ContractDetailsDialogProps> = ({
         if (contractId && onEdit) {
             onClose();
             onEdit(contractId);
-        }
-    };
-
-    // 处理复制操作
-    const handleCopy = () => {
-        if (contractId && onCopy) {
-            onClose();
-            onCopy(contractId);
         }
     };
 
@@ -285,6 +344,55 @@ export const ContractDetailsDialog: React.FC<ContractDetailsDialogProps> = ({
         </Paper>
     );
 
+    // 渲染合同原件卡片
+    const renderPdfSection = () => (
+        <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 }, mb: 2 }}>
+            <Typography variant="h6" gutterBottom>合同原件</Typography>
+            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+                {hasPdf ? (
+                    <>
+                        <Chip
+                            icon={<PdfIcon />}
+                            label="已上传"
+                            color="success"
+                            variant="outlined"
+                        />
+                        <Button
+                            variant="outlined"
+                            startIcon={pdfViewLoading ? <CircularProgress size={16} /> : <VisibilityIcon />}
+                            onClick={handleViewPdf}
+                            disabled={pdfViewLoading}
+                        >
+                            查看合同原件
+                        </Button>
+                    </>
+                ) : (
+                    <Chip
+                        icon={<PdfIcon />}
+                        label="未上传"
+                        color="default"
+                        variant="outlined"
+                    />
+                )}
+                <Button
+                    variant="outlined"
+                    startIcon={pdfUploadLoading ? <CircularProgress size={16} /> : <UploadIcon />}
+                    onClick={() => pdfInputRef.current?.click()}
+                    disabled={pdfUploadLoading}
+                >
+                    {hasPdf ? '替换合同原件' : '上传合同原件'}
+                </Button>
+                <input
+                    ref={pdfInputRef}
+                    type="file"
+                    accept=".pdf"
+                    onChange={handleUploadPdf}
+                    style={{ display: 'none' }}
+                />
+            </Box>
+        </Paper>
+    );
+
     return (
         <Dialog
             open={open}
@@ -330,6 +438,7 @@ export const ContractDetailsDialog: React.FC<ContractDetailsDialogProps> = ({
                     <Box>
                         {renderContractInfo()}
                         {renderPricingDetails()}
+                        {renderPdfSection()}
                         {renderSystemInfo()}
                     </Box>
                 ) : null}
@@ -340,14 +449,6 @@ export const ContractDetailsDialog: React.FC<ContractDetailsDialogProps> = ({
                     关闭
                 </Button>
                 <Button
-                    variant="outlined"
-                    onClick={handleCopy}
-                    disabled={!data}
-                    startIcon={<CopyIcon />}
-                >
-                    复制
-                </Button>
-                <Button
                     variant="contained"
                     onClick={handleEdit}
                     disabled={!data || data?.status !== 'pending'}
@@ -356,6 +457,14 @@ export const ContractDetailsDialog: React.FC<ContractDetailsDialogProps> = ({
                     编辑
                 </Button>
             </DialogActions>
+
+            {/* Snackbar提示 */}
+            <Snackbar
+                open={snackbarOpen}
+                autoHideDuration={3000}
+                onClose={() => setSnackbarOpen(false)}
+                message={snackbarMessage}
+            />
         </Dialog>
     );
 };

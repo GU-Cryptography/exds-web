@@ -522,3 +522,201 @@ def _build_filter_description(params):
         descriptions.append(f"购电时间：{start} ~ {end}")
 
     return '；'.join(descriptions) if descriptions else '无筛选条件'
+
+
+# ##############################################################################
+# 合同PDF文件管理API (Contract PDF APIs)
+# ##############################################################################
+
+from webapp.services.contract_pdf_service import ContractPdfService
+
+
+@router.post("/upload-pdfs", summary="批量上传合同PDF文件")
+async def upload_contract_pdfs(
+    files: List[UploadFile] = File(..., description="PDF文件列表"),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    批量上传PDF文件，自动匹配合同记录
+    
+    文件命名规范：客户名称-合同描述.pdf
+    例如：富联精密科技（赣州）有限公司-26年零售平台电子合同.pdf
+    
+    匹配规则：
+    1. 根据客户名称模糊匹配
+    2. 如果描述中有年份(如"26年"表示2026年)，用年份进一步过滤
+    3. 匹配单个且无已上传PDF -> 自动导入
+    4. 匹配多个 -> 需要用户确认
+    5. 匹配单个但已有PDF -> 需要用户确认是否覆盖
+    
+    返回:
+    - matched: 自动匹配并保存的文件列表
+    - pending: 需要用户确认的文件列表
+    - errors: 处理错误列表
+    """
+    pdf_service = ContractPdfService(DATABASE)
+    
+    matched = []
+    pending = []  # 需要用户确认的
+    errors = []
+    
+    for file in files:
+        # 验证文件类型
+        if not file.filename.lower().endswith('.pdf'):
+            errors.append({
+                "filename": file.filename,
+                "error": "不是PDF文件"
+            })
+            continue
+        
+        try:
+            # 读取文件内容
+            content = await file.read()
+            
+            # 匹配合同记录
+            match_result = pdf_service.match_pdf_to_contracts(file.filename)
+            
+            if match_result["auto_import"] and match_result["target_contract"]:
+                # 可以自动导入
+                contract = match_result["target_contract"]
+                success = pdf_service.save_pdf_to_contract(
+                    contract_id=contract["_id"],
+                    pdf_data=content,
+                    filename=file.filename,
+                    uploader=current_user.username
+                )
+                
+                if success:
+                    matched.append({
+                        "filename": file.filename,
+                        "contract_id": contract["_id"],
+                        "contract_name": contract["contract_name"],
+                        "customer_name": contract["customer_name"]
+                    })
+                else:
+                    errors.append({
+                        "filename": file.filename,
+                        "error": "保存失败"
+                    })
+            else:
+                # 需要用户确认
+                pending.append({
+                    "filename": file.filename,
+                    "reason": match_result["reason"],
+                    "candidates": match_result["matches"],
+                    "target_contract": match_result["target_contract"]
+                })
+                
+        except Exception as e:
+            errors.append({
+                "filename": file.filename,
+                "error": str(e)
+            })
+    
+    return {
+        "matched": matched,
+        "pending": pending,  # 改名为pending更准确
+        "errors": errors,
+        "summary": {
+            "total": len(files),
+            "matched_count": len(matched),
+            "pending_count": len(pending),
+            "error_count": len(errors)
+        }
+    }
+
+
+@router.get("/{contract_id}/pdf", summary="获取合同PDF文件")
+async def get_contract_pdf(
+    contract_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    获取合同的PDF文件，返回PDF文件流供预览/下载
+    """
+    pdf_service = ContractPdfService(DATABASE)
+    
+    result = pdf_service.get_contract_pdf(contract_id)
+    
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="该合同未上传PDF文件"
+        )
+    
+    # 返回PDF文件流
+    from urllib.parse import quote
+    encoded_filename = quote(result["pdf_filename"])
+    
+    return StreamingResponse(
+        io.BytesIO(result["pdf_data"]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}"
+        }
+    )
+
+
+@router.post("/{contract_id}/upload-pdf", summary="为指定合同上传PDF")
+async def upload_single_pdf(
+    contract_id: str,
+    file: UploadFile = File(..., description="PDF文件"),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    为指定合同上传/替换PDF文件
+    """
+    # 验证文件类型
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请上传PDF格式的文件"
+        )
+    
+    pdf_service = ContractPdfService(DATABASE)
+    
+    try:
+        content = await file.read()
+        
+        success = pdf_service.save_pdf_to_contract(
+            contract_id=contract_id,
+            pdf_data=content,
+            filename=file.filename,
+            uploader=current_user.username
+        )
+        
+        if success:
+            return {
+                "success": True,
+                "message": "PDF上传成功",
+                "contract_id": contract_id,
+                "filename": file.filename
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="合同不存在或保存失败"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"上传失败：{str(e)}"
+        )
+
+
+@router.get("/{contract_id}/has-pdf", summary="检查合同是否有PDF")
+async def check_contract_has_pdf(
+    contract_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    检查合同是否已上传PDF文件
+    """
+    pdf_service = ContractPdfService(DATABASE)
+    has_pdf = pdf_service.has_pdf(contract_id)
+    
+    return {"has_pdf": has_pdf}
+

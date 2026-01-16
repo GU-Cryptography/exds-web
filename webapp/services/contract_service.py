@@ -430,9 +430,15 @@ class ContractService:
         if not doc:
             return {}
 
+        # 需要排除的字段（二进制数据不应该返回给API）
+        excluded_fields = {'pdf_binary_data'}
+
         # 转换ObjectId为字符串
         result = {}
         for key, value in doc.items():
+            # 跳过需要排除的字段
+            if key in excluded_fields:
+                continue
             if isinstance(value, ObjectId):
                 if key == "_id":
                     result["id"] = str(value)  # 将_id转换为id
@@ -440,6 +446,9 @@ class ContractService:
                     result[key] = str(value)
             else:
                 result[key] = value
+        
+        # 添加一个has_pdf标志字段（不返回二进制数据本身）
+        result["has_pdf"] = bool(doc.get("pdf_filename"))
 
         # 计算并添加虚拟状态字段
         if "purchase_start_month" in doc and "purchase_end_month" in doc:

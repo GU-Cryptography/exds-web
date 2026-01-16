@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
@@ -7,37 +7,148 @@
     <meta name="theme-color" content="#000000" />
     <meta
       name="description"
-      content="Web site created using create-react-app"
+      content="电力交易辅助决策系统"
     />
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
-    <!--
-      manifest.json provides metadata used when your web app is installed on a
-      user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
-    -->
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-    <!--
-      Notice the use of %PUBLIC_URL% in the tags above.
-      It will be replaced with the URL of the `public` folder during the build.
-      Only files inside the `public` folder can be referenced from the HTML.
-
-      Unlike "/favicon.ico" or "favicon.ico", "%PUBLIC_URL%/favicon.ico" will
-      work correctly both with client-side routing and a non-root public URL.
-      Learn how to configure a non-root public URL by running `npm run build`.
-    -->
-    <title>React App</title>
+    <title>电力交易辅助决策系统</title>
+    <style>
+      /* 浏览器兼容性提示样式 */
+      #browser-upgrade-notice {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        z-index: 99999;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      }
+      .upgrade-container {
+        max-width: 600px;
+        margin: 100px auto;
+        padding: 40px;
+        background: white;
+        border-radius: 16px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        text-align: center;
+      }
+      .upgrade-icon {
+        font-size: 64px;
+        margin-bottom: 20px;
+      }
+      .upgrade-title {
+        font-size: 24px;
+        color: #1a1a2e;
+        margin-bottom: 16px;
+        font-weight: 600;
+      }
+      .upgrade-message {
+        font-size: 16px;
+        color: #666;
+        line-height: 1.6;
+        margin-bottom: 24px;
+      }
+      .upgrade-browsers {
+        display: flex;
+        justify-content: center;
+        gap: 20px;
+        flex-wrap: wrap;
+        margin-bottom: 24px;
+      }
+      .browser-link {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 16px 24px;
+        border: 2px solid #e0e0e0;
+        border-radius: 12px;
+        text-decoration: none;
+        color: #333;
+        transition: all 0.2s;
+      }
+      .browser-link:hover {
+        border-color: #667eea;
+        background: #f8f9ff;
+      }
+      .browser-name {
+        margin-top: 8px;
+        font-weight: 500;
+      }
+      .upgrade-note {
+        font-size: 14px;
+        color: #999;
+      }
+    </style>
   </head>
   <body>
-    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <noscript>您需要启用JavaScript才能运行此应用。</noscript>
+    
+    <!-- 浏览器兼容性检测提示 -->
+    <div id="browser-upgrade-notice">
+      <div class="upgrade-container">
+        <div class="upgrade-icon">⚠️</div>
+        <h1 class="upgrade-title">浏览器版本过低</h1>
+        <p class="upgrade-message">
+          您的浏览器版本不支持本系统所需的功能。<br/>
+          为了获得最佳体验，请升级到以下浏览器的最新版本：
+        </p>
+        <div class="upgrade-browsers">
+          <a href="https://www.google.cn/chrome/" target="_blank" class="browser-link">
+            <span style="font-size: 32px;">🌐</span>
+            <span class="browser-name">Chrome</span>
+          </a>
+          <a href="https://www.microsoft.com/edge" target="_blank" class="browser-link">
+            <span style="font-size: 32px;">🔷</span>
+            <span class="browser-name">Edge</span>
+          </a>
+          <a href="https://www.firefox.com.cn/" target="_blank" class="browser-link">
+            <span style="font-size: 32px;">🦊</span>
+            <span class="browser-name">Firefox</span>
+          </a>
+        </div>
+        <p class="upgrade-note">
+          推荐使用 Chrome 93+、Edge 93+ 或 Firefox 92+ 版本
+        </p>
+      </div>
+    </div>
+    
     <div id="root"></div>
-    <!--
-      This HTML file is a template.
-      If you open it directly in the browser, you will see an empty page.
-
-      You can add webfonts, meta tags, or analytics to this file.
-      The build step will place the bundled scripts into the <body> tag.
-
-      To begin the development, run `npm start` or `yarn start`.
-      To create a production bundle, use `npm run build` or `yarn build`.
-    -->
+    
+    <!-- 浏览器兼容性检测脚本（在React加载前执行） -->
+    <script>
+      (function() {
+        // 检测必要的现代浏览器特性
+        var isCompatible = true;
+        
+        try {
+          // 检测 Object.hasOwn (ES2022)
+          if (typeof Object.hasOwn !== 'function') {
+            isCompatible = false;
+          }
+          
+          // 检测其他关键特性
+          if (typeof Promise === 'undefined' ||
+              typeof fetch === 'undefined' ||
+              typeof Symbol === 'undefined' ||
+              !Array.prototype.includes ||
+              !Object.entries) {
+            isCompatible = false;
+          }
+          
+          // 检测可选链操作符支持（通过eval测试）
+          eval('var _test = {}; _test?.foo');
+        } catch (e) {
+          isCompatible = false;
+        }
+        
+        if (!isCompatible) {
+          // 显示升级提示，隐藏应用
+          document.getElementById('browser-upgrade-notice').style.display = 'block';
+          document.getElementById('root').style.display = 'none';
+        }
+      })();
+    </script>
   </body>
 </html>

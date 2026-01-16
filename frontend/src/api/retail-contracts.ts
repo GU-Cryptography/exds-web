@@ -190,3 +190,93 @@ export default {
   importContracts,
   exportContracts
 };
+
+
+// ##############################################################################
+// PDF合同文件管理API (Contract PDF APIs)
+// ##############################################################################
+
+// PDF上传结果类型
+export interface PdfUploadMatchedItem {
+  filename: string;
+  contract_id: string;
+  contract_name: string;
+  customer_name: string;
+}
+
+export interface PdfCandidateContract {
+  _id: string;
+  contract_name: string;
+  customer_name: string;
+  purchase_start_month: string;
+  purchase_end_month: string;
+  has_pdf: boolean;
+  contract_year?: number;
+}
+
+export interface PdfUploadPendingItem {
+  filename: string;
+  reason: string;
+  candidates: PdfCandidateContract[];
+  target_contract: PdfCandidateContract | null;
+}
+
+export interface PdfUploadErrorItem {
+  filename: string;
+  error: string;
+}
+
+export interface PdfUploadResult {
+  matched: PdfUploadMatchedItem[];
+  pending: PdfUploadPendingItem[];
+  errors: PdfUploadErrorItem[];
+  summary: {
+    total: number;
+    matched_count: number;
+    pending_count: number;
+    error_count: number;
+  };
+}
+
+/**
+ * 批量上传合同PDF文件
+ * @param files PDF文件数组
+ */
+export const uploadContractPdfs = (files: File[]) => {
+  const formData = new FormData();
+  files.forEach(file => formData.append('files', file));
+  return apiClient.post<PdfUploadResult>('/api/v1/retail-contracts/upload-pdfs', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  });
+};
+
+/**
+ * 获取合同PDF文件
+ * @param contractId 合同ID
+ */
+export const getContractPdf = (contractId: string) => {
+  return apiClient.get(`/api/v1/retail-contracts/${contractId}/pdf`, {
+    responseType: 'blob'
+  });
+};
+
+/**
+ * 为指定合同上传PDF文件
+ * @param contractId 合同ID
+ * @param file PDF文件
+ */
+export const uploadContractPdf = (contractId: string, file: File) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return apiClient.post(`/api/v1/retail-contracts/${contractId}/upload-pdf`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  });
+};
+
+/**
+ * 检查合同是否有PDF文件
+ * @param contractId 合同ID
+ */
+export const checkContractHasPdf = (contractId: string) => {
+  return apiClient.get<{ has_pdf: boolean }>(`/api/v1/retail-contracts/${contractId}/has-pdf`);
+};
