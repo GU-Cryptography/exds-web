@@ -53,10 +53,19 @@ class ContractCreate(BaseModel):
     @field_validator('purchase_end_month')
     @classmethod
     def validate_end_month(cls, v, info):
-        """验证购电结束月份必须大于等于开始月份"""
+        """
+        验证购电结束月份必须大于等于开始月份
+        并自动修正为当月最后一天
+        """
+        if v:
+             from calendar import monthrange
+             # 确保设为月底
+             days_in_month = monthrange(v.year, v.month)[1]
+             v = v.replace(day=days_in_month, hour=23, minute=59, second=59)
+
         if 'purchase_start_month' in info.data:
             start_month = info.data['purchase_start_month']
-            if v < start_month:
+            if v and start_month and v < start_month:
                 raise ValueError("购电结束月份必须大于等于购电开始月份")
         return v
 

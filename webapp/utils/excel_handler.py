@@ -112,16 +112,17 @@ class DateParser:
     ]
 
     @classmethod
-    def parse_date_field(cls, date_value, field_name: str) -> datetime:
+    def parse_date_field(cls, date_value, field_name: str, is_end_of_month: bool = False) -> datetime:
         """
-        解析日期字段为datetime对象（每月1号）
+        解析日期字段为datetime对象
 
         Args:
             date_value: 日期值（各种格式）
             field_name: 字段名称，用于错误提示
+            is_end_of_month: 是否为结束月份（如果是，设为当月最后一天 23:59:59）
 
         Returns:
-            datetime: 解析后的日期对象（每月1号）
+            datetime: 解析后的日期对象
 
         Raises:
             ValueError: 日期格式不正确时抛出
@@ -129,28 +130,39 @@ class DateParser:
         if pd.isna(date_value):
             raise ValueError(f"{field_name}不能为空")
 
+        dt_obj = None
+
         # 如果已经是datetime对象
         if isinstance(date_value, datetime):
-            return datetime(date_value.year, date_value.month, 1)
-
+            dt_obj = date_value
         # 处理Excel的Timestamp对象
-        if hasattr(date_value, 'date'):
-            date_value = date_value.date()
-            if hasattr(date_value, 'year'):
-                return datetime(date_value.year, date_value.month, 1)
-
+        elif hasattr(date_value, 'date'):
+            d = date_value.date()
+            if hasattr(d, 'year'):
+                 dt_obj = datetime(d.year, d.month, 1)
+        
         # 转换为字符串处理
-        date_str = str(date_value).strip()
+        if not dt_obj:
+            date_str = str(date_value).strip()
+            # 尝试多种日期格式
+            for fmt in cls.SUPPORTED_FORMATS:
+                try:
+                     parsed = datetime.strptime(date_str, fmt)
+                     dt_obj = parsed
+                     break
+                except ValueError:
+                    continue
 
-        # 尝试多种日期格式
-        for fmt in cls.SUPPORTED_FORMATS:
-            try:
-                dt = datetime.strptime(date_str, fmt)
-                return datetime(dt.year, dt.month, 1)  # 统一为每月1号
-            except ValueError:
-                continue
+        if not dt_obj:
+             raise ValueError(f"无法解析日期格式：{date_value}，支持的格式：YYYY-MM、YYYY-MM-DD、YYYY/MM、YYYY/MM/DD")
 
-        raise ValueError(f"无法解析日期格式：{date_str}，支持的格式：YYYY-MM、YYYY-MM-DD、YYYY/MM、YYYY/MM/DD")
+        # 统一处理日期
+        if is_end_of_month:
+            from calendar import monthrange
+            _, last_day = monthrange(dt_obj.year, dt_obj.month)
+            return datetime(dt_obj.year, dt_obj.month, last_day, 23, 59, 59)
+        else:
+            return datetime(dt_obj.year, dt_obj.month, 1)
 
 
 class DataValidator:
@@ -399,7 +411,7 @@ class ContractDataTransformer:
             row_data['购买时间-开始'], '购买时间-开始'
         )
         contract_data['purchase_end_month'] = DateParser.parse_date_field(
-            row_data['购买时间-结束'], '购买时间-结束'
+            row_data['购买时间-结束'], '购买时间-结束', is_end_of_month=True
         )
 
         # 3. 查询关联数据ID
