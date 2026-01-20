@@ -47,7 +47,7 @@ def validate_password_strength(password: str) -> (bool, str): # type: ignore
 # --- Security & Config Constants (Moved from main.py) ---
 SECRET_KEY = "a_very_secret_key_that_should_be_changed"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 # --- Pydantic Models (Moved from main.py) ---
 class Token(BaseModel):

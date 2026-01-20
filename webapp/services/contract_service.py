@@ -579,4 +579,47 @@ class ContractService:
         # 查找重叠的合同
         overlapping_contracts = list(self.collection.find(query))
 
-        return len(overlapping_contracts) > 0
+    def get_active_customers(self, start_date: datetime, end_date: datetime) -> List[str]:
+        """
+        获取指定时间范围内有有效合同的客户ID列表
+        
+        Args:
+            start_date: 查询范围开始时间
+            end_date: 查询范围结束时间
+            
+        Returns:
+            客户ID列表
+        """
+        # 确保时间类型正确
+        if isinstance(start_date, str):
+            try:
+                start_date = datetime.strptime(start_date, "%Y-%m-%d")
+            except ValueError:
+                start_date = datetime.strptime(start_date, "%Y-%m")
+                
+        if isinstance(end_date, str):
+            try:
+                end_date = datetime.strptime(end_date, "%Y-%m-%d")
+            except ValueError:
+                # 如果只有年月，默认到该月最后一天还是第一天？
+                # 通常作为结束时间，应涵盖该月？这里简单处理，假设调用方已处理好
+                end_date = datetime.strptime(end_date, "%Y-%m")
+
+        # 查询条件：合同有效期与查询范围有重叠
+        # 即：合同开始时间 <= 查询结束时间 AND 合同结束时间 >= 查询开始时间
+        query = {
+            "purchase_start_month": {"$lte": end_date},
+            "purchase_end_month": {"$gte": start_date},
+            # 状态过滤：根据实际业务需求，可能需要过滤 active 状态
+            # 但 calculate_contract_status 是动态计算的，数据库中不一定实时准确
+            # 这里先假设只要有合同记录且日期匹配即视为签约
+        }
+        
+        # 优化：如果是明确的 status 字段
+        # query["status"] = {"$in": ["active", "有效", "执行中"]}
+        
+        cursor = self.collection.find(query, {"customer_id": 1})
+        customer_ids = list(set(str(doc["customer_id"]) for doc in cursor if doc.get("customer_id")))
+        
+        return customer_ids
+

@@ -216,27 +216,86 @@
 
 该集合存储聚合后的用户级负荷数据，是系统内唯一的权威负荷曲线源。
 
-**设计原则**: 采用**长表 (Long Format)** 结构，每个时间点为一条独立记录。
+**设计原则**: 采用**宽表 (Wide Format) + 双数组**结构，每个客户每天一条记录，计量点数据和电表示度数据分离存储。
 
 ### 7.1. 字段说明
 
 | 字段名 | 类型 | 说明 | 示例 |
 | :--- | :--- | :--- | :--- |
 | `_id` | `ObjectId` | 唯一ID | `ObjectId("...")` |
-| `customer_id` | `String` | 关联客户ID (来自 `customers._id`) | `"673f9f87069d137d83be63a6"` |
+| `customer_id` | `String` | 关联客户ID (来自 `customer_archives._id`) | `"673f9f87069d137d83be63a6"` |
 | `customer_name` | `String` | 冗余客户全称 (便于查询展示) | `"江西省xx物资公司"` |
-| `datetime` | `DateTime` | 数据时间点 (本地时间，24:00 存储为次日 00:00:00) | `ISODate("2025-11-11T00:00:00Z")` |
-| `load_value` | `Number` | 时段用电量，单位: **MWh** | `0.8505` |
-| `source` | `String` | 数据来源: `"rpa"` (权威结算) / `"manual"` (手工导入转换) | `"rpa"` |
+| `date` | `String` | 数据日期 (YYYY-MM-DD) | `"2025-11-11"` |
+| `mp_load` | `Object` | 计量点数据（来自 `raw_mp_data`） | 见下表 |
+| `meter_load` | `Object` | 电表示度数据（来自 `raw_meter_data`） | 见下表 |
+| `deviation` | `Object` | 误差分析数据 | 见下表 |
 | `updated_at` | `DateTime` | 最后更新时间 | `ISODate("2025-11-12T10:00:00Z")` |
 
-### 7.2. 索引信息
+> **注意**：不再保存 `final_load`、`final_source`、`is_complete` 字段，融合逻辑改为后端 API 动态计算。
+
+#### `mp_load` 子对象结构
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `values` | `Array[48]` | 48点电量数组 (MWh, **保留4位小数**) |
+| `total` | `Number` | 日总电量 (MWh, **保留4位小数**) |
+| `mp_count` | `Integer` | 实际参与聚合的计量点数量 |
+| `missing_mps` | `Array[String]` | 缺失的计量点编号 |
+
+#### `meter_load` 子对象结构
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `values` | `Array[48]` | 48点电量数组 (MWh, **保留4位小数**) |
+| `total` | `Number` | 日总电量 (MWh, **保留4位小数**) |
+| `meter_count` | `Integer` | 实际参与聚合的电表数量 |
+| `missing_meters` | `Array[String]` | 缺失的电表资产编号 |
+| `data_quality` | `Object` | 数据质量标记（可选） |
+| `data_quality.interpolated_points` | `Array[Number]` | 被插值的时段索引 (0-47) |
+| `data_quality.dirty_points` | `Array[Number]` | 脏数据时段索引（无法处理） |
+
+#### `deviation` 误差分析字段
+
+当 `mp_load` 和 `meter_load` 同时存在时，计算并存储误差信息：
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `daily_error` | `Number` | 日电量误差 = (mp_total - meter_total) / meter_total |
+| `daily_error_abs` | `Number` | 日电量绝对误差 (MWh) |
+| `is_warning` | `Boolean` | 误差是否超过阈值 (默认5%) |
+
+
+### 7.2. 动态融合规则
+
+融合逻辑由后端 API 根据参数动态计算，不在数据库中存储：
+
+```
+GET /api/v1/load-data/curve/{customer_id}?priority=mp&threshold=0.95
+
+if priority == "mp":  # 计量点优先（默认）
+    if mp_load.coverage >= threshold:
+        return mp_load.values
+    elif meter_load exists:
+        return meter_load.values
+    else:
+        return mp_load.values
+else:  # priority == "meter"，电表优先
+    if meter_load.coverage >= threshold:
+        return meter_load.values
+    elif mp_load exists:
+        return mp_load.values
+    else:
+        return meter_load.values
+```
+
+> **补录替换**：当 `raw_mp_data` 有新数据写入时，自动触发 `mp_load` 重新聚合，下次查询自动使用最新数据。
+
+### 7.3. 索引信息
 
 - `_id_` (默认)
-- `customer_id`, `datetime` (唯一复合索引，确保单一权威源)
-- `datetime` (时序查询优化)
+- `customer_id`, `date` (唯一复合索引)
+- `date` (时序查询优化)
 - `customer_name` (检索优化)
-- `source` (统计分析优化)
 
 ---
 
@@ -244,27 +303,29 @@
 
 该集合存储**未签约客户**的手工导入负荷数据。此数据仅用于潜在客户开发阶段的用电分析，不参与正式结算或生产预测。
 
-**设计原则**: 结构与 `unified_load_curve` 完全一致，便于后续客户签约时迁移数据。
+**设计原则**: 结构与 `unified_load_curve` 保持一致（宽表），便于后续客户签约时迁移数据。
 
 ### 8.1. 字段说明
 
 | 字段名 | 类型 | 说明 | 示例 |
 | :--- | :--- | :--- | :--- |
 | `_id` | `ObjectId` | 唯一ID | `ObjectId("...")` |
-| `customer_id` | `String` | 关联客户ID (来自 `customers._id`) | `"673f9f87069d137d83be63a6"` |
+| `customer_id` | `String` | 关联客户ID (来自 `customer_archives._id`) | `"673f9f87069d137d83be63a6"` |
 | `customer_name` | `String` | 冗余客户全称 (便于查询展示) | `"江西省xx物资公司"` |
-| `datetime` | `DateTime` | 数据时间点 (本地时间，24:00 存储为次日 00:00:00) | `ISODate("2025-11-11T00:00:00Z")` |
-| `load_value` | `Number` | 时段用电量，单位: **MWh** | `0.8505` |
-| `source` | `String` | 固定为 `"manual"` | `"manual"` |
+| `date` | `String` | 数据日期 (YYYY-MM-DD) | `"2025-11-11"` |
+| `manual_load` | `Object` | 手工数据（结构同 unified_load_curve） | 见 7.1 |
+| `final_load` | `Array[48]` | 最终曲线 (MWh) | `[0.85, 0.92, ...]` |
+| `final_source` | `String` | 固定为 `"manual"` | `"manual"` |
+| `is_complete` | `Boolean` | 数据完整性标记 | `true` |
 | `updated_at` | `DateTime` | 最后更新时间 | `ISODate("2025-11-12T10:00:00Z")` |
 
 ### 8.2. 索引信息
 
 - `_id_` (默认)
-- `customer_id`, `datetime` (唯一复合索引)
-- `datetime` (时序查询优化)
+- `customer_id`, `date` (唯一复合索引)
+- `date` (时序查询优化)
 - `customer_name` (检索优化)
-- `source` (统计分析优化)
+- `is_complete` (快速筛选)
 
 ---
 
