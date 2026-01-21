@@ -2,7 +2,7 @@ import os
 import tempfile
 import shutil
 import logging
-from fastapi import APIRouter, Query, HTTPException, File, UploadFile, Form, Response, Body
+from fastapi import APIRouter, Query, HTTPException, File, UploadFile, Form, Response, Body, Depends
 from webapp.tools.mongo import DATABASE
 from typing import List, Dict
 from datetime import datetime, timedelta
@@ -10,6 +10,7 @@ import calendar
 import statistics
 from bson import json_util
 import json
+from webapp.tools.security import get_current_active_user, User
 
 from webapp.api import v1_retail_packages, v1_customers, v1_retail_contracts
 from webapp.api import v1_forecast_base_data
@@ -23,6 +24,7 @@ from webapp.services.package_service import PackageService
 from webapp.services.pricing_engine import PricingEngine
 from webapp.services.pricing_model_service import pricing_model_service
 from webapp.services.tou_service import get_tou_rule_by_date, get_tou_versions, get_tou_summary
+from webapp.services.sgcc_price_service import sgcc_price_service
 
 # 创建一个API路由器
 router = APIRouter(prefix="/api/v1", tags=["v1"])
@@ -333,6 +335,26 @@ def get_sgcc_prices(page: int = 1, pageSize: int = 10):
         logger.error(f"Error in get_sgcc_prices: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取国网代购电价数据时出错: {str(e)}")
 
+@router.post("/prices/sgcc/import", summary="导入国网代购电PDF公告")
+async def import_sgcc_price(file: UploadFile = File(...), current_user: User = Depends(get_current_active_user)):
+    """
+    上传并解析国网代购电PDF公告，解析结果存入数据库。
+    """
+    if not file.filename.endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="只支持PDF文件上传")
+    
+    try:
+        content = await file.read()
+        result = sgcc_price_service.import_pdf(content, file.filename)
+        if result['status'] == 'success':
+            return result
+        else:
+            raise HTTPException(status_code=500, detail=result['message'])
+    except Exception as e:
+        logger.error(f"Error in import_sgcc_price: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")
+
+
 # ##############################################################################
 # 定价模型API (Pricing Model APIs)
 # ##############################################################################
@@ -440,8 +462,6 @@ async def calculate_package_price(data: dict = Body(...)):
 # 客户标签管理API (Customer Tags APIs)
 # ##############################################################################
 
-from webapp.tools.security import get_current_active_user, User
-from fastapi import Depends
 
 @router.get("/customer-tags", summary="获取所有可用的客户标签")
 async def get_customer_tags(current_user: User = Depends(get_current_active_user)):

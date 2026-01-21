@@ -18,7 +18,9 @@ import apiClient from '../api/client';
 import PriceCheckIcon from '@mui/icons-material/PriceCheck';
 import ElectricMeterIcon from '@mui/icons-material/ElectricMeter';
 import LanIcon from '@mui/icons-material/Lan';
+import FileUploadIcon from '@mui/icons-material/FileUpload';
 import { DataGrid, GridColDef, GridRenderCellParams, GridPaginationModel } from '@mui/x-data-grid';
+import { Snackbar } from '@mui/material';
 import {
     ComposedChart,
     Line,
@@ -89,9 +91,43 @@ const GridAgencyPricePage: React.FC = () => {
 
     // General state
     const [loading, setLoading] = useState<boolean>(true);
+    const [importLoading, setImportLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
+    const [importError, setImportError] = useState<string | null>(null);
+    const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const chartRef = useRef<HTMLDivElement>(null);
+
+    const fetchData = async () => {
+        try {
+            setLoading(true);
+            const response = await apiClient.get<PaginatedSgccResponse>('/api/v1/prices/sgcc', {
+                params: {
+                    page: paginationModel.page + 1, // API is 1-based
+                    pageSize: paginationModel.pageSize,
+                },
+            });
+
+            const { total, pageData, chartData } = response.data;
+
+            setGridData(pageData);
+            setRowCount(total);
+
+            // Chart data and latest data for cards should only be set on the first load
+            if (paginationModel.page === 0) {
+                setChartData(chartData);
+                setLatestData(pageData[0] || null);
+            }
+
+            setError(null);
+        } catch (err) {
+            setError('获取数据失败，请稍后重试。');
+            console.error(err);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const handlePreviousMonth = () => {
         console.log("Navigate to Previous Month");
@@ -131,6 +167,49 @@ const GridAgencyPricePage: React.FC = () => {
         } catch (error) {
             console.error('Error fetching PDF:', error);
             setError('无法加载PDF文件，请检查网络或联系管理员。');
+        }
+    };
+
+    const handleImportClick = () => {
+        fileInputRef.current?.click();
+    };
+
+    const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        if (!file.name.toLowerCase().endsWith('.pdf')) {
+            setImportError('只支持 PDF 格式的文件');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            setImportLoading(true);
+            setImportError(null);
+            setSuccessMessage(null);
+            const response = await apiClient.post('/api/v1/prices/sgcc/import', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                },
+            });
+
+            if (response.data.status === 'success') {
+                setSuccessMessage(response.data.message || '导入成功');
+                fetchData(); // 重新加载数据
+            } else {
+                setImportError(response.data.message || '导入失败，请检查文件内容。');
+            }
+        } catch (err: any) {
+            console.error('Error importing PDF:', err);
+            setImportError(err.response?.data?.detail || '导入失败，请检查文件格式或重试。');
+        } finally {
+            setImportLoading(false);
+            if (fileInputRef.current) {
+                fileInputRef.current.value = ''; // 清除选择，允许重复上传同一文件
+            }
         }
     };
 
@@ -190,36 +269,6 @@ const GridAgencyPricePage: React.FC = () => {
     ];
 
     useEffect(() => {
-        const fetchData = async () => {
-            try {
-                setLoading(true);
-                const response = await apiClient.get<PaginatedSgccResponse>('/api/v1/prices/sgcc', {
-                    params: {
-                        page: paginationModel.page + 1, // API is 1-based
-                        pageSize: paginationModel.pageSize,
-                    },
-                });
-
-                const { total, pageData, chartData } = response.data;
-
-                setGridData(pageData);
-                setRowCount(total);
-
-                // Chart data and latest data for cards should only be set on the first load
-                if (paginationModel.page === 0) {
-                    setChartData(chartData);
-                    setLatestData(pageData[0] || null);
-                }
-
-                setError(null);
-            } catch (err) {
-                setError('获取数据失败，请稍后重试。');
-                console.error(err);
-            } finally {
-                setLoading(false);
-            }
-        };
-
         fetchData();
     }, [paginationModel]);
 
@@ -318,7 +367,29 @@ const GridAgencyPricePage: React.FC = () => {
     const renderChart = (allChartData: SGCCPriceData[]) => {
         return (
             <Paper sx={{ p: 2, mt: 3, height: 400 }}>
-                <Typography variant="h6" gutterBottom>历史趋势图</Typography>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                    <Typography variant="h6">历史趋势图</Typography>
+                    {!isMobile && (
+                        <>
+                            <input
+                                type="file"
+                                accept="application/pdf"
+                                style={{ display: 'none' }}
+                                ref={fileInputRef}
+                                onChange={handleFileChange}
+                            />
+                            <Button
+                                variant="outlined"
+                                startIcon={importLoading ? <CircularProgress size={20} /> : <FileUploadIcon />}
+                                onClick={handleImportClick}
+                                disabled={importLoading}
+                                size="small"
+                            >
+                                {importLoading ? '导入中...' : '导入公告'}
+                            </Button>
+                        </>
+                    )}
+                </Box>
                 <Box ref={chartRef} sx={{ height: '90%', position: 'relative', backgroundColor: isFullscreen ? 'background.paper' : 'transparent', p: isFullscreen ? 2 : 0 }}>
                     <FullscreenEnterButton />
                     <FullscreenExitButton />
@@ -427,6 +498,28 @@ const GridAgencyPricePage: React.FC = () => {
             )}
 
             {renderContent()}
+
+            <Snackbar
+                open={!!successMessage}
+                autoHideDuration={3000}
+                onClose={() => setSuccessMessage(null)}
+                anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+            >
+                <Alert onClose={() => setSuccessMessage(null)} severity="success" sx={{ width: '100%' }}>
+                    {successMessage}
+                </Alert>
+            </Snackbar>
+
+            <Snackbar
+                open={!!importError}
+                autoHideDuration={3000}
+                onClose={() => setImportError(null)}
+                anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+            >
+                <Alert onClose={() => setImportError(null)} severity="error" sx={{ width: '100%' }}>
+                    {importError}
+                </Alert>
+            </Snackbar>
         </Box>
     );
 };
