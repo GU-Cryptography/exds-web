@@ -25,7 +25,9 @@ import {
     ListItemIcon,
     ListItemText,
     LinearProgress,
-    Tooltip
+    Tooltip,
+    FormControlLabel,
+    Checkbox
 } from '@mui/material';
 import {
     Download as DownloadIcon,
@@ -69,6 +71,7 @@ export const LoadDataImportDialog: React.FC<LoadDataImportDialogProps> = ({
     onSuccess
 }) => {
     const [importType, setImportType] = useState<'meter' | 'mp'>('meter');
+    const [overwrite, setOverwrite] = useState(false);
     const [fileList, setFileList] = useState<FileItem[]>([]);
     const [loading, setLoading] = useState(false);
     const [globalError, setGlobalError] = useState<string | null>(null);
@@ -229,9 +232,9 @@ export const LoadDataImportDialog: React.FC<LoadDataImportDialogProps> = ({
             try {
                 let response;
                 if (importType === 'meter') {
-                    response = await importMeterData(item.file);
+                    response = await importMeterData(item.file, overwrite);
                 } else {
-                    response = await importMpData(item.file);
+                    response = await importMpData(item.file, overwrite);
                 }
 
                 const result = response.data;
@@ -370,6 +373,18 @@ export const LoadDataImportDialog: React.FC<LoadDataImportDialogProps> = ({
                             </Button>
                         </Tooltip>
                     )}
+
+                    <FormControlLabel
+                        control={
+                            <Checkbox
+                                checked={overwrite}
+                                onChange={(e) => setOverwrite(e.target.checked)}
+                                size="small"
+                                disabled={loading}
+                            />
+                        }
+                        label={<Typography variant="body2">覆盖已存在数据</Typography>}
+                    />
 
                     <Box sx={{ flex: 1 }} />
 

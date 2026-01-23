@@ -267,76 +267,110 @@ class MeterDataImportService:
             return [], errors
     
     @staticmethod
-    def import_records(records: List[Dict]) -> Dict:
+    def import_records(records: List[Dict], overwrite: bool = False) -> Dict:
         """
-        将记录导入数据库（优化版：批量查询+批量插入，跳过已存在记录）
+        将记录导入数据库（支持覆盖模式）
         
         Args:
             records: 数据记录列表
+            overwrite: 是否覆盖已存在记录
         
         Returns:
             {
                 "inserted": 新插入数量,
-                "skipped": 跳过数量（已存在）,
+                "updated": 更新数量,
+                "skipped": 跳过数量,
                 "errors": 错误列表
             }
         """
         if not records:
-            return {"inserted": 0, "skipped": 0, "errors": []}
+            return {"inserted": 0, "updated": 0, "skipped": 0, "errors": []}
         
         errors = []
+        inserted = 0
+        updated = 0
+        skipped = 0
         
         try:
-            # 1. 构建所有记录的 (meter_id, date) 键
-            record_keys = [(r["meter_id"], r["date"]) for r in records]
+            from pymongo import ReplaceOne, InsertOne
             
-            # 2. 批量查询已存在的记录
-            # 使用 $or 查询所有可能存在的记录
-            or_conditions = [
-                {"meter_id": meter_id, "date": date}
-                for meter_id, date in record_keys
-            ]
+            # 1. 如果是覆盖模式，使用 ReplaceOne (upsert=True)
+            if overwrite:
+                operations = []
+                for r in records:
+                    op = ReplaceOne(
+                        {"meter_id": r["meter_id"], "date": r["date"]},
+                        r,
+                        upsert=True
+                    )
+                    operations.append(op)
+                
+                if operations:
+                    try:
+                        bulk_result = RAW_METER_DATA.bulk_write(operations, ordered=False)
+                        # inserted_count returns only actual inserts, upserts are in upserted_count or matched_count
+                        # logically: inserted + modified + upserted
+                        inserted = bulk_result.inserted_count + bulk_result.upserted_count
+                        updated = bulk_result.modified_count
+                        # In overwrite mode, matched but not modified counts as updated for our purpose? 
+                        # Or maybe just say "processed".
+                        # Let's simplify: inserted = new, updated = existing overwritten
+                        # Actually calculating exact 'updated' vs 'no-change' is hard with bulk_write if data is identical.
+                        # But user cares that it IS there.
+                        # Let's count total requests - inserted = updated (roughly)
+                        total_ops = len(operations)
+                        updated = total_ops - inserted
+                    except Exception as e:
+                        logger.error(f"Bulk write error: {e}")
+                        errors.append(str(e))
+                
+            else:
+                # 2. 如果非覆盖模式，保持原有逻辑（跳过已存在）
+                # 构建所有记录的 (meter_id, date) 键
+                record_keys = [(r["meter_id"], r["date"]) for r in records]
+                
+                # 批量查询已存在的记录
+                or_conditions = [
+                    {"meter_id": meter_id, "date": date}
+                    for meter_id, date in record_keys
+                ]
+                
+                existing_keys = set()
+                if or_conditions:
+                    batch_size = 500
+                    for i in range(0, len(or_conditions), batch_size):
+                        batch_conditions = or_conditions[i:i + batch_size]
+                        for doc in RAW_METER_DATA.find(
+                            {"$or": batch_conditions},
+                            {"meter_id": 1, "date": 1}
+                        ):
+                            existing_keys.add((doc["meter_id"], doc["date"]))
+                
+                # 过滤出需要新插入的记录
+                new_records = []
+                for record in records:
+                    key = (record["meter_id"], record["date"])
+                    if key not in existing_keys:
+                        new_records.append(record)
+                
+                skipped = len(records) - len(new_records)
+                
+                # 批量插入新记录
+                if new_records:
+                    try:
+                        result = RAW_METER_DATA.insert_many(new_records, ordered=False)
+                        inserted = len(result.inserted_ids)
+                    except Exception as e:
+                        logger.warning(f"批量插入部分失败: {e}")
+                        errors.append(f"批量插入异常: {str(e)}")
+                        if hasattr(e, 'details') and 'nInserted' in e.details:
+                            inserted = e.details['nInserted']
             
-            existing_keys = set()
-            if or_conditions:
-                # 分批查询避免 $or 条件过多
-                batch_size = 500
-                for i in range(0, len(or_conditions), batch_size):
-                    batch_conditions = or_conditions[i:i + batch_size]
-                    for doc in RAW_METER_DATA.find(
-                        {"$or": batch_conditions},
-                        {"meter_id": 1, "date": 1}
-                    ):
-                        existing_keys.add((doc["meter_id"], doc["date"]))
-            
-            # 3. 过滤出需要新插入的记录
-            new_records = []
-            for record in records:
-                key = (record["meter_id"], record["date"])
-                if key not in existing_keys:
-                    new_records.append(record)
-            
-            skipped = len(records) - len(new_records)
-            inserted = 0
-            
-            # 4. 批量插入新记录
-            if new_records:
-                try:
-                    result = RAW_METER_DATA.insert_many(new_records, ordered=False)
-                    inserted = len(result.inserted_ids)
-                except Exception as e:
-                    # insert_many 可能因为部分重复键失败
-                    # 记录错误但继续处理
-                    logger.warning(f"批量插入部分失败: {e}")
-                    errors.append(f"批量插入异常: {str(e)}")
-                    # 尝试获取实际插入数量
-                    if hasattr(e, 'details') and 'nInserted' in e.details:
-                        inserted = e.details['nInserted']
-            
-            logger.info(f"电表数据导入完成: 插入 {inserted}, 跳过 {skipped}")
+            logger.info(f"电表数据导入完成: 模式={'覆盖' if overwrite else '跳过'}, 插入/更新 {inserted+updated}, 跳过 {skipped}")
             
             return {
                 "inserted": inserted,
+                "updated": updated,
                 "skipped": skipped,
                 "errors": errors
             }
@@ -346,18 +380,20 @@ class MeterDataImportService:
             errors.append(f"导入异常: {str(e)}")
             return {
                 "inserted": 0,
+                "updated": 0,
                 "skipped": 0,
                 "errors": errors
             }
     
     @staticmethod
-    def import_excel_file(file_content: bytes, filename: str) -> Dict:
+    def import_excel_file(file_content: bytes, filename: str, overwrite: bool = False) -> Dict:
         """
         导入 Excel 文件的完整流程
         
         Args:
             file_content: Excel 文件二进制内容
             filename: 文件名
+            overwrite: 是否覆盖
         
         Returns:
             导入结果
@@ -373,15 +409,22 @@ class MeterDataImportService:
                 "message": "未解析到有效数据",
                 "parse_errors": parse_errors,
                 "inserted": 0,
+                "updated": 0,
                 "skipped": 0
             }
         
         # 导入记录
-        result = MeterDataImportService.import_records(records)
+        result = MeterDataImportService.import_records(records, overwrite)
         result["parse_errors"] = parse_errors
         result["success"] = True
         result["total_records"] = len(records)
-        result["message"] = f"成功导入 {result['inserted']} 条，跳过 {result['skipped']} 条（已存在）"
+        
+        msg_parts = []
+        if result['inserted'] > 0: msg_parts.append(f"新增 {result['inserted']} 条")
+        if result['updated'] > 0: msg_parts.append(f"更新 {result['updated']} 条")
+        if result['skipped'] > 0: msg_parts.append(f"跳过 {result['skipped']} 条")
+        
+        result["message"] = "，".join(msg_parts) if msg_parts else "未导入任何数据"
         
         return result
 

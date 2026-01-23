@@ -9,398 +9,549 @@ import {
     Paper,
     Typography,
     Box,
-    FormControl,
-    InputLabel,
-    Select,
-    MenuItem,
     Alert,
     CircularProgress,
-    Divider,
-    RadioGroup,
-    FormControlLabel,
-    Radio,
     Table,
     TableBody,
     TableCell,
     TableContainer,
     TableHead,
     TableRow,
-    Chip
+    Chip,
+    Tooltip,
+    Stack,
+    IconButton,
+    Collapse
 } from '@mui/material';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { zhCN } from 'date-fns/locale';
-import { format, subDays, startOfMonth, endOfMonth } from 'date-fns';
-import apiClient from '../../api/client';
+import { format } from 'date-fns';
+import CalculateIcon from '@mui/icons-material/Calculate';
+import InfoIcon from '@mui/icons-material/Info';
+import TableChartIcon from '@mui/icons-material/TableChart';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
+import {
+    previewCalibration,
+    calculateCalibration,
+    applyCalibration
+} from '../../api/load-data';
 
 interface CoefficientCalibrationDialogProps {
     open: boolean;
     onClose: () => void;
     customerId: string;
     customerName?: string;
+    startDate: Date;
+    endDate: Date;
     onSuccess?: () => void;
 }
 
+interface MeterInfo {
+    meter_id: string;
+    multiplier?: number;
+    allocation_ratio?: number;
+}
+
+interface BreakdownItem {
+    id: string;
+    total: number;
+    ratio?: number;
+    has_data: boolean;
+}
+
+interface AccountPreview {
+    account_no: string;
+    meters?: MeterInfo[];
+    mp_count?: number;
+    status: 'balanced' | 'imbalanced' | 'missing_config' | 'missing_data';
+    mp_total: number;
+    meter_total: number;
+    diff_rate: number;
+    message: string;
+    mps_breakdown?: BreakdownItem[];
+    meters_breakdown?: BreakdownItem[];
+}
+
 interface CalibrationResult {
-    success: boolean;
     sample_days: number;
     sample_points: number;
     residual_rate: number;
     confidence: 'High' | 'Medium' | 'Low';
+    matched_count?: number;
+    unmatched_count?: number;
     meter_results: {
         meter_id: string;
         recommended_value: number;
+        match_type?: string;
+        matched_mp?: string;
     }[];
     data_summary: {
         mp_total: number;
         est_total: number;
     };
-    message?: string;
 }
+
+const Row = (props: {
+    row: AccountPreview;
+    onCalibrate: (accountNo: string) => void;
+    getStatusLabel: (status: string) => string;
+    getStatusColor: (status: string) => any;
+    renderMetersInfo: (meters?: MeterInfo[]) => React.ReactNode;
+}) => {
+    const { row, onCalibrate, getStatusLabel, getStatusColor, renderMetersInfo } = props;
+    const [open, setOpen] = React.useState(false);
+
+    return (
+        <React.Fragment>
+            <TableRow sx={{ '& > *': { borderBottom: 'unset' } }}>
+                <TableCell>
+                    {row.account_no || <Typography color="text.secondary" variant="body2">(未配置户号)</Typography>}
+                </TableCell>
+                <TableCell>{row.mp_count ?? '-'}个</TableCell>
+                <TableCell>{renderMetersInfo(row.meters)}</TableCell>
+                <TableCell>
+                    <Chip
+                        label={getStatusLabel(row.status)}
+                        color={getStatusColor(row.status)}
+                        size="small"
+                    />
+                </TableCell>
+                <TableCell align="right">{row.mp_total}</TableCell>
+                <TableCell align="right">{row.meter_total}</TableCell>
+                <TableCell align="right">{(row.diff_rate * 100).toFixed(2)}%</TableCell>
+                <TableCell>{row.message}</TableCell>
+                <TableCell align="center">
+                    <Stack direction="row" spacing={1} justifyContent="center">
+                        <IconButton
+                            aria-label="expand row"
+                            size="small"
+                            onClick={() => setOpen(!open)}
+                        >
+                            {open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+                        </IconButton>
+                        <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<CalculateIcon />}
+                            disabled={row.status === 'balanced' || row.status === 'missing_config' || row.status === 'missing_data'}
+                            onClick={() => onCalibrate(row.account_no)}
+                        >
+                            校核
+                        </Button>
+                    </Stack>
+                </TableCell>
+            </TableRow>
+            <TableRow>
+                <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={9}>
+                    <Collapse in={open} timeout="auto" unmountOnExit>
+                        <Box sx={{ margin: 1, mb: 2 }}>
+                            <Typography variant="subtitle2" gutterBottom component="div" sx={{ fontWeight: 'bold' }}>
+                                设备详情明细 (统计时段内)
+                            </Typography>
+                            <TableContainer component={Paper} variant="outlined" sx={{ bgcolor: 'rgba(0,0,0,0.02)' }}>
+                                <Table size="small">
+                                    <TableHead>
+                                        <TableRow sx={{ bgcolor: 'rgba(0,0,0,0.04)' }}>
+                                            <TableCell>类型</TableCell>
+                                            <TableCell>编号</TableCell>
+                                            <TableCell align="right">阶段总电量</TableCell>
+                                            <TableCell align="right">系数</TableCell>
+                                            <TableCell align="center">状态</TableCell>
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        {row.mps_breakdown?.map((mp, idx) => (
+                                            <TableRow key={`mp-${mp.id}`}>
+                                                <TableCell>{idx === 0 ? '计量点 (MP)' : ''}</TableCell>
+                                                <TableCell>{mp.id}</TableCell>
+                                                <TableCell align="right">{mp.total}</TableCell>
+                                                <TableCell align="right">-</TableCell>
+                                                <TableCell align="center">
+                                                    {mp.has_data ? <Chip label="有数" size="small" color="success" variant="outlined" /> : <Chip label="无数" size="small" color="error" variant="outlined" />}
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                        <TableRow sx={{ bgcolor: 'rgba(0,0,0,0.03)' }}>
+                                            <TableCell colSpan={2} align="right"><strong>MP 总计</strong></TableCell>
+                                            <TableCell align="right"><strong>{row.mp_total}</strong></TableCell>
+                                            <TableCell colSpan={2}></TableCell>
+                                        </TableRow>
+                                        {row.meters_breakdown?.map((meter, idx) => (
+                                            <TableRow key={`meter-${meter.id}`}>
+                                                <TableCell>{idx === 0 ? '电表 (Meter)' : ''}</TableCell>
+                                                <TableCell>{meter.id}</TableCell>
+                                                <TableCell align="right">{meter.total}</TableCell>
+                                                <TableCell align="right">{meter.ratio}</TableCell>
+                                                <TableCell align="center">
+                                                    {meter.has_data ? <Chip label="有数" size="small" color="success" variant="outlined" /> : <Chip label="无数" size="small" color="error" variant="outlined" />}
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                        <TableRow sx={{ bgcolor: 'rgba(0,0,0,0.03)' }}>
+                                            <TableCell colSpan={2} align="right"><strong>Meter 总计</strong></TableCell>
+                                            <TableCell align="right"><strong>{row.meter_total}</strong></TableCell>
+                                            <TableCell colSpan={2}></TableCell>
+                                        </TableRow>
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+                        </Box>
+                    </Collapse>
+                </TableCell>
+            </TableRow>
+        </React.Fragment>
+    );
+};
 
 export const CoefficientCalibrationDialog: React.FC<CoefficientCalibrationDialogProps> = ({
     open,
     onClose,
     customerId,
     customerName,
+    startDate,
+    endDate,
     onSuccess
 }) => {
-    // Stage: 'config' | 'calculating' | 'result' | 'applying'
-    const [stage, setStage] = useState<'config' | 'calculating' | 'result' | 'applying'>('config');
+    // Preview State
+    const [previewLoading, setPreviewLoading] = useState(false);
+    const [previewResult, setPreviewResult] = useState<AccountPreview[]>([]);
+    const [previewError, setPreviewError] = useState<string | null>(null);
 
-    // Config State
-    const [startDate, setStartDate] = useState<Date | null>(subDays(new Date(), 1)); // Default: Yesterday (1 day)
-    const [endDate, setEndDate] = useState<Date | null>(subDays(new Date(), 1));   // Default: Yesterday
-    const [algoModel, setAlgoModel] = useState('lsq_constrained');
-    const [sampleStrategy, setSampleStrategy] = useState('last_1_day');
+    // Calibration State (Single Account)
+    const [calibDialogOpen, setCalibDialogOpen] = useState(false);
+    const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
+    const [calibLoading, setCalibLoading] = useState(false);
+    const [calibResult, setCalibResult] = useState<CalibrationResult | null>(null);
+    const [calibError, setCalibError] = useState<string | null>(null);
+    const [applying, setApplying] = useState(false);
 
-    // Result State
-    const [result, setResult] = useState<CalibrationResult | null>(null);
-    const [error, setError] = useState<string | null>(null);
+    const [sampleRange, setSampleRange] = useState<number>(0); // 0=Today, 1=+/-1, 3=+/-3
 
-    // Apply State
-    const [applyMode, setApplyMode] = useState<'archive_only' | 'recalculate'>('archive_only');
-
+    // Initial Fetch (Reset range when dialog opens with new dates)
     useEffect(() => {
-        if (open) {
-            setStage('config');
-            setResult(null);
-            setError(null);
-            // Reset dates on open? Optional.
+        if (open && customerId && startDate && endDate) {
+            setSampleRange(0);
+            handlePreview(0); // Pass explicit 0 to avoid closure staleness if we used state
         }
-    }, [open]);
+    }, [open, customerId, startDate, endDate]);
 
-    const handleCalculate = async () => {
+    // Re-fetch when range changes (triggered by user)
+    const handleRangeChange = (newRange: number) => {
+        setSampleRange(newRange);
+        handlePreview(newRange);
+    };
+
+    const getEffectiveRange = (range: number) => {
+        const s = new Date(startDate);
+        const e = new Date(endDate);
+        if (range > 0) {
+            s.setDate(s.getDate() - range);
+            e.setDate(e.getDate() + range);
+        }
+        return {
+            sStr: format(s, 'yyyy-MM-dd'),
+            eStr: format(e, 'yyyy-MM-dd')
+        };
+    };
+
+    const handlePreview = async (currentRange: number = sampleRange) => {
         if (!startDate || !endDate) return;
-
-        setStage('calculating');
-        setError(null);
-
+        setPreviewLoading(true);
+        setPreviewError(null);
         try {
-            const resp = await apiClient.post('/api/v1/load-data/calibration/calculate', null, {
-                params: {
-                    customer_id: customerId,
-                    start_date: format(startDate, 'yyyy-MM-dd'),
-                    end_date: format(endDate, 'yyyy-MM-dd')
-                }
-            });
-
-            const data = resp.data;
-            if (data.success) {
-                setResult(data);
-                setStage('result');
+            const { sStr, eStr } = getEffectiveRange(currentRange);
+            const res = await previewCalibration(
+                customerId,
+                sStr,
+                eStr
+            );
+            if (res.data.success) {
+                setPreviewResult(res.data.accounts);
             } else {
-                setError(data.message || '计算失败');
-                setStage('config'); // Go back to config on error
+                setPreviewError(res.data.message || '预览失败');
             }
         } catch (err: any) {
-            console.error(err);
-            setError(err.response?.data?.detail || '计算请求失败');
-            setStage('config');
+            setPreviewError(err.message || '预览请求失败');
+        } finally {
+            setPreviewLoading(false);
         }
     };
 
-    const handleApply = async () => {
-        if (!result) return;
-
-        setStage('applying');
-        setError(null);
+    const handleOpenCalibrate = async (accountNo: string) => {
+        setSelectedAccount(accountNo);
+        setCalibDialogOpen(true);
+        setCalibResult(null);
+        setCalibLoading(true);
+        setCalibError(null); // Reset error state for new calibration attempt
 
         try {
-            const payload = {
-                customer_id: customerId,
-                coefficients: result.meter_results.map(r => ({
-                    meter_id: r.meter_id,
-                    value: r.recommended_value
-                })),
-                update_history: applyMode === 'recalculate',
-                history_range: applyMode === 'recalculate' && startDate && endDate
-                    ? [format(startDate, 'yyyy-MM-dd'), format(endDate, 'yyyy-MM-dd')]
-                    : undefined
-            };
-
-            await apiClient.post('/api/v1/load-data/calibration/apply', payload);
-
-            if (onSuccess) onSuccess();
-            onClose();
+            const { sStr, eStr } = getEffectiveRange(sampleRange); // Use range-aware dates
+            const res = await calculateCalibration(
+                customerId,
+                sStr,
+                eStr,
+                accountNo
+            );
+            if (res.data.success) {
+                setCalibResult(res.data);
+                // Refresh preview to update status after calibration calculation
+                handlePreview();
+            } else {
+                setCalibError(res.data.message || '计算失败');
+            }
         } catch (err: any) {
-            console.error(err);
-            setError(err.response?.data?.detail || '应用配置失败');
-            setStage('result'); // Go back to result on error
+            setCalibError(err.message || '计算请求失败');
+        } finally {
+            setCalibLoading(false);
         }
     };
 
-    const handleStrategyChange = (val: string) => {
-        setSampleStrategy(val);
-        const today = new Date();
-        if (val === 'last_1_day') {
-            setEndDate(subDays(today, 1));
-            setStartDate(subDays(today, 1)); // Just yesterday
-        } else if (val === 'last_7_days') {
-            setEndDate(subDays(today, 1));
-            setStartDate(subDays(today, 7)); // 7 days ending yesterday
-        } else if (val === 'last_30_days') {
-            setEndDate(subDays(today, 1));
-            setStartDate(subDays(today, 30));
-        } else if (val === 'current_month') {
-            setStartDate(startOfMonth(today));
-            setEndDate(subDays(today, 1));
+    const handleApply = async (updateHistory: boolean) => {
+        if (!calibResult || !selectedAccount) return;
+        setApplying(true);
+        try {
+            const res = await applyCalibration({
+                customer_id: customerId,
+                coefficients: calibResult.meter_results.map(m => ({
+                    meter_id: m.meter_id,
+                    value: m.recommended_value
+                })),
+                update_history: updateHistory,
+                history_range: [format(startDate!, 'yyyy-MM-dd'), format(endDate!, 'yyyy-MM-dd')]
+            });
+
+            if (res.data.success) {
+                setCalibDialogOpen(false);
+                // Refresh preview
+                handlePreview();
+                if (onSuccess) onSuccess();
+            } else {
+                setCalibError(res.data.message || '应用失败');
+            }
+        } catch (err: any) {
+            setCalibError(err.message || '应用请求失败');
+        } finally {
+            setApplying(false);
         }
     };
+
+    const getStatusColor = (status: string) => {
+        switch (status) {
+            case 'balanced': return 'success';
+            case 'imbalanced': return 'error';
+            case 'missing_config': return 'warning';
+            default: return 'default';
+        }
+    };
+
+    const getStatusLabel = (status: string) => {
+        switch (status) {
+            case 'balanced': return '平衡';
+            case 'imbalanced': return '偏差';
+            case 'missing_config': return '缺档案';
+            case 'missing_data': return '缺数据';
+            default: return status;
+        }
+    };
+
+    const renderMetersInfo = (meters?: MeterInfo[]) => {
+        if (!meters || meters.length === 0) return "-";
+
+        const details = meters.map(m => (
+            <div key={m.meter_id}>
+                {m.meter_id} (系数: {m.allocation_ratio ?? '未配置'})
+            </div>
+        ));
+
+        return (
+            <Tooltip title={<Stack spacing={0.5}>{details}</Stack>} arrow>
+                <Chip
+                    label={`${meters.length}个电表`}
+                    size="small"
+                    variant="outlined"
+                    icon={<InfoIcon />}
+                    sx={{ cursor: 'help' }}
+                />
+            </Tooltip>
+        );
+    };
+
+    const dateRangeStr = startDate && endDate
+        ? (startDate.getTime() === endDate.getTime()
+            ? format(startDate, 'yyyy-MM-dd')
+            : `${format(startDate, 'yyyy-MM-dd')} ~ ${format(endDate, 'yyyy-MM-dd')}`)
+        : '';
 
     return (
-        <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-            <DialogTitle>
-                系数智能推荐 {customerName ? ` - ${customerName}` : ''}
-            </DialogTitle>
+        <>
+            <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
+                <DialogTitle>
+                    系数校核 - {customerName || customerId}
+                </DialogTitle>
+                <DialogContent>
+                    <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+                        <Alert severity="info" sx={{ flex: 1 }}>
+                            系统将基于选定时间范围内的负荷曲线，利用最小二乘法自动推算各电表的分配系数。
+                        </Alert>
 
-            <DialogContent dividers>
-                {/* 1. Configuration Section */}
-                <Box sx={{ mb: 3 }}>
-                    <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>
-                        1. 分析配置 (Configuration)
-                    </Typography>
-
-                    <Grid container spacing={2} sx={{ mb: 2 }}>
-                        <Grid size={{ xs: 12, md: 6 }}>
-                            <FormControl fullWidth size="small">
-                                <InputLabel>算法模型</InputLabel>
-                                <Select
-                                    value={algoModel}
-                                    label="算法模型"
-                                    onChange={(e) => setAlgoModel(e.target.value)}
-                                    disabled={stage !== 'config'}
-                                >
-                                    <MenuItem value="lsq_constrained">约束最小二乘法 (Constrained Least Squares)</MenuItem>
-                                </Select>
-                            </FormControl>
-                        </Grid>
-                        <Grid size={{ xs: 12, md: 6 }}>
-                            <FormControl fullWidth size="small">
-                                <InputLabel>样本策略</InputLabel>
-                                <Select
-                                    value={sampleStrategy}
-                                    label="样本策略"
-                                    onChange={(e) => handleStrategyChange(e.target.value)}
-                                    disabled={stage !== 'config'}
-                                >
-                                    <MenuItem value="last_1_day">单日 (推荐)</MenuItem>
-                                    <MenuItem value="last_7_days">连续 7 天</MenuItem>
-                                    <MenuItem value="last_30_days">近 30 天</MenuItem>
-                                    <MenuItem value="current_month">本月至今</MenuItem>
-                                    <MenuItem value="custom">自定义范围</MenuItem>
-                                </Select>
-                            </FormControl>
-                        </Grid>
-                    </Grid>
-
-                    <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
-                        <Grid container spacing={2}>
-                            <Grid size={{ xs: 6 }}>
-                                <DatePicker
-                                    label="开始日期"
-                                    value={startDate}
-                                    onChange={(v) => { setStartDate(v); setSampleStrategy('custom'); }}
-                                    disabled={stage !== 'config'}
-                                    slotProps={{ textField: { size: 'small', fullWidth: true } }}
-                                />
-                            </Grid>
-                            <Grid size={{ xs: 6 }}>
-                                <DatePicker
-                                    label="结束日期"
-                                    value={endDate}
-                                    onChange={(v) => { setEndDate(v); setSampleStrategy('custom'); }}
-                                    disabled={stage !== 'config'}
-                                    slotProps={{ textField: { size: 'small', fullWidth: true } }}
-                                />
-                            </Grid>
-                        </Grid>
-                    </LocalizationProvider>
-                </Box>
-
-                {error && (
-                    <Alert severity="error" sx={{ mb: 2 }}>
-                        {error}
-                    </Alert>
-                )}
-
-                {/* 2. Calculating State */}
-                {stage === 'calculating' && (
-                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4 }}>
-                        <CircularProgress size={40} sx={{ mb: 2 }} />
-                        <Typography color="text.secondary">正在执行最小二乘优化计算...</Typography>
+                        <Paper variant="outlined" sx={{ p: 1, bgcolor: 'background.default' }}>
+                            <Typography variant="caption" color="textSecondary" display="block" gutterBottom align="center">
+                                样本范围扩展
+                            </Typography>
+                            <Stack direction="row" spacing={1}>
+                                {[0, 1, 3].map((r) => (
+                                    <Chip
+                                        key={r}
+                                        label={r === 0 ? "仅当日" : `±${r}天`}
+                                        color={sampleRange === r ? "primary" : "default"}
+                                        onClick={() => handleRangeChange(r)}
+                                        disabled={previewLoading}
+                                        size="small"
+                                        variant={sampleRange === r ? "filled" : "outlined"}
+                                        clickable
+                                    />
+                                ))}
+                            </Stack>
+                        </Paper>
                     </Box>
-                )}
 
-                {/* 3. Result Section (Only show if result exists) */}
-                {result && (stage === 'result' || stage === 'applying') && (
-                    <>
-                        <Divider sx={{ my: 2 }} />
-
-                        <Box sx={{ mb: 3 }}>
-                            <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>
-                                2. 拟合分析 (Fitting Analysis)
-                            </Typography>
-
-                            <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
-                                <Grid container spacing={2} alignItems="center">
-                                    <Grid size={{ xs: 12, md: 4 }}>
-                                        <Box display="flex" alignItems="center" gap={1}>
-                                            <Typography variant="body2">拟合置信度:</Typography>
-                                            <Chip
-                                                label={result.confidence === 'High' ? '高 (High)' : result.confidence === 'Medium' ? '中 (Medium)' : '低 (Low)'}
-                                                color={result.confidence === 'High' ? 'success' : result.confidence === 'Medium' ? 'warning' : 'error'}
-                                                size="small"
-                                            />
-                                        </Box>
-                                    </Grid>
-                                    <Grid size={{ xs: 12, md: 4 }}>
-                                        <Typography variant="body2">
-                                            残差 (Residual): <strong>{(result.residual_rate * 100).toFixed(2)}%</strong>
-                                        </Typography>
-                                    </Grid>
-                                    <Grid size={{ xs: 12, md: 4 }}>
-                                        <Typography variant="body2">
-                                            有效样本: {result.sample_days} 天 (双边数据完整的重叠天数)
-                                        </Typography>
-                                    </Grid>
-
-                                    <Grid size={{ xs: 6 }}>
-                                        <Typography variant="caption" color="text.secondary" display="block">MP Total (True)</Typography>
-                                        <Typography variant="h6">{result.data_summary.mp_total.toLocaleString()} kWh</Typography>
-                                    </Grid>
-                                    <Grid size={{ xs: 6 }}>
-                                        <Typography variant="caption" color="text.secondary" display="block">Meter Total (Est)</Typography>
-                                        <Typography variant="h6">{result.data_summary.est_total.toLocaleString()} kWh</Typography>
-                                    </Grid>
-                                </Grid>
-                            </Paper>
+                    <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Typography variant="subtitle1">
+                            校核数据日期: <strong>{dateRangeStr}</strong>
+                        </Typography>
+                        <Box>
+                            <Button
+                                variant="outlined"
+                                onClick={() => handlePreview()}
+                                disabled={previewLoading}
+                            >
+                                {previewLoading ? '检查中...' : '刷新状态'}
+                            </Button>
                         </Box>
+                    </Box>
 
-                        <Box sx={{ mb: 3 }}>
-                            <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>
-                                3. 推荐结果 (Optimization Result)
-                            </Typography>
+                    {previewError && <Alert severity="error" sx={{ mb: 2 }}>{previewError}</Alert>}
+
+                    <TableContainer component={Paper} variant="outlined">
+                        <Table size="small">
+                            <TableHead>
+                                <TableRow>
+                                    <TableCell>户号</TableCell>
+                                    <TableCell>计量点</TableCell>
+                                    <TableCell>包含电表</TableCell>
+                                    <TableCell>状态</TableCell>
+                                    <TableCell align="right">计量点总电量</TableCell>
+                                    <TableCell align="right">电表总电量</TableCell>
+                                    <TableCell align="right">偏差率</TableCell>
+                                    <TableCell>说明</TableCell>
+                                    <TableCell align="center">操作</TableCell>
+                                </TableRow>
+                            </TableHead>
+                            <TableBody>
+                                {previewResult.length === 0 && !previewLoading && (
+                                    <TableRow>
+                                        <TableCell colSpan={9} align="center">暂无数据</TableCell>
+                                    </TableRow>
+                                )}
+                                {previewResult.map((row) => (
+                                    <Row
+                                        key={row.account_no}
+                                        row={row}
+                                        onCalibrate={handleOpenCalibrate}
+                                        getStatusLabel={getStatusLabel}
+                                        getStatusColor={getStatusColor}
+                                        renderMetersInfo={renderMetersInfo}
+                                    />
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </TableContainer>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={onClose}>关闭</Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* Calibration Result Dialog */}
+            <Dialog open={calibDialogOpen} onClose={() => setCalibDialogOpen(false)} maxWidth="sm" fullWidth>
+                <DialogTitle>推荐系数方案 (户号: {selectedAccount})</DialogTitle>
+                <DialogContent>
+                    {calibLoading && <Box display="flex" justifyContent="center" p={4}><CircularProgress /></Box>}
+
+                    {calibError && (
+                        <Alert severity="error" sx={{ whiteSpace: 'pre-wrap' }}>
+                            {calibError}
+                        </Alert>
+                    )}
+
+                    {calibResult && (
+                        <Box sx={{ mt: 1 }}>
+                            <Alert severity="info" sx={{ mb: 2 }}>
+                                采样天数: {calibResult.sample_days} 天,
+                                残差率: {(calibResult.residual_rate * 100).toFixed(2)}%
+                                (置信度: {calibResult.confidence})
+                                {calibResult.matched_count !== undefined && (
+                                    <span> | 1:1匹配: {calibResult.matched_count}个, 计算: {calibResult.unmatched_count}个</span>
+                                )}
+                            </Alert>
 
                             <TableContainer component={Paper} variant="outlined">
                                 <Table size="small">
                                     <TableHead>
-                                        <TableRow sx={{ bgcolor: 'grey.100' }}>
-                                            <TableCell>目标电表</TableCell>
-                                            <TableCell align="right">当前系数</TableCell>
-                                            <TableCell align="center">{">>>"}</TableCell>
-                                            <TableCell align="right" sx={{ fontWeight: 'bold', color: 'primary.main' }}>🔥 推荐系数</TableCell>
+                                        <TableRow>
+                                            <TableCell>电表ID</TableCell>
+                                            <TableCell>匹配类型</TableCell>
+                                            <TableCell align="right">推荐系数</TableCell>
                                         </TableRow>
                                     </TableHead>
                                     <TableBody>
-                                        {result.meter_results.map((row) => (
-                                            <TableRow key={row.meter_id}>
-                                                <TableCell>{row.meter_id}</TableCell>
-                                                <TableCell align="right">1.0000</TableCell> {/* TODO: Fetch current if needed, or assume 1.0/Unknown */}
-                                                <TableCell align="center">{">>>"}</TableCell>
-                                                <TableCell align="right" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
-                                                    {row.recommended_value.toFixed(4)}
+                                        {calibResult.meter_results.map((m) => (
+                                            <TableRow key={m.meter_id}>
+                                                <TableCell>{m.meter_id}</TableCell>
+                                                <TableCell>
+                                                    <Chip
+                                                        label={m.match_type || '计算'}
+                                                        size="small"
+                                                        color={m.match_type === '1:1匹配' ? 'success' : 'default'}
+                                                    />
+                                                    {m.matched_mp && <Typography variant="caption" display="block">MP: {m.matched_mp}</Typography>}
+                                                </TableCell>
+                                                <TableCell align="right">
+                                                    <Typography fontWeight="bold" color={m.recommended_value === 1.0 ? 'success.main' : 'primary'}>
+                                                        {m.recommended_value.toFixed(4)}
+                                                    </Typography>
                                                 </TableCell>
                                             </TableRow>
                                         ))}
                                     </TableBody>
                                 </Table>
                             </TableContainer>
+                            <Box sx={{ mt: 2 }}>
+                                <Typography variant="caption" color="text.secondary">
+                                    * 应用后将更新档案中的分配系数
+                                </Typography>
+                            </Box>
                         </Box>
-
-                        <Box sx={{ mb: 2 }}>
-                            <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>
-                                4. 生效操作 (Action)
-                            </Typography>
-                            <FormControl component="fieldset">
-                                <RadioGroup
-                                    value={applyMode}
-                                    onChange={(e) => setApplyMode(e.target.value as any)}
-                                >
-                                    <FormControlLabel
-                                        value="archive_only"
-                                        control={<Radio />}
-                                        label={
-                                            <Box>
-                                                <Typography variant="body2" sx={{ fontWeight: 'bold' }}>仅更新档案 (Update Archive)</Typography>
-                                                <Typography variant="caption" color="text.secondary">从 [今天] 开始生效 (仅影响未来聚合)</Typography>
-                                            </Box>
-                                        }
-                                        sx={{ mb: 1 }}
-                                    />
-                                    <FormControlLabel
-                                        value="recalculate"
-                                        control={<Radio />}
-                                        label={
-                                            <Box>
-                                                <Typography variant="body2" sx={{ fontWeight: 'bold' }}>更新并重算历史 (Update & Recalculate)</Typography>
-                                                <Typography variant="caption" color="text.secondary">从 [参考时段开始 ({startDate ? format(startDate, 'MM-dd') : ''})] 重算至 [昨天]</Typography>
-                                                <Typography variant="caption" display="block" color="error.main">[!] 注意: 历史数据将发生变更</Typography>
-                                            </Box>
-                                        }
-                                    />
-                                </RadioGroup>
-                            </FormControl>
-                        </Box>
-                    </>
-                )}
-
-                {stage === 'applying' && (
-                    <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
-                        <CircularProgress size={24} sx={{ mr: 2 }} />
-                        <Typography>正在保存并应用...</Typography>
-                    </Box>
-                )}
-            </DialogContent>
-
-            <DialogActions>
-                <Button onClick={onClose} disabled={stage === 'calculating' || stage === 'applying'}>
-                    取消
-                </Button>
-
-                {stage === 'config' && (
+                    )}
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setCalibDialogOpen(false)} disabled={applying}>取消</Button>
                     <Button
-                        onClick={handleCalculate}
+                        onClick={() => handleApply(false)}
                         variant="contained"
-                        color="primary"
-                        disabled={!startDate || !endDate}
+                        disabled={!calibResult || applying}
                     >
-                        ⚡ 开始计算
+                        仅更新档案
                     </Button>
-                )}
-
-                {(stage === 'result' || stage === 'applying') && (
                     <Button
-                        onClick={handleApply}
+                        onClick={() => handleApply(true)}
                         variant="contained"
-                        color="success"
-                        disabled={stage === 'applying'}
+                        color="secondary"
+                        disabled={!calibResult || applying}
                     >
-                        应用配置
+                        更新并重算历史
                     </Button>
-                )}
-            </DialogActions>
-        </Dialog>
+                </DialogActions>
+            </Dialog>
+        </>
     );
 };

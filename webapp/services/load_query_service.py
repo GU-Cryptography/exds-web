@@ -5,32 +5,590 @@
 """
 
 import logging
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Union
+from pydantic import BaseModel
+from datetime import datetime
+from bson import ObjectId
+
 from webapp.tools.mongo import DATABASE
 from webapp.models.load_enums import FusionStrategy
+from webapp.services.contract_service import ContractService
+from webapp.schemas.load_structs import (
+    DailyCurve, DailyTotal, MonthlyTotal, CustomerLoadData
+)
 
 logger = logging.getLogger(__name__)
 
-from datetime import datetime
-from webapp.services.contract_service import ContractService
 CUSTOMER_ARCHIVES = DATABASE['customer_archives']
 UNIFIED_LOAD_CURVE = DATABASE['unified_load_curve']
-# RETAIL_CONTRACTS is accessed via ContractService
 
 contract_service = ContractService(DATABASE)
+
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
 
 class LoadQueryService:
     
     @staticmethod
-    def _apply_fusion_strategy(
+    def _get_fusion_expression(strategy: FusionStrategy) -> Dict:
+        """
+        构建 MongoDB Aggregation 的融合策略表达式
+        用于 $project 阶段，计算 effective_load 和 effective_source
+        """
+        # 定义字段引用
+        mp_valid = {"$and": [{"$ifNull": ["$mp_load", False]}, {"$gt": ["$mp_load.mp_count", 0]}]}
+        meter_valid = {"$and": [{"$ifNull": ["$meter_load", False]}, {"$gt": ["$meter_load.meter_count", 0]}]}
+        
+        mp_val = "$mp_load"
+        meter_val = "$meter_load"
+        
+        # 构造条件表达式 (MongoDB $cond)
+        if strategy == FusionStrategy.MP_ONLY:
+            cond = {"$cond": {
+                "if": mp_valid,
+                "then": mp_val,
+                "else": None
+            }}
+        elif strategy == FusionStrategy.METER_ONLY:
+            cond = {"$cond": {
+                "if": meter_valid,
+                "then": meter_val,
+                "else": None
+            }}
+        elif strategy == FusionStrategy.METER_PRIORITY:
+            cond = {"$cond": {
+                "if": meter_valid,
+                "then": meter_val,
+                "else": {"$cond": {
+                    "if": mp_valid,
+                    "then": mp_val,
+                    "else": None
+                }}
+            }}
+        elif strategy == FusionStrategy.MP_COMPLETE:
+            # MP完整才用MP，否则尝试电表，否则MP
+            mp_is_complete = {"$and": [
+                mp_valid,
+                {"$eq": [{"$size": {"$ifNull": ["$mp_load.missing_mps", []]}}, 0]}
+            ]}
+            cond = {"$cond": {
+                "if": mp_is_complete,
+                "then": mp_val,
+                "else": {"$cond": {
+                    "if": meter_valid,
+                    "then": meter_val,
+                    "else": {"$cond": { # 回退到MP（即使不完整）
+                        "if": mp_valid,
+                        "then": mp_val,
+                        "else": None
+                    }}
+                }}
+            }}
+        else: # MP_PRIORITY (Default)
+            cond = {"$cond": {
+                "if": mp_valid,
+                "then": mp_val,
+                "else": {"$cond": {
+                    "if": meter_valid,
+                    "then": meter_val,
+                    "else": None
+                }}
+            }}
+            
+        return cond
+
+    @staticmethod
+    def _format_dataframe(data: List[BaseModel], index_key: str = 'date') -> Any:
+        """辅助方法：将 Pydantic 列表转换为 Pandas DataFrame"""
+        if pd is None:
+            logger.warning("Pandas not installed, returning raw list")
+            return data
+            
+        if not data:
+            return pd.DataFrame()
+            
+        dicts = [d.dict() for d in data]
+        df = pd.DataFrame(dicts)
+        if index_key in df.columns:
+            df[index_key] = pd.to_datetime(df[index_key])
+            df.set_index(index_key, inplace=True)
+        return df
+
+    # =========================================================================
+    # 1. 基础查询接口 (单客户)
+    # =========================================================================
+
+    @staticmethod
+    def get_daily_curve(
+        customer_id: str, 
+        date: str, 
+        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY
+    ) -> Optional[DailyCurve]:
+        """获取单个客户单日的负荷曲线"""
+        try:
+            curve = UNIFIED_LOAD_CURVE.find_one({
+                "customer_id": customer_id,
+                "date": date
+            })
+            if not curve:
+                return None
+                
+            # 复用 Python 层的简单融合逻辑（单条无需聚合管道）
+            fused = LoadQueryService._apply_fusion_strategy_legacy(curve, strategy)
+            if fused["source"] == "none":
+                return None
+                
+            return DailyCurve(
+                date=date, 
+                values=fused["values"], 
+                total=fused["total"]
+            )
+        except Exception as e:
+            logger.error(f"get_daily_curve failed: {e}")
+            return None
+
+    @staticmethod
+    def get_curve_series(
+        customer_id: str, 
+        start_date: str, 
+        end_date: str, 
+        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY,
+        return_df: bool = False
+    ) -> Union[List[DailyCurve], Any]:
+        """获取单个客户连续多日的负荷曲线"""
+        pipeline = [
+            {"$match": {
+                "customer_id": customer_id,
+                "date": {"$gte": start_date, "$lte": end_date}
+            }},
+            {"$sort": {"date": 1}},
+            {"$project": {
+                "date": 1,
+                "effective": LoadQueryService._get_fusion_expression(strategy)
+            }},
+            # 过滤掉无数据天
+            {"$match": {"effective": {"$ne": None}}},
+            {"$project": {
+                "date": 1,
+                "values": "$effective.values",
+                "total": "$effective.total"
+            }}
+        ]
+        
+        docs = list(UNIFIED_LOAD_CURVE.aggregate(pipeline))
+        result = [DailyCurve(**d) for d in docs]
+        
+        if return_df:
+            return LoadQueryService._format_dataframe(result)
+        return result
+
+    @staticmethod
+    def get_daily_totals(
+        customer_id: str, 
+        start_date: str, 
+        end_date: str, 
+        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY,
+        return_df: bool = False
+    ) -> Union[List[DailyTotal], Any]:
+        """获取单个客户连续多日的日电量"""
+        pipeline = [
+            {"$match": {
+                "customer_id": customer_id,
+                "date": {"$gte": start_date, "$lte": end_date}
+            }},
+            {"$sort": {"date": 1}},
+            {"$project": {
+                "date": 1,
+                "effective": LoadQueryService._get_fusion_expression(strategy)
+            }},
+            {"$match": {"effective": {"$ne": None}}},
+            {"$project": {
+                "date": 1,
+                "total": "$effective.total"
+            }}
+        ]
+        
+        docs = list(UNIFIED_LOAD_CURVE.aggregate(pipeline))
+        result = [DailyTotal(**d) for d in docs]
+        
+        if return_df:
+            return LoadQueryService._format_dataframe(result)
+        return result
+
+    @staticmethod
+    def get_monthly_totals(
+        customer_id: str, 
+        start_month: str, 
+        end_month: str, 
+        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY
+    ) -> List[MonthlyTotal]:
+        """获取单个客户连续多月的月电量"""
+        # 构造日期范围
+        try:
+            sy, sm = map(int, start_month.split("-"))
+            ey, em = map(int, end_month.split("-"))
+            s_date = f"{sy:04d}-{sm:02d}-01"
+            # 结束日期需推算到下月1号前
+            if em == 12:
+                e_date = f"{ey+1:04d}-01-01"
+            else:
+                e_date = f"{ey:04d}-{em+1:02d}-01"
+        except:
+            return []
+
+        pipeline = [
+            {"$match": {
+                "customer_id": customer_id,
+                "date": {"$gte": s_date, "$lt": e_date}
+            }},
+            {"$project": {
+                "month": {"$substr": ["$date", 0, 7]}, # YYYY-MM
+                "effective": LoadQueryService._get_fusion_expression(strategy)
+            }},
+            {"$match": {"effective": {"$ne": None}}},
+            {"$group": {
+                "_id": "$month",
+                "total": {"$sum": "$effective.total"},
+                "days_count": {"$sum": 1}
+            }},
+            {"$sort": {"_id": 1}},
+            {"$project": {
+                "month": "$_id",
+                "total": 1,
+                "days_count": 1,
+                "_id": 0
+            }}
+        ]
+        
+        docs = list(UNIFIED_LOAD_CURVE.aggregate(pipeline))
+        return [MonthlyTotal(**d) for d in docs]
+
+    # =========================================================================
+    # 2. 聚合查询接口 (多客户求和)
+    # =========================================================================
+
+    @staticmethod
+    def aggregate_curve_series(
+        customer_ids: List[str], 
+        start_date: str, 
+        end_date: str, 
+        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY,
+        return_df: bool = False
+    ) -> Union[List[DailyCurve], Any]:
+        """获取多个客户的聚合负荷曲线（叠加）"""
+        if not customer_ids:
+            return [] if not return_df else pd.DataFrame()
+
+        pipeline = [
+            {"$match": {
+                "customer_id": {"$in": customer_ids},
+                "date": {"$gte": start_date, "$lte": end_date}
+            }},
+            {"$project": {
+                "date": 1,
+                "effective": LoadQueryService._get_fusion_expression(strategy)
+            }},
+            {"$match": {"effective": {"$ne": None}}},
+            # 按日期分组，对 values 数组进行对应位相加
+            {"$group": {
+                "_id": "$date",
+                "total": {"$sum": "$effective.total"},
+                # 假设所有有效曲线长度一致 (48或96)，使用 $reduce 进行数组相加比较复杂
+                # 这里使用 unwind -> group 的方式虽然不是最高效，但最通用
+                "values_matrix": {"$push": "$effective.values"}
+            }},
+            {"$sort": {"_id": 1}}
+        ]
+        
+        # 注意：MangoDB 直接做数组对应位相加比较困难（需要 $zip + $map + $sum），
+        # 且点数可能不一致（48 vs 96）。
+        # 这里采用：在 Python 层做最终的数组叠加，避免复杂的 Aggregation 逻辑导致性能问题或错误
+        
+        docs = list(UNIFIED_LOAD_CURVE.aggregate(pipeline))
+        result = []
+        
+        for doc in docs:
+            date = doc["_id"]
+            total = doc["total"]
+            matrices = doc["values_matrix"]
+            
+            # Python 层数组相加
+            # 自动适应长度，分别统计 48点和96点
+            # 简单起见，假设主要是 48点，或者把 96点降采样? 
+            # 策略：以第一个非空数组长度为基准，或者取最大长度
+            
+            # 快速叠加
+            final_values = []
+            if matrices:
+                # 找出最长长度
+                max_len = max((len(x) for x in matrices if x), default=0)
+                if max_len > 0:
+                    sum_arr = [0.0] * max_len
+                    for arr in matrices:
+                        if not arr: continue
+                        # 处理长度不一致情况 (简单的对齐，实际很少见混合)
+                        check_len = len(arr)
+                        if check_len == max_len:
+                            for i, v in enumerate(arr):
+                                if v: sum_arr[i] += v
+                        elif check_len == 48 and max_len == 96:
+                            # 简单的倍增扩充 (不插值)
+                            for i, v in enumerate(arr):
+                                if v: 
+                                    sum_arr[i*2] += v
+                                    sum_arr[i*2+1] += v
+                        # 其他情况暂忽略
+                    final_values = [round(x, 4) for x in sum_arr]
+            
+            result.append(DailyCurve(date=date, values=final_values, total=round(total, 4)))
+            
+        if return_df:
+            return LoadQueryService._format_dataframe(result)
+        return result
+
+    @staticmethod
+    def aggregate_daily_totals(
+        customer_ids: List[str], 
+        start_date: str, 
+        end_date: str, 
+        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY,
+        return_df: bool = False
+    ) -> Union[List[DailyTotal], Any]:
+        """获取多个客户的聚合日电量（叠加）"""
+        if not customer_ids:
+            return [] if not return_df else pd.DataFrame()
+
+        pipeline = [
+            {"$match": {
+                "customer_id": {"$in": customer_ids},
+                "date": {"$gte": start_date, "$lte": end_date}
+            }},
+            {"$project": {
+                "date": 1,
+                "effective": LoadQueryService._get_fusion_expression(strategy)
+            }},
+            {"$match": {"effective": {"$ne": None}}},
+            {"$group": {
+                "_id": "$date",
+                "total": {"$sum": "$effective.total"}
+            }},
+            {"$sort": {"_id": 1}},
+            {"$project": {
+                "date": "$_id",
+                "total": 1,
+                "_id": 0
+            }}
+        ]
+        
+        docs = list(UNIFIED_LOAD_CURVE.aggregate(pipeline))
+        result = [DailyTotal(**d) for d in docs]
+        
+        if return_df:
+            return LoadQueryService._format_dataframe(result)
+        return result
+
+    @staticmethod
+    def aggregate_monthly_totals(
+        customer_ids: List[str], 
+        start_month: str, 
+        end_month: str, 
+        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY
+    ) -> List[MonthlyTotal]:
+        """获取多个客户的聚合月电量（叠加）"""
+        if not customer_ids:
+            return []
+
+        try:
+            sy, sm = map(int, start_month.split("-"))
+            ey, em = map(int, end_month.split("-"))
+            s_date = f"{sy:04d}-{sm:02d}-01"
+            if em == 12:
+                e_date = f"{ey+1:04d}-01-01"
+            else:
+                e_date = f"{ey:04d}-{em+1:02d}-01"
+        except:
+            return []
+
+        pipeline = [
+            {"$match": {
+                "customer_id": {"$in": customer_ids},
+                "date": {"$gte": s_date, "$lt": e_date}
+            }},
+            {"$project": {
+                "month": {"$substr": ["$date", 0, 7]},
+                "effective": LoadQueryService._get_fusion_expression(strategy)
+            }},
+            {"$match": {"effective": {"$ne": None}}},
+            # 先按 月份+客户 聚合一次（算出每户月电量，避免天数重复统计问题? 不，直接按月聚合即可）
+            # 需求是：所有客户在该月的总电量
+            {"$group": {
+                "_id": "$month",
+                "total": {"$sum": "$effective.total"},
+                # 注意：days_count 这里含义变成了 "人天数"，可能不是想要 "当月包含多少天"
+                # 如果要统计当月实际有数据的天数（并集），需要更复杂逻辑
+                # 这里简单返回 记录条数 (records count)，或者不返回 days_count
+                "days_count": {"$sum": 1} 
+            }},
+            {"$sort": {"_id": 1}},
+            {"$project": {
+                "month": "$_id",
+                "total": 1,
+                "days_count": 1,
+                "_id": 0
+            }}
+        ]
+        
+        docs = list(UNIFIED_LOAD_CURVE.aggregate(pipeline))
+        return [MonthlyTotal(**d) for d in docs]
+
+    # =========================================================================
+    # 3. 签约客户快捷接口
+    # =========================================================================
+
+    @staticmethod
+    def get_signed_customers_aggregated_load(
+        month: str,  # YYYY-MM
+        data_type: str = 'daily', # curve, daily, monthly
+        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY,
+        return_df: bool = False
+    ) -> Union[List[Any], Any]:
+        """
+        获取指定月份签约客户的聚合负荷。
+        注意：签约客户列表是按月变化的。这里获取该月所有 有效签约 的客户，
+        并计算它们在该月的聚合数据。
+        """
+        try:
+            year, mon = map(int, month.split("-"))
+            start_date = f"{year:04d}-{mon:02d}-01"
+            # 计算月底
+            if mon == 12:
+                next_start = f"{year+1:04d}-01-01"
+            else:
+                next_start = f"{year:04d}-{mon+1:02d}-01"
+            
+            # 1. 获取签约客户ID
+            # 使用 ContractService 查找在该月份内有效的合同
+            customer_ids = contract_service.get_active_customers(start_date, next_start)
+            
+            if not customer_ids:
+                return [] if not return_df else (pd.DataFrame() if pd else [])
+
+            # 2. 根据类型调用聚合接口
+            # 注意 end_date 是 next_start 的前一天 (如果不包含 next_start)
+            # 简单起见，传入 next_start，聚合查询用的 $lt next_start 吗？
+            # 之前的接口是 $lte end_date。所以需要计算 month end date str.
+            import datetime
+            last_day = (datetime.datetime.strptime(next_start, "%Y-%m-%d") - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+
+            if data_type == 'curve':
+                return LoadQueryService.aggregate_curve_series(
+                    customer_ids, start_date, last_day, strategy, return_df
+                )
+            elif data_type == 'daily':
+                return LoadQueryService.aggregate_daily_totals(
+                    customer_ids, start_date, last_day, strategy, return_df
+                )
+            elif data_type == 'monthly':
+                 # 对于 monthly，只需传入 month 即可
+                 return LoadQueryService.aggregate_monthly_totals(
+                     customer_ids, month, month, strategy
+                 )
+            else:
+                raise ValueError(f"Unknown data_type: {data_type}")
+                
+        except Exception as e:
+            logger.error(f"get_signed_customers_aggregated_load failed: {e}")
+            return []
+
+    # =========================================================================
+    # 4. 保留接口 (兼容旧代码)
+    # =========================================================================
+
+    @staticmethod
+    def get_diagnosis_curves(
+        customer_id: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        detail_date: Optional[str] = None
+    ) -> Dict:
+        """
+        [Legacy] 获取诊断详情页面的负荷比对曲线数据
+        被 webapp/api/v1_load_diagnosis.py 引用
+        """
+        if detail_date:
+            # 返回48点曲线对比
+            curve = UNIFIED_LOAD_CURVE.find_one({
+                "customer_id": customer_id,
+                "date": detail_date
+            })
+            
+            if not curve:
+                return {"date": detail_date, "mp_values": [], "meter_values": [], "point_errors": []}
+            
+            mp_values = curve.get("mp_load", {}).get("values", []) if curve.get("mp_load") else []
+            meter_values = curve.get("meter_load", {}).get("values", []) if curve.get("meter_load") else []
+            deviation = curve.get("deviation") or {}
+            
+            return {
+                "date": detail_date,
+                "mp_values": mp_values,
+                "meter_values": meter_values,
+                "mp_total": curve.get("mp_load", {}).get("total") if curve.get("mp_load") else None,
+                "meter_total": curve.get("meter_load", {}).get("total") if curve.get("meter_load") else None,
+                "daily_error": deviation.get("daily_error"),
+                "point_errors": deviation.get("point_errors", [])
+            }
+        else:
+            # 返回日电量对比
+            if not start_date or not end_date:
+                return {"start_date": start_date, "end_date": end_date, "daily_comparison": [], "warning_dates": []}
+
+            curves = list(UNIFIED_LOAD_CURVE.find({
+                "customer_id": customer_id,
+                "date": {"$gte": start_date, "$lte": end_date}
+            }).sort("date", 1))
+            
+            daily_comparison = []
+            warning_dates = []
+            
+            for curve in curves:
+                date = curve.get("date")
+                mp_total = curve.get("mp_load", {}).get("total") if curve.get("mp_load") else None
+                meter_total = curve.get("meter_load", {}).get("total") if curve.get("meter_load") else None
+                deviation = curve.get("deviation", {})
+                daily_error = deviation.get("daily_error")
+                is_warning = deviation.get("is_warning", False)
+                
+                daily_comparison.append({
+                    "date": date,
+                    "mp_total": mp_total,
+                    "meter_total": meter_total,
+                    "daily_error": daily_error,
+                    "is_warning": is_warning
+                })
+                
+                if is_warning:
+                    warning_dates.append({
+                        "date": date,
+                        "error": daily_error
+                    })
+            
+            return {
+                "start_date": start_date,
+                "end_date": end_date,
+                "daily_comparison": daily_comparison,
+                "warning_dates": warning_dates
+            }
+
+    @staticmethod
+    def _apply_fusion_strategy_legacy(
         curve: Dict, 
         strategy: FusionStrategy
     ) -> Dict:
         """
-        根据融合策略计算最终曲线
-        
-        Returns:
-            {"values": [48点], "total": float, "source": "mp"/"meter"/"none"}
+        [Inner Legacy Helper] 供 get_daily_curve 使用
         """
         mp_load = curve.get("mp_load")
         meter_load = curve.get("meter_load")
@@ -53,15 +611,12 @@ class LoadQueryService:
             return {"values": [], "total": 0, "source": "none"}
             
         elif strategy == FusionStrategy.MP_COMPLETE:
-            # 新策略：如果当日 MP 完整（无缺失计量点），则优先使用 MP 数据；否则回退使用电表数据
             if mp_load:
                 mp_count = mp_load.get("mp_count", 0)
                 missing_count = len(mp_load.get("missing_mps", []))
-                # 只有当有计量点且缺失数为0时，才视为完整
                 if mp_count > 0 and missing_count == 0:
                     return {"values": mp_load.get("values", []), "total": mp_load.get("total", 0), "source": "mp"}
             
-            # 不完整或无 MP，则尝试电表
             if meter_load:
                 return {"values": meter_load.get("values", []), "total": meter_load.get("total", 0), "source": "meter"}
             if mp_load:
@@ -74,211 +629,3 @@ class LoadQueryService:
             if meter_load:
                 return {"values": meter_load.get("values", []), "total": meter_load.get("total", 0), "source": "meter"}
             return {"values": [], "total": 0, "source": "none"}
-
-    @staticmethod
-    def get_signed_customers_in_range(start_date: str, end_date: str) -> List[str]:
-        """获取指定时间范围内的签约客户ID列表"""
-        try:
-            return contract_service.get_active_customers(start_date, end_date)
-        except Exception as e:
-            logger.error(f"查询签约客户失败: {e}")
-            return []
-
-    @staticmethod
-    def get_customer_curve(
-        customer_id: Optional[str] = None,
-        customer_name: Optional[str] = None,
-        start_date: str = None,
-        end_date: str = None,
-        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY
-    ) -> List[Dict]:
-        """
-        获取单客户的融合负荷曲线
-        优化：支持 customer_id 或 customer_name 二选一，直接返回曲线列表，减少档案查询次数
-        """
-        try:
-            actual_cid = customer_id
-            if not actual_cid and customer_name:
-                # 如果只有名称，则查询一次档案获取ID
-                customer = CUSTOMER_ARCHIVES.find_one({"user_name": customer_name})
-                if customer:
-                    actual_cid = str(customer["_id"])
-            
-            if not actual_cid:
-                return []
-            
-            # 查询曲线数据
-            curves = list(UNIFIED_LOAD_CURVE.find({
-                "customer_id": actual_cid,
-                "date": {"$gte": start_date, "$lte": end_date}
-            }).sort("date", 1))
-            
-            result_curves = []
-            for curve in curves:
-                fused = LoadQueryService._apply_fusion_strategy(curve, strategy)
-                result_curves.append({
-                    "date": curve.get("date"),
-                    "values": fused["values"],
-                    "total": fused["total"],
-                    "source": fused["source"]
-                })
-            
-            return result_curves
-        except Exception as e:
-            logger.error(f"获取客户曲线失败 id={customer_id}: {e}", exc_info=True)
-            raise
-
-    @staticmethod
-    def get_batch_customer_curves(
-        start_date: str,
-        end_date: str,
-        customer_ids: Optional[List[str]] = None,
-        month: Optional[str] = None,
-        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY,
-        include_curves: bool = False
-    ) -> Dict:
-        """
-        批量获取客户日电量和曲线
-        """
-        try:
-            target_ids = []
-            if customer_ids:
-                target_ids = customer_ids
-            elif month:
-                # 兼容旧逻辑，根据月份生成时间范围
-                try:
-                    year, mon = map(int, month.split("-"))
-                    start_date_range = f"{year:04d}-{mon:02d}-01"
-                    if mon == 12:
-                        end_date_range = f"{year+1:04d}-01-01"
-                    else:
-                        end_date_range = f"{year:04d}-{mon+1:02d}-01"
-                    target_ids = LoadQueryService.get_signed_customers_in_range(start_date_range, end_date_range)
-                except:
-                    target_ids = []
-            else:
-                target_ids = UNIFIED_LOAD_CURVE.distinct("customer_id")
-            
-            if not target_ids:
-                return {"signed_customer_count": 0, "customers": []}
-            
-            customers_result = []
-            for cid in target_ids:
-                curves = list(UNIFIED_LOAD_CURVE.find({
-                    "customer_id": cid,
-                    "date": {"$gte": start_date, "$lte": end_date}
-                }).sort("date", 1))
-                
-                if not curves:
-                    continue
-                
-                customer_name = curves[0].get("customer_name", "未知")
-                daily_data = []
-                for curve in curves:
-                    fused = LoadQueryService._apply_fusion_strategy(curve, strategy)
-                    item = {
-                        "date": curve.get("date"),
-                        "total": fused["total"],
-                        "source": fused["source"]
-                    }
-                    if include_curves:
-                        item["values"] = fused["values"]
-                    daily_data.append(item)
-                
-                customers_result.append({
-                    "customer_id": cid,
-                    "customer_name": customer_name,
-                    "daily_data": daily_data
-                })
-            
-            return {
-                "month": month,
-                "signed_customer_count": len(target_ids),
-                "include_curves": include_curves,
-                "customers": customers_result
-            }
-        except Exception as e:
-            logger.error(f"批量获取客户曲线失败: {e}", exc_info=True)
-            raise
-
-    @staticmethod
-    def get_total_load_curve(
-        start_date: str,
-        end_date: str,
-        month: Optional[str] = None,
-        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY,
-        include_curves: bool = False
-    ) -> Dict:
-        """
-        获取所有签约客户的总负荷日电量曲线
-        """
-        try:
-            if month:
-                # 兼容旧逻辑
-                try:
-                    year, mon = map(int, month.split("-"))
-                    month_start = f"{year:04d}-{mon:02d}-01"
-                    if mon == 12:
-                        month_end = f"{year+1:04d}-01-01"
-                    else:
-                        month_end = f"{year:04d}-{mon+1:02d}-01"
-                    customer_ids = LoadQueryService.get_signed_customers_in_range(month_start, month_end)
-                except:
-                    customer_ids = []
-            else:
-                customer_ids = UNIFIED_LOAD_CURVE.distinct("customer_id")
-            
-            if not customer_ids:
-                return {"signed_customer_count": 0, "daily_totals": [], "curves": []}
-            
-            from collections import defaultdict
-            daily_data = defaultdict(lambda: {"total": 0, "count": 0, "values": [0.0] * 48})
-            
-            for cid in customer_ids:
-                curves = list(UNIFIED_LOAD_CURVE.find({
-                    "customer_id": cid,
-                    "date": {"$gte": start_date, "$lte": end_date}
-                }))
-                
-                for curve in curves:
-                    date = curve.get("date")
-                    fused = LoadQueryService._apply_fusion_strategy(curve, strategy)
-                    
-                    if fused["source"] != "none":
-                        daily_data[date]["total"] += fused["total"]
-                        daily_data[date]["count"] += 1
-                        
-                        if include_curves and fused["values"]:
-                            for i, v in enumerate(fused["values"]):
-                                if i < 48:
-                                    daily_data[date]["values"][i] += v if v else 0
-            
-            daily_totals = []
-            curves_result = []
-            for date in sorted(daily_data.keys()):
-                d = daily_data[date]
-                daily_totals.append({
-                    "date": date,
-                    "total_load": round(d["total"], 4),
-                    "customer_count": d["count"]
-                })
-                if include_curves:
-                    curves_result.append({
-                        "date": date,
-                        "values": [round(v, 4) for v in d["values"]]
-                    })
-            
-            result = {
-                "start_date": start_date,
-                "end_date": end_date,
-                "signed_customer_count": len(customer_ids),
-                "daily_totals": daily_totals
-            }
-            
-            if include_curves:
-                result["curves"] = curves_result
-            
-            return result
-        except Exception as e:
-            logger.error(f"获取总负荷曲线失败: {e}", exc_info=True)
-            raise

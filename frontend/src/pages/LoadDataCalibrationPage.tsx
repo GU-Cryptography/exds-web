@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
     Box,
     Typography,
@@ -14,31 +14,25 @@ import {
     TableHead,
     TableRow,
     TablePagination,
+    TableSortLabel,
     IconButton,
-    Chip,
     Tooltip,
     Snackbar,
     useTheme,
     useMediaQuery,
-    Card,
-    CardContent,
-    InputAdornment,
-    FormControl,
-    InputLabel,
-    Select,
-    MenuItem
+    LinearProgress
 } from '@mui/material';
 import {
     Search as SearchIcon,
-    Refresh as RefreshIcon,
     Upload as UploadIcon,
     Visibility as VisibilityIcon,
     People as PeopleIcon,
     Sync as SyncIcon,
-    CheckCircle as CheckCircleIcon,
     Warning as WarningIcon,
     Error as ErrorIcon,
-    InfoOutlined as InfoOutlinedIcon,
+    PlayArrow as PlayArrowIcon,
+    HourglassEmpty as HourglassEmptyIcon,
+    BrokenImage as BrokenImageIcon
 } from '@mui/icons-material';
 import Grid from '@mui/material/Grid';
 import apiClient from '../api/client';
@@ -47,35 +41,34 @@ import { LoadDataAggregationDialog } from '../components/load-diagnosis/LoadData
 import { useTabContext } from '../contexts/TabContext';
 import { LoadDataDiagnosisWorkbench } from './LoadDataDiagnosisWorkbench';
 
-// 统计数据类型
-interface SummaryData {
-    total_customers: number;
-    pending_mp_customers: number;
-    pending_meter_customers: number;
-    integrity_anomaly_count: number;
-    reliability_anomaly_count: number;
-    accuracy_anomaly_count: number;
-}
-
-// 客户列表项类型
-interface CustomerItem {
+// 诊断结果类型
+interface DiagnosisResult {
     customer_id: string;
     customer_name: string;
-    contract_days: number; // Keep for backward compatibility if needed, or remove? API sends string now. Let's make it optional or remove.
-    cycle_range?: string;
-    data_days?: number;
-    integrity_rate: number;
-    reliability_issue_days: number;
-    accuracy_rate: number;
-    status: 'normal' | 'pending' | 'warning' | 'critical';
-    data_distribution: {
-        mp: number;
-        meter: number;
-    };
+    date_range: { start: string | null; end: string | null };
+    total_days: number;
+    breakpoint_days: number;
+    data_distribution: { mp_days: number; meter_days: number };
+    incomplete_days: { mp_incomplete: number; meter_incomplete: number };
+    max_error: number | null;
+    has_unaggregated: { mp: boolean; meter: boolean };
 }
 
-// 筛选状态类型
-type FilterStatus = 'all' | 'abnormal' | 'error_limit' | 'pending_compare' | 'reliability' | 'pending_meter';
+// 统计摘要类型
+interface DiagnosisSummary {
+    total_customers: number;
+    unaggregated_customers: number;
+    error_anomaly_customers: number;
+    mp_missing_customers: number;
+    meter_missing_customers: number;
+    breakpoint_customers: number;
+}
+
+// 排序方向类型
+type Order = 'asc' | 'desc';
+
+// 可排序的列
+type SortableColumn = 'customer_name' | 'start_date' | 'end_date' | 'total_days' | 'breakpoint_days' | 'mp_incomplete' | 'meter_incomplete' | 'max_error';
 
 export const LoadDataCalibrationPage: React.FC = () => {
     const theme = useTheme();
@@ -84,17 +77,24 @@ export const LoadDataCalibrationPage: React.FC = () => {
 
     // 状态
     const [loading, setLoading] = useState(false);
+    const [diagnosing, setDiagnosing] = useState(false);
+    const [diagnosisProgress, setDiagnosisProgress] = useState(0);
     const [error, setError] = useState<string | null>(null);
-    const [summary, setSummary] = useState<SummaryData | null>(null);
-    const [customers, setCustomers] = useState<CustomerItem[]>([]);
-    const [total, setTotal] = useState(0);
 
-    // 分页
+    // 数据
+    const [customers, setCustomers] = useState<{ customer_id: string; customer_name: string }[]>([]);
+    const [diagnosisResults, setDiagnosisResults] = useState<DiagnosisResult[]>([]);
+    const [summary, setSummary] = useState<DiagnosisSummary | null>(null);
+
+    // 客户端分页
     const [page, setPage] = useState(0);
     const [pageSize, setPageSize] = useState(10);
 
+    // 客户端排序
+    const [orderBy, setOrderBy] = useState<SortableColumn>('customer_name');
+    const [order, setOrder] = useState<Order>('asc');
+
     // 筛选
-    const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
     const [searchKeyword, setSearchKeyword] = useState('');
 
     // 弹窗状态
@@ -116,68 +116,167 @@ export const LoadDataCalibrationPage: React.FC = () => {
         setSnackbar({ open: true, message, severity });
     };
 
-    // 数据获取
-    const fetchSummary = async () => {
-        try {
-            const response = await apiClient.get('/api/v1/load-data/summary');
-            setSummary(response.data);
-        } catch (err: any) {
-            console.error('获取统计数据失败:', err);
-        }
-    };
-
-    const fetchCustomers = async () => {
+    // 初始加载：获取签约客户列表
+    const fetchSignedCustomers = async () => {
         setLoading(true);
         setError(null);
         try {
-            const params: any = {
-                page: page + 1,
-                page_size: pageSize
-            };
-            if (filterStatus !== 'all') {
-                if (filterStatus === 'abnormal') params.status = 'anomaly'; // Maps to integrity
-                else if (filterStatus === 'error_limit') params.status = 'error'; // Maps to accuracy
-                else if (filterStatus === 'pending_compare') params.status = 'pending'; // Maps to pending MP
-                else if (filterStatus === 'reliability') params.status = 'reliability'; // Maps to reliability
-                else if (filterStatus === 'pending_meter') params.status = 'pending_meter'; // Maps to pending meter
-            }
-            if (searchKeyword) {
-                params.search = searchKeyword;
-            }
-
-            const response = await apiClient.get('/api/v1/load-data/customers', { params });
-            // API V3 response structure
+            const response = await apiClient.get('/api/v1/load-data/signed-customers');
             setCustomers(response.data.customers || []);
-            setTotal(response.data.total || 0);
 
+            // 尝试从 sessionStorage 恢复诊断结果
+            try {
+                const savedResults = sessionStorage.getItem('load_diagnosis_results');
+                const savedSummary = sessionStorage.getItem('load_diagnosis_summary');
+
+                if (savedResults && savedSummary) {
+                    setDiagnosisResults(JSON.parse(savedResults));
+                    setSummary(JSON.parse(savedSummary));
+                } else {
+                    // 初始化空的诊断结果
+                    setDiagnosisResults([]);
+                    setSummary({
+                        total_customers: response.data.total || 0,
+                        unaggregated_customers: 0,
+                        error_anomaly_customers: 0,
+                        mp_missing_customers: 0,
+                        meter_missing_customers: 0,
+                        breakpoint_customers: 0
+                    });
+                }
+            } catch (e) {
+                console.warn('Failed to restore diagnosis state:', e);
+                setDiagnosisResults([]);
+            }
         } catch (err: any) {
-            console.error('获取客户列表失败:', err);
-            setError(err.response?.data?.detail || err.message || '获取数据失败，请重试');
-            setCustomers([]);
-            setTotal(0);
+            console.error('获取签约客户失败:', err);
+            setError(err.response?.data?.detail || err.message || '获取数据失败');
         } finally {
             setLoading(false);
         }
     };
 
-    // 重新聚合
-    const handleReaggregate = () => {
-        setAggregationDialogOpen(true);
+    // 执行诊断
+    const handleDiagnose = async () => {
+        setDiagnosing(true);
+        setDiagnosisProgress(0);
+        try {
+            const response = await apiClient.post('/api/v1/load-data/diagnose');
+            const results = response.data.customers || [];
+            const summaryData = response.data.summary;
+
+            setDiagnosisResults(results);
+            setSummary(summaryData);
+
+            // 保存到 sessionStorage
+            sessionStorage.setItem('load_diagnosis_results', JSON.stringify(results));
+            sessionStorage.setItem('load_diagnosis_summary', JSON.stringify(summaryData));
+
+            showSnackbar('诊断完成', 'success');
+        } catch (err: any) {
+            console.error('诊断失败:', err);
+            showSnackbar(err.response?.data?.detail || err.message || '诊断失败', 'error');
+        } finally {
+            setDiagnosing(false);
+            setDiagnosisProgress(100);
+        }
     };
 
-    // 初始化加载
+    // 清除缓存（在数据变更时调用）
+    const clearDiagnosisCache = () => {
+        sessionStorage.removeItem('load_diagnosis_results');
+        sessionStorage.removeItem('load_diagnosis_summary');
+        setDiagnosisResults([]);
+        setSummary(prev => prev ? ({
+            ...prev,
+            unaggregated_customers: 0,
+            error_anomaly_customers: 0,
+            mp_missing_customers: 0,
+            meter_missing_customers: 0,
+            breakpoint_customers: 0
+        }) : null);
+    };
+
+    // 初始化
     useEffect(() => {
-        fetchSummary();
+        fetchSignedCustomers();
     }, []);
 
-    useEffect(() => {
-        fetchCustomers();
-    }, [page, pageSize, filterStatus, searchKeyword]); // Added dependencies back
+    // 筛选和排序后的数据
+    const filteredAndSortedData = useMemo(() => {
+        // 合并客户列表和诊断结果
+        const mergedData = customers.map(c => {
+            const diagnosis = diagnosisResults.find(d => d.customer_id === c.customer_id);
+            return diagnosis || {
+                customer_id: c.customer_id,
+                customer_name: c.customer_name,
+                date_range: { start: null, end: null },
+                total_days: 0,
+                breakpoint_days: 0,
+                data_distribution: { mp_days: 0, meter_days: 0 },
+                incomplete_days: { mp_incomplete: 0, meter_incomplete: 0 },
+                max_error: null,
+                has_unaggregated: { mp: false, meter: false }
+            } as DiagnosisResult;
+        });
 
-    // 统计卡片点击
-    const handleCardClick = (status: FilterStatus) => {
-        setFilterStatus(status);
-        setPage(0);
+        // 筛选
+        let filtered = mergedData;
+        if (searchKeyword) {
+            const keyword = searchKeyword.toLowerCase();
+            filtered = mergedData.filter(d =>
+                d.customer_name.toLowerCase().includes(keyword)
+            );
+        }
+
+        // 排序
+        filtered.sort((a, b) => {
+            const asc = order === 'asc' ? 1 : -1;
+            switch (orderBy) {
+                case 'customer_name':
+                    return asc * a.customer_name.localeCompare(b.customer_name, 'zh');
+                case 'start_date':
+                    const startA = a.date_range?.start || '';
+                    const startB = b.date_range?.start || '';
+                    return asc * startA.localeCompare(startB);
+                case 'end_date':
+                    const endA = a.date_range?.end || '';
+                    const endB = b.date_range?.end || '';
+                    return asc * endA.localeCompare(endB);
+                case 'total_days':
+                    return asc * (a.total_days - b.total_days);
+                case 'breakpoint_days':
+                    return asc * (a.breakpoint_days - b.breakpoint_days);
+                case 'mp_incomplete':
+                    return asc * (a.incomplete_days.mp_incomplete - b.incomplete_days.mp_incomplete);
+                case 'meter_incomplete':
+                    return asc * (a.incomplete_days.meter_incomplete - b.incomplete_days.meter_incomplete);
+                case 'max_error':
+                    const aErr = a.max_error ?? -Infinity;
+                    const bErr = b.max_error ?? -Infinity;
+                    return asc * (aErr - bErr);
+                default:
+                    return 0;
+            }
+        });
+
+        return filtered;
+    }, [customers, diagnosisResults, searchKeyword, orderBy, order]);
+
+    // 当前页数据
+    const paginatedData = useMemo(() => {
+        const start = page * pageSize;
+        return filteredAndSortedData.slice(start, start + pageSize);
+    }, [filteredAndSortedData, page, pageSize]);
+
+    // 排序处理
+    const handleSort = (column: SortableColumn) => {
+        if (orderBy === column) {
+            setOrder(order === 'asc' ? 'desc' : 'asc');
+        } else {
+            setOrderBy(column);
+            setOrder('asc');
+        }
     };
 
     // 查看详情
@@ -185,74 +284,69 @@ export const LoadDataCalibrationPage: React.FC = () => {
         addTab({
             key: `load-diagnosis-${customerId}`,
             title: `诊断：${customerName}`,
-            path: `/load-diagnosis/${customerId}`, // Add a virtual path
+            path: `/load-diagnosis/${customerId}`,
             component: <LoadDataDiagnosisWorkbench customerId={customerId} />
         });
     };
 
-    // 获取状态颜色
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case 'normal': return 'success';
-            case 'pending': return 'info';
-            case 'warning': return 'warning';
-            case 'critical': return 'error';
-            default: return 'default';
+    // 判断是否已诊断
+    const isDiagnosed = diagnosisResults.length > 0;
+
+    // 导出计量点缺失数据
+    const handleExportMpMissing = async () => {
+        try {
+            setLoading(true);
+            const response = await apiClient.get('/api/v1/load-data/export/mp-missing', {
+                responseType: 'blob'
+            });
+
+            // 下载文件
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            const contentDisposition = response.headers['content-disposition'];
+            let filename = '计量点缺失明细.xlsx';
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename\*=UTF-8''(.+)/);
+                if (filenameMatch) {
+                    filename = decodeURIComponent(filenameMatch[1]);
+                }
+            }
+            link.setAttribute('download', filename);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        } catch (err: any) {
+            setError(err.response?.data?.detail || err.message || '导出失败');
+        } finally {
+            setLoading(false);
         }
-    };
-
-    const getStatusLabel = (status: string) => {
-        switch (status) {
-            case 'normal': return '正常';
-            case 'pending': return '待聚合';
-            case 'warning': return '警告';
-            case 'critical': return '严重';
-            default: return status;
-        }
-    };
-
-    // 格式化百分比
-    const formatPercent = (value: number | null, decimals: number = 1) => {
-        if (value === null || value === undefined) return '-';
-        return `${(value * 100).toFixed(decimals)}%`;
-    };
-
-    // 指标定义提示
-    const metricDefinitions = {
-        pending_mp: '待聚合(MP) = 原始计量点数据天数 > 已聚合天数的客户数',
-        pending_meter: '待聚合(电表) = 原始电表数据天数 > 已聚合天数的客户数',
-        integrity: '完整率 = 实际数据天数 ÷ (昨天 - 最早记录日期 + 1)',
-        reliability: '可靠率异常 = 最近30天内存在计量点数据缺失的客户数',
-        accuracy: '准确率 = 1 - 日电量误差率的平均值',
     };
 
     // 统计卡片组件
     const StatCard: React.FC<{
         title: string;
-        value: number;
+        value: number | string;
         icon: React.ReactNode;
         color: string;
-        bgColor?: string;
         onClick?: () => void;
-        isActive?: boolean;
         tooltip?: string;
-    }> = ({ title, value, icon, color, bgColor, onClick, isActive, tooltip }) => (
+    }> = ({ title, value, icon, color, onClick, tooltip }) => (
         <Paper
-            elevation={isActive ? 4 : 1}
+            elevation={1}
             sx={{
                 p: { xs: 1.5, sm: 2 },
                 display: 'flex',
                 alignItems: 'center',
+                bgcolor: 'background.paper',
+                border: '1px solid',
+                borderColor: 'divider',
                 cursor: onClick ? 'pointer' : 'default',
-                bgcolor: isActive ? bgColor || 'action.selected' : 'background.paper',
-                border: isActive ? `2px solid ${color}` : '1px solid',
-                borderColor: isActive ? color : 'divider',
-                transition: 'all 0.2s ease-in-out',
+                transition: 'all 0.2s',
                 '&:hover': onClick ? {
-                    transform: 'translateY(-2px)',
-                    boxShadow: 4,
-                    borderColor: color
-                } : {}
+                    boxShadow: 2,
+                    transform: 'translateY(-2px)'
+                } : undefined
             }}
             onClick={onClick}
         >
@@ -262,27 +356,22 @@ export const LoadDataCalibrationPage: React.FC = () => {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                width: { xs: 40, sm: 48 },
-                height: { xs: 40, sm: 48 },
+                width: { xs: 36, sm: 44 },
+                height: { xs: 36, sm: 44 },
                 borderRadius: '50%',
                 bgcolor: `${color}15`
             }}>
                 {icon}
             </Box>
             <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Typography variant="body2" color="text.secondary" noWrap>
-                        {title}
-                    </Typography>
-                    {tooltip && (
-                        <Tooltip title={tooltip} arrow placement="top">
-                            <InfoOutlinedIcon sx={{ fontSize: 14, color: 'text.disabled', cursor: 'help' }} />
-                        </Tooltip>
-                    )}
-                </Box>
-                <Typography variant="h5" fontWeight="bold" sx={{ color: color }}>
-                    {value}
+                <Typography variant="body2" color="text.secondary" noWrap>
+                    {title}
                 </Typography>
+                <Tooltip title={tooltip || ''}>
+                    <Typography variant="h6" fontWeight="bold" sx={{ color: color }}>
+                        {value}
+                    </Typography>
+                </Tooltip>
             </Box>
         </Paper>
     );
@@ -290,216 +379,269 @@ export const LoadDataCalibrationPage: React.FC = () => {
     // 渲染统计卡片
     const renderSummaryCards = () => (
         <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mb: 2 }}>
-            <Grid size={{ xs: 6, sm: 2 }}>
+            <Grid size={{ xs: 6, sm: 4, md: 2 }}>
                 <StatCard
                     title="签约客户"
                     value={summary?.total_customers || 0}
-                    icon={<PeopleIcon sx={{ fontSize: { xs: 24, sm: 28 } }} />}
+                    icon={<PeopleIcon sx={{ fontSize: { xs: 20, sm: 24 } }} />}
                     color="#1976d2"
-                    onClick={() => handleCardClick('all')}
-                    isActive={filterStatus === 'all'}
                 />
             </Grid>
-            <Grid size={{ xs: 6, sm: 2 }}>
+            <Grid size={{ xs: 6, sm: 4, md: 2 }}>
                 <StatCard
-                    title="待聚合(MP)"
-                    value={summary?.pending_mp_customers || 0}
-                    icon={<SyncIcon sx={{ fontSize: { xs: 24, sm: 28 } }} />}
+                    title="未聚合客户"
+                    value={isDiagnosed ? (summary?.unaggregated_customers || 0) : '-'}
+                    icon={<SyncIcon sx={{ fontSize: { xs: 20, sm: 24 } }} />}
                     color="#0288d1"
-                    bgColor="#e3f2fd"
-                    onClick={() => handleCardClick('pending_compare')}
-                    isActive={filterStatus === 'pending_compare'}
-                    tooltip={metricDefinitions.pending_mp}
                 />
             </Grid>
-            <Grid size={{ xs: 6, sm: 2 }}>
+            <Grid size={{ xs: 6, sm: 4, md: 2 }}>
                 <StatCard
-                    title="待聚合(电表)"
-                    value={summary?.pending_meter_customers || 0}
-                    icon={<SyncIcon sx={{ fontSize: { xs: 24, sm: 28 } }} />}
-                    color="#5c6bc0"
-                    bgColor="#e8eaf6"
-                    onClick={() => handleCardClick('pending_meter')}
-                    isActive={filterStatus === 'pending_meter'}
-                    tooltip={metricDefinitions.pending_meter}
-                />
-            </Grid>
-            <Grid size={{ xs: 6, sm: 2 }}>
-                <StatCard
-                    title="完整率异常"
-                    value={summary?.integrity_anomaly_count || 0}
-                    icon={<WarningIcon sx={{ fontSize: { xs: 24, sm: 28 } }} />}
-                    color="#ed6c02"
-                    bgColor="#fff3e0"
-                    onClick={() => handleCardClick('abnormal')}
-                    isActive={filterStatus === 'abnormal'}
-                    tooltip={metricDefinitions.integrity}
-                />
-            </Grid>
-            <Grid size={{ xs: 6, sm: 2 }}>
-                <StatCard
-                    title="可靠率异常"
-                    value={summary?.reliability_anomaly_count || 0}
-                    icon={<CheckCircleIcon sx={{ fontSize: { xs: 24, sm: 28 } }} />}
-                    color="#9c27b0"
-                    bgColor="#f3e5f5"
-                    onClick={() => handleCardClick('reliability')}
-                    isActive={filterStatus === 'reliability'}
-                    tooltip={metricDefinitions.reliability}
-                />
-            </Grid>
-            <Grid size={{ xs: 6, sm: 2 }}>
-                <StatCard
-                    title="准确率异常"
-                    value={summary?.accuracy_anomaly_count || 0}
-                    icon={<ErrorIcon sx={{ fontSize: { xs: 24, sm: 28 } }} />}
+                    title="误差异常"
+                    value={isDiagnosed ? (summary?.error_anomaly_customers || 0) : '-'}
+                    icon={<ErrorIcon sx={{ fontSize: { xs: 20, sm: 24 } }} />}
                     color="#d32f2f"
-                    bgColor="#ffebee"
-                    onClick={() => handleCardClick('error_limit')}
-                    isActive={filterStatus === 'error_limit'}
-                    tooltip={metricDefinitions.accuracy}
+                />
+            </Grid>
+            <Grid size={{ xs: 6, sm: 4, md: 2 }}>
+                <StatCard
+                    title="计量点缺失"
+                    value={isDiagnosed ? (summary?.mp_missing_customers || 0) : '-'}
+                    icon={<WarningIcon sx={{ fontSize: { xs: 20, sm: 24 } }} />}
+                    color="#ed6c02"
+                    onClick={handleExportMpMissing}
+                    tooltip="点击导出缺失明细"
+                />
+            </Grid>
+            <Grid size={{ xs: 6, sm: 4, md: 2 }}>
+                <StatCard
+                    title="电表缺失"
+                    value={isDiagnosed ? (summary?.meter_missing_customers || 0) : '-'}
+                    icon={<HourglassEmptyIcon sx={{ fontSize: { xs: 20, sm: 24 } }} />}
+                    color="#9c27b0"
+                />
+            </Grid>
+            <Grid size={{ xs: 6, sm: 4, md: 2 }}>
+                <StatCard
+                    title="断点客户"
+                    value={isDiagnosed ? (summary?.breakpoint_customers || 0) : '-'}
+                    icon={<BrokenImageIcon sx={{ fontSize: { xs: 20, sm: 24 } }} />}
+                    color="#607d8b"
                 />
             </Grid>
         </Grid>
     );
 
-    // 渲染移动端卡片
-    const renderMobileCards = () => (
-        <Box>
-            {customers.map((customer) => (
-                <Paper key={customer.customer_id} variant="outlined" sx={{ p: 2, mb: 2 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                        <Typography
-                            variant="subtitle1"
-                            sx={{
-                                cursor: 'pointer',
-                                color: 'primary.main',
-                                fontWeight: 'bold',
-                                '&:hover': { textDecoration: 'underline' }
-                            }}
-                            onClick={() => handleViewDetail(customer.customer_id, customer.customer_name)}
-                        >
-                            {customer.customer_name}
-                        </Typography>
-                        <Chip
-                            size="small"
-                            label={getStatusLabel(customer.status)}
-                            color={getStatusColor(customer.status) as any}
-                        />
-                    </Box>
-
-                    <Box sx={{ display: 'flex', gap: 2, mb: 1 }}>
-                        <Typography variant="caption">
-                            周期: {customer.contract_days}天
-                        </Typography>
-                        <Typography variant="caption">
-                            MP: {customer.data_distribution?.mp} / M: {customer.data_distribution?.meter}
-                        </Typography>
-                    </Box>
-
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
-                        <Box sx={{ textAlign: 'center' }}>
-                            <Typography variant="caption" display="block" color="text.secondary">完整率</Typography>
-                            <Typography variant="body2">{formatPercent(customer.integrity_rate)}</Typography>
-                        </Box>
-                        <Box sx={{ textAlign: 'center' }}>
-                            <Typography variant="caption" display="block" color="text.secondary">可靠率</Typography>
-                            <Typography variant="body2">{customer.reliability_issue_days}天异常</Typography>
-                        </Box>
-                        <Box sx={{ textAlign: 'center' }}>
-                            <Typography variant="caption" display="block" color="text.secondary">准确率</Typography>
-                            <Typography variant="body2">{formatPercent(customer.accuracy_rate)}</Typography>
-                        </Box>
-                    </Box>
-                </Paper>
-            ))}
-        </Box>
-    );
-
-    // 渲染桌面端表格
+    // 渲染表格
     const renderTable = () => (
         <TableContainer>
             <Table sx={{
                 '& .MuiTableCell-root': {
                     fontSize: { xs: '0.75rem', sm: '0.875rem' },
-                    px: { xs: 0.5, sm: 2 }
+                    px: { xs: 0.5, sm: 1.5 }
                 }
             }}>
                 <TableHead>
                     <TableRow>
-                        <TableCell>客户名称</TableCell>
-                        <TableCell align="center">数据周期</TableCell>
-                        <TableCell align="center">总天数</TableCell>
-                        <TableCell align="center">数据分布(MP/Meter)</TableCell>
-                        <TableCell align="center">完整率</TableCell>
-                        <TableCell align="center">MP异常天数</TableCell>
-                        <TableCell align="center">准确率</TableCell>
-                        <TableCell align="center">状态</TableCell>
+                        <TableCell>
+                            <TableSortLabel
+                                active={orderBy === 'customer_name'}
+                                direction={orderBy === 'customer_name' ? order : 'asc'}
+                                onClick={() => handleSort('customer_name')}
+                            >
+                                客户名称
+                            </TableSortLabel>
+                        </TableCell>
+                        <TableCell align="center">
+                            <TableSortLabel
+                                active={orderBy === 'start_date'}
+                                direction={orderBy === 'start_date' ? order : 'asc'}
+                                onClick={() => handleSort('start_date')}
+                            >
+                                开始日期
+                            </TableSortLabel>
+                        </TableCell>
+                        <TableCell align="center">
+                            <TableSortLabel
+                                active={orderBy === 'end_date'}
+                                direction={orderBy === 'end_date' ? order : 'asc'}
+                                onClick={() => handleSort('end_date')}
+                            >
+                                结束日期
+                            </TableSortLabel>
+                        </TableCell>
+                        <TableCell align="center">
+                            <TableSortLabel
+                                active={orderBy === 'total_days'}
+                                direction={orderBy === 'total_days' ? order : 'asc'}
+                                onClick={() => handleSort('total_days')}
+                            >
+                                周期
+                            </TableSortLabel>
+                        </TableCell>
+                        <TableCell align="center">
+                            <TableSortLabel
+                                active={orderBy === 'breakpoint_days'}
+                                direction={orderBy === 'breakpoint_days' ? order : 'asc'}
+                                onClick={() => handleSort('breakpoint_days')}
+                            >
+                                断点
+                            </TableSortLabel>
+                        </TableCell>
+                        <TableCell align="center">数据分布</TableCell>
+                        <TableCell align="center">
+                            <TableSortLabel
+                                active={orderBy === 'mp_incomplete'}
+                                direction={orderBy === 'mp_incomplete' ? order : 'asc'}
+                                onClick={() => handleSort('mp_incomplete')}
+                            >
+                                计量点缺失
+                            </TableSortLabel>
+                        </TableCell>
+                        <TableCell align="center">
+                            <TableSortLabel
+                                active={orderBy === 'meter_incomplete'}
+                                direction={orderBy === 'meter_incomplete' ? order : 'asc'}
+                                onClick={() => handleSort('meter_incomplete')}
+                            >
+                                电表缺失
+                            </TableSortLabel>
+                        </TableCell>
+                        <TableCell align="center">
+                            <TableSortLabel
+                                active={orderBy === 'max_error'}
+                                direction={orderBy === 'max_error' ? order : 'asc'}
+                                onClick={() => handleSort('max_error')}
+                            >
+                                最大误差
+                            </TableSortLabel>
+                        </TableCell>
+                        <TableCell align="center">未聚合</TableCell>
                         <TableCell align="center">操作</TableCell>
                     </TableRow>
                 </TableHead>
                 <TableBody>
-                    {customers.map((customer) => (
-                        <TableRow key={customer.customer_id} hover>
-                            <TableCell>
-                                <Typography
-                                    sx={{
-                                        cursor: 'pointer',
-                                        color: 'primary.main',
-                                        '&:hover': { textDecoration: 'underline' }
-                                    }}
-                                    onClick={() => handleViewDetail(customer.customer_id, customer.customer_name)}
-                                >
-                                    {customer.customer_name}
-                                </Typography>
-                            </TableCell>
-                            <TableCell align="center">
-                                {customer.cycle_range || '-'}
-                            </TableCell>
-                            <TableCell align="center">
-                                {customer.data_days || 0} 天
-                            </TableCell>
-                            <TableCell align="center">
-                                <Typography variant="caption">
-                                    MP:{customer.data_distribution?.mp} / M:{customer.data_distribution?.meter}
-                                </Typography>
-                            </TableCell>
-                            <TableCell align="center">
-                                {formatPercent(customer.integrity_rate)}
-                            </TableCell>
-                            <TableCell align="center">
-                                {customer.reliability_issue_days}天异常
-                            </TableCell>
-                            <TableCell align="center">
-                                {formatPercent(customer.accuracy_rate)}
-                            </TableCell>
-                            <TableCell align="center">
-                                <Chip
-                                    size="small"
-                                    label={getStatusLabel(customer.status)}
-                                    color={getStatusColor(customer.status) as any}
-                                />
-                            </TableCell>
-                            <TableCell align="center">
-                                <Tooltip title="查看详情">
-                                    <IconButton
-                                        size="small"
-                                        onClick={() => handleViewDetail(customer.customer_id, customer.customer_name)}
+                    {paginatedData.map((row) => {
+                        const hasDiagnosis = diagnosisResults.some(d => d.customer_id === row.customer_id);
+                        return (
+                            <TableRow key={row.customer_id} hover>
+                                <TableCell>
+                                    <Typography
+                                        sx={{
+                                            cursor: 'pointer',
+                                            color: 'primary.main',
+                                            '&:hover': { textDecoration: 'underline' }
+                                        }}
+                                        onClick={() => handleViewDetail(row.customer_id, row.customer_name)}
                                     >
-                                        <VisibilityIcon fontSize="small" />
-                                    </IconButton>
-                                </Tooltip>
-                            </TableCell>
-                        </TableRow>
-                    ))}
+                                        {row.customer_name}
+                                    </Typography>
+                                </TableCell>
+                                <TableCell align="center">
+                                    {hasDiagnosis && row.date_range.start
+                                        ? row.date_range.start
+                                        : '-'}
+                                </TableCell>
+                                <TableCell align="center">
+                                    {hasDiagnosis && row.date_range.end
+                                        ? row.date_range.end
+                                        : '-'}
+                                </TableCell>
+                                <TableCell align="center">
+                                    {hasDiagnosis ? `${row.total_days}天` : '-'}
+                                </TableCell>
+                                <TableCell align="center">
+                                    {hasDiagnosis ? row.breakpoint_days : '-'}
+                                </TableCell>
+                                <TableCell align="center">
+                                    {hasDiagnosis
+                                        ? `${row.data_distribution.mp_days}/${row.data_distribution.meter_days}`
+                                        : '-'}
+                                </TableCell>
+                                <TableCell align="center">
+                                    {hasDiagnosis ? row.incomplete_days.mp_incomplete : '-'}
+                                </TableCell>
+                                <TableCell align="center">
+                                    {hasDiagnosis ? row.incomplete_days.meter_incomplete : '-'}
+                                </TableCell>
+                                <TableCell align="center">
+                                    {hasDiagnosis && row.max_error !== null
+                                        ? `${row.max_error.toFixed(1)}%`
+                                        : '-'}
+                                </TableCell>
+                                <TableCell align="center">
+                                    {hasDiagnosis
+                                        ? `${row.has_unaggregated.mp ? '是' : '否'}/${row.has_unaggregated.meter ? '是' : '否'}`
+                                        : '-'}
+                                </TableCell>
+                                <TableCell align="center">
+                                    <Tooltip title="查看详情">
+                                        <IconButton
+                                            size="small"
+                                            onClick={() => handleViewDetail(row.customer_id, row.customer_name)}
+                                        >
+                                            <VisibilityIcon fontSize="small" />
+                                        </IconButton>
+                                    </Tooltip>
+                                </TableCell>
+                            </TableRow>
+                        );
+                    })}
                 </TableBody>
             </Table>
         </TableContainer>
     );
 
+    // 渲染移动端卡片
+    const renderMobileCards = () => (
+        <Box>
+            {paginatedData.map((row) => {
+                const hasDiagnosis = diagnosisResults.some(d => d.customer_id === row.customer_id);
+                return (
+                    <Paper key={row.customer_id} variant="outlined" sx={{ p: 2, mb: 2 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                            <Typography
+                                variant="subtitle1"
+                                sx={{
+                                    cursor: 'pointer',
+                                    color: 'primary.main',
+                                    fontWeight: 'bold',
+                                    '&:hover': { textDecoration: 'underline' }
+                                }}
+                                onClick={() => handleViewDetail(row.customer_id, row.customer_name)}
+                            >
+                                {row.customer_name}
+                            </Typography>
+                        </Box>
+                        {hasDiagnosis ? (
+                            <>
+                                <Typography variant="caption" display="block">
+                                    周期: {row.date_range.start} ~ {row.date_range.end} ({row.total_days}天)
+                                </Typography>
+                                <Box sx={{ display: 'flex', gap: 2, mt: 1, flexWrap: 'wrap' }}>
+                                    <Typography variant="caption">断点: {row.breakpoint_days}</Typography>
+                                    <Typography variant="caption">
+                                        分布: {row.data_distribution.mp_days}/{row.data_distribution.meter_days}
+                                    </Typography>
+                                    <Typography variant="caption">
+                                        误差: {row.max_error !== null ? `${row.max_error.toFixed(1)}%` : '-'}
+                                    </Typography>
+                                </Box>
+                            </>
+                        ) : (
+                            <Typography variant="caption" color="text.secondary">
+                                未诊断
+                            </Typography>
+                        )}
+                    </Paper>
+                );
+            })}
+        </Box>
+    );
+
     return (
         <Box sx={{ width: '100%' }}>
-            {/* 移动端显示的页面标题 (桌面端移除标题栏，直接显示内容) */}
+            {/* 移动端标题 */}
             {isMobile && (
                 <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
                     <Typography variant="h6">负荷数据诊断</Typography>
@@ -509,101 +651,83 @@ export const LoadDataCalibrationPage: React.FC = () => {
             {/* 第一行: 统计卡片 */}
             {renderSummaryCards()}
 
-            {/* 第二行: 筛选与工具栏 */}
+            {/* 第二行: 筛选与诊断按钮 */}
             <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
                 <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flex: 1, minWidth: { xs: '100%', sm: 'auto' } }}>
                         <TextField
                             placeholder="搜索客户名称"
                             size="small"
                             value={searchKeyword}
-                            onChange={(e) => setSearchKeyword(e.target.value)}
-                            InputProps={{
-                                startAdornment: (
-                                    <InputAdornment position="start">
-                                        <SearchIcon />
-                                    </InputAdornment>
-                                )
+                            onChange={(e) => {
+                                setSearchKeyword(e.target.value);
+                                setPage(0);
                             }}
-                            sx={{ width: { xs: '100%', sm: '250px' } }}
+                            InputProps={{
+                                startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                            }}
+                            sx={{ width: { xs: '100%', sm: '300px' } }}
                         />
-                        <FormControl size="small" sx={{ minWidth: 120 }}>
-                            <InputLabel>状态筛选</InputLabel>
-                            <Select
-                                value={filterStatus}
-                                label="状态筛选"
-                                onChange={(e) => {
-                                    setFilterStatus(e.target.value as FilterStatus);
-                                    setPage(0);
-                                }}
-                            >
-                                <MenuItem value="all">全部</MenuItem>
-                                <MenuItem value="abnormal">数据异常</MenuItem>
-                                <MenuItem value="error_limit">误差超限</MenuItem>
-                                <MenuItem value="pending_compare">待对比</MenuItem>
-                            </Select>
-                        </FormControl>
+                        <Button
+                            variant="contained"
+                            startIcon={diagnosing ? <CircularProgress size={16} color="inherit" /> : <PlayArrowIcon />}
+                            onClick={handleDiagnose}
+                            disabled={diagnosing || loading}
+                            sx={{ whiteSpace: 'nowrap' }}
+                        >
+                            {diagnosing ? '诊断中...' : '执行诊断'}
+                        </Button>
                     </Box>
 
-                    <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                         <Button
                             variant="text"
                             startIcon={<UploadIcon />}
                             onClick={() => setImportDialogOpen(true)}
                         >
-                            导入数据...
+                            导入数据
                         </Button>
                         <Button
                             variant="outlined"
-                            startIcon={<RefreshIcon />}
-                            onClick={handleReaggregate}
-                            disabled={loading}
+                            startIcon={<SyncIcon />}
+                            onClick={() => setAggregationDialogOpen(true)}
+                            disabled={diagnosing}
                         >
-                            执行数据聚合
+                            执行聚合
                         </Button>
                     </Box>
                 </Box>
+
+                {/* 诊断进度条 */}
+                {diagnosing && (
+                    <Box sx={{ mt: 2 }}>
+                        <LinearProgress />
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                            正在诊断所有签约客户...
+                        </Typography>
+                    </Box>
+                )}
             </Paper>
 
             {/* 第三行: 客户列表 */}
             <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 } }}>
-                {loading && !customers.length ? (
+                {loading ? (
                     <Box display="flex" justifyContent="center" alignItems="center" minHeight="300px">
                         <CircularProgress />
                     </Box>
                 ) : error ? (
                     <Alert severity="error">{error}</Alert>
-                ) : customers.length === 0 ? (
+                ) : filteredAndSortedData.length === 0 ? (
                     <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
-                        <Typography color="text.secondary">暂无数据</Typography>
+                        <Typography color="text.secondary">暂无签约客户</Typography>
                     </Box>
                 ) : (
                     <>
-                        {/* Loading 覆盖层 */}
-                        {loading && (
-                            <Box
-                                sx={{
-                                    position: 'absolute',
-                                    top: 0,
-                                    left: 0,
-                                    right: 0,
-                                    bottom: 0,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    backgroundColor: 'rgba(255, 255, 255, 0.7)',
-                                    zIndex: 1000
-                                }}
-                            >
-                                <CircularProgress />
-                            </Box>
-                        )}
-
                         {isMobile ? renderMobileCards() : renderTable()}
 
                         <TablePagination
                             component="div"
-                            count={total}
+                            count={filteredAndSortedData.length}
                             page={page}
                             onPageChange={(_, newPage) => setPage(newPage)}
                             rowsPerPage={pageSize}
@@ -623,11 +747,8 @@ export const LoadDataCalibrationPage: React.FC = () => {
                 open={importDialogOpen}
                 onClose={() => setImportDialogOpen(false)}
                 onSuccess={() => {
-                    // Refresh data after import, but keep dialog open or user decides to close?
-                    // Typically user closes after seeing success.
-                    // We can refresh the summary cards or list if needed.
-                    fetchSummary();
-                    fetchCustomers();
+                    clearDiagnosisCache();
+                    fetchSignedCustomers();
                 }}
             />
 
@@ -636,8 +757,8 @@ export const LoadDataCalibrationPage: React.FC = () => {
                 open={aggregationDialogOpen}
                 onClose={() => setAggregationDialogOpen(false)}
                 onSuccess={() => {
-                    fetchSummary();
-                    fetchCustomers();
+                    clearDiagnosisCache();
+                    fetchSignedCustomers();
                 }}
             />
 

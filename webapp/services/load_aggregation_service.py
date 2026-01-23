@@ -61,6 +61,65 @@ class LoadAggregationService:
             return []
     
     @staticmethod
+    def get_customer_structure(customer_id: str) -> Optional[Dict]:
+        """
+        获取客户的详细档案结构 (包含户号、计量点、电表关系)
+        
+        Returns:
+            {
+                "customer_name": str,
+                "accounts": [
+                    {
+                        "account_no": str,
+                        "mp_ids": [str],
+                        "meters": [{meter_id, multiplier, allocation_ratio}]
+                    }
+                ]
+            }
+        """
+        try:
+            try:
+                customer = CUSTOMER_ARCHIVES.find_one({"_id": ObjectId(customer_id)})
+            except:
+                customer = CUSTOMER_ARCHIVES.find_one({"_id": customer_id})
+            
+            if not customer:
+                return None
+            
+            structure = {
+                "customer_name": customer.get("name") or customer.get("customer_name"),
+                "accounts": []
+            }
+            
+            for account in customer.get("accounts", []):
+                acc_info = {
+                    "account_no": account.get("account_id") or account.get("account_no"),
+                    "mp_ids": [],
+                    "meters": []
+                }
+                
+                # Extract MPs
+                for mp in account.get("metering_points", []):
+                    if mp.get("mp_no"):
+                        acc_info["mp_ids"].append(mp.get("mp_no"))
+                        
+                # Extract Meters
+                for meter in account.get("meters", []):
+                    acc_info["meters"].append({
+                        "meter_id": meter.get("meter_id"),
+                        "multiplier": meter.get("multiplier", 1),
+                        "allocation_ratio": meter.get("allocation_ratio")
+                    })
+                
+                structure["accounts"].append(acc_info)
+                
+            return structure
+            
+        except Exception as e:
+            logger.error(f"获取客户档案结构失败: {e}")
+            return None
+
+    @staticmethod
     def get_customer_meters(customer_id: str) -> List[Dict]:
         """
         获取客户的所有电表信息
@@ -95,13 +154,14 @@ class LoadAggregationService:
             return []
     
     @staticmethod
-    def aggregate_mp_load(customer_id: str, date: str) -> Optional[Dict]:
+    def aggregate_mp_load(customer_id: str, date: str, mp_ids_override: Optional[List[str]] = None) -> Optional[Dict]:
         """
         聚合单个客户单日的计量点数据
         
         Args:
             customer_id: 客户ID
             date: 日期（YYYY-MM-DD）
+            mp_ids_override: 可选，指定要聚合的计量点ID列表 (若提供则忽略customer_id关联查询)
         
         Returns:
             {
@@ -113,9 +173,14 @@ class LoadAggregationService:
         """
         try:
             # 获取应有的计量点列表
-            expected_mps = LoadAggregationService.get_customer_metering_points(customer_id)
+            if mp_ids_override is not None:
+                expected_mps = mp_ids_override
+            else:
+                expected_mps = LoadAggregationService.get_customer_metering_points(customer_id)
+            
             if not expected_mps:
-                logger.info(f"客户 {customer_id} 无计量点档案")
+                if not mp_ids_override:
+                     logger.info(f"客户 {customer_id} 无计量点档案")
                 return None
             
             # 查询该日的计量点数据
@@ -145,8 +210,8 @@ class LoadAggregationService:
             # 计算覆盖率
             
             return {
-                "values": [round(v, 4) for v in aggregated_values],
-                "total": round(total, 4),
+                "values": [round(v, 3) for v in aggregated_values],
+                "total": round(total, 3),
                 "mp_count": len(found_mps),
                 "missing_mps": sorted(list(missing_mps))
             }
@@ -169,6 +234,100 @@ class LoadAggregationService:
                 i += 1
         return gaps
     
+    @staticmethod
+    def calculate_meter_48_points(readings: List[float], multiplier: float, prev_readings: List[float] = None, next_readings: List[float] = None) -> Dict:
+        """
+        核心算法：将原始示数列表转换为48点负荷数据 (含清洗、插值、对齐)
+        Args:
+            readings: 当日示数列表
+            multiplier: 倍率
+            prev_readings: 前日示数 (用于修补头部缺口)
+            next_readings: 次日示数 (用于修补尾部缺口)
+        Returns:
+            {
+                "values": [48 float],
+                "interpolated_indices": [int],
+                "dirty_indices": [int], # 回落点
+                "is_valid": bool # 是否适合用于高精度计算 (无大量缺口/回落)
+            }
+        """
+        if not readings or len(readings) < 2:
+            return {"values": [0.0]*48, "interpolated_indices": [], "dirty_indices": [], "is_valid": False}
+            
+        readings = list(readings)
+        interpolated_points = []
+        dirty_points = []
+        
+        # 1. 找出缺口
+        gaps = LoadAggregationService._find_gaps(readings)
+        
+        # 2. 处理缺口
+        for gap_start, gap_length in gaps:
+            if gap_length > 3:
+                # 大缺口：尝试历史廓形填充
+                if not LoadAggregationService._profile_fill(
+                    readings, gap_start, gap_length, prev_readings or [], interpolated_points
+                ):
+                    LoadAggregationService._linear_interpolate(readings, gap_start, gap_length, interpolated_points)
+            else:
+                LoadAggregationService._linear_interpolate(readings, gap_start, gap_length, interpolated_points)
+                
+        # 3. 差分计算
+        load_values = []
+        for i in range(1, len(readings)):
+            curr = readings[i]
+            prev = readings[i-1]
+            if curr is not None and prev is not None:
+                diff = curr - prev
+                if diff < 0:
+                    dirty_points.append(i-1)
+                    diff = 0 # 脏数据归零
+                load_values.append(diff * multiplier)
+            else:
+                load_values.append(0)
+                
+        # 4. 补齐最后一点 (针对96点数据)
+        if len(readings) == 96 and len(load_values) == 95:
+            if next_readings and len(next_readings) > 0 and next_readings[0] is not None and readings[-1] is not None:
+                last_diff = next_readings[0] - readings[-1]
+                if last_diff < 0:
+                    last_diff = 0
+                    dirty_points.append(95)
+                load_values.append(last_diff * multiplier)
+            else:
+                load_values.append(load_values[-1] if load_values else 0)
+                interpolated_points.append(95)
+                
+        # 5. 96转48对齐
+        values_48 = []
+        if len(load_values) >= 95:
+            for i in range(0, 95, 2):
+                val = load_values[i] + (load_values[i+1] if i+1 < len(load_values) else 0)
+                values_48.append(val)
+            # 索引映射
+            interpolated_indices = list(set(p // 2 for p in interpolated_points if p < 96))
+            dirty_indices = list(set(p // 2 for p in dirty_points if p < 96))
+        else:
+            # 简单截断或补零
+            values_48 = load_values[:48]
+            while len(values_48) < 48: values_48.append(0)
+            interpolated_indices = interpolated_points
+            dirty_indices = dirty_points
+            
+        # 6. 单位转换 (kWh -> MWh)
+        values_48 = [v / 1000.0 for v in values_48[:48]]
+        
+        # 7. 质量判定
+        # 如果有任何回落(dirty)或 插值(interpolated)超过 4个点(2小时)，视为不适合高精度校核
+        is_valid = len(dirty_indices) == 0 and len(interpolated_indices) <= 4
+        
+        return {
+            "values": values_48,
+            "interpolated_indices": interpolated_indices,
+            "dirty_indices": dirty_indices,
+            "is_valid": is_valid
+        }
+
     @staticmethod
     def _linear_interpolate(readings: list, start: int, length: int, interpolated_points: list):
         """线性插值填充缺口"""
@@ -236,7 +395,7 @@ class LoadAggregationService:
         return True
     
     @staticmethod
-    def aggregate_meter_load(customer_id: str, date: str) -> Optional[Dict]:
+    def aggregate_meter_load(customer_id: str, date: str, meter_configs_override: Optional[List[Dict]] = None) -> Optional[Dict]:
         """
         聚合单个客户单日的电表示度数据
         
@@ -266,7 +425,10 @@ class LoadAggregationService:
         """
         try:
             # 获取客户档案中的电表列表（用于获取倍率和分配系数）
-            expected_meters = LoadAggregationService.get_customer_meters(customer_id)
+            if meter_configs_override is not None:
+                expected_meters = meter_configs_override
+            else:
+                expected_meters = LoadAggregationService.get_customer_meters(customer_id)
             
             # 从档案中获取电表ID列表
             meter_ids_from_archive = [m["meter_id"] for m in expected_meters] if expected_meters else []
@@ -309,9 +471,15 @@ class LoadAggregationService:
             
             # 获取前一日数据（用于历史廓形填充）
             from datetime import datetime as dt, timedelta
-            prev_date = (dt.strptime(date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+            curr_dt = dt.strptime(date, "%Y-%m-%d")
+            prev_date = (curr_dt - timedelta(days=1)).strftime("%Y-%m-%d")
             prev_day_data = {doc["meter_id"]: doc.get("readings", []) 
                             for doc in RAW_METER_DATA.find({"meter_id": {"$in": list(found_meters)}, "date": prev_date})}
+            
+            # 获取后一日数据（用于补齐最后一点 23:45-24:00）
+            next_date = (curr_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+            next_day_data = {doc["meter_id"]: doc.get("readings", []) 
+                            for doc in RAW_METER_DATA.find({"meter_id": {"$in": list(found_meters)}, "date": next_date})}
             
             # 聚合48点数据
             aggregated_values = [0.0] * 48
@@ -326,89 +494,38 @@ class LoadAggregationService:
                 ratio = params["ratio"]
                 
                 readings = doc.get("readings", [])
-                if not readings or len(readings) < 2:
-                    continue
                 
-                # 复制一份用于处理
-                readings = list(readings)
-                interpolated_points = []
-                dirty_points = []
-                
-                # ========== 数据清洗与插值 ==========
-                
-                # 1. 找出缺口
-                gaps = LoadAggregationService._find_gaps(readings)
-                
-                # 2. 处理缺口
+                # 调用共享计算方法
                 prev_readings = prev_day_data.get(meter_id, [])
-                for gap_start, gap_length in gaps:
-                    if gap_length > 3:
-                        # 大缺口：尝试历史廓形填充
-                        if not LoadAggregationService._profile_fill(
-                            readings, gap_start, gap_length, prev_readings, interpolated_points
-                        ):
-                            # 失败则用线性插值
-                            LoadAggregationService._linear_interpolate(
-                                readings, gap_start, gap_length, interpolated_points
-                            )
-                    else:
-                        # 小缺口：线性插值
-                        LoadAggregationService._linear_interpolate(
-                            readings, gap_start, gap_length, interpolated_points
-                        )
+                next_readings = next_day_data.get(meter_id, [])
                 
-                # ========== 差分计算 ==========
-                load_values = []
+                calc_res = LoadAggregationService.calculate_meter_48_points(
+                    readings, multiplier, prev_readings, next_readings
+                )
                 
-                for i in range(1, len(readings)):
-                    reading_curr = readings[i]
-                    reading_prev = readings[i-1]
-                    
-                    if reading_curr is not None and reading_prev is not None:
-                        diff = reading_curr - reading_prev
-                        
-                        # 示数回落：标记为脏数据
-                        if diff < 0:
-                            logger.warning(f"检测到示数回落(脏数据): meter={meter_id}, idx={i}")
-                            dirty_points.append(i - 1)  # 标记时段索引
-                            diff = 0  # 设为0避免负值
-                        
-                        load_values.append(diff * multiplier)
-                    else:
-                        load_values.append(0)
+                load_values_mwh = calc_res["values"]
+                interpolated_points = calc_res["interpolated_indices"]
+                dirty_points = calc_res["dirty_indices"]
                 
-                # ========== 96转48对齐 ==========
-                if len(load_values) >= 95:
-                    load_48 = []
-                    for i in range(0, 95, 2):
-                        if i + 1 < len(load_values):
-                            load_48.append(load_values[i] + load_values[i+1])
-                        else:
-                            load_48.append(load_values[i])
-                    load_values = load_48[:48]
-                    # 插值点索引也要转换
-                    interpolated_points = list(set(p // 2 for p in interpolated_points if p < 96))
-                    dirty_points = list(set(p // 2 for p in dirty_points if p < 96))
-                elif len(load_values) >= 47:
-                    while len(load_values) < 48:
-                        load_values.append(0)
-                    load_values = load_values[:48]
-                else:
-                    while len(load_values) < 48:
-                        load_values.append(0)
+                # 应用分配系数并累加 (已经在 calculate 中转为 MWh 了，这里只需乘 ratio)
+                # 注意：calculate_meter_48_points 返回的是 MWh，但聚合逻辑可能期望保留精度在最后处理
+                # 不过考虑到之前代码是在累加时 / 1000，shared method 已经做了 / 1000
+                # 所以这里直接累加即可
                 
-                # 应用分配系数并累加
-                for i, val in enumerate(load_values[:48]):
-                    aggregated_values[i] += val * ratio / 1000  # 转换为 MWh
+                for i, val in enumerate(load_values_mwh):
+                    aggregated_values[i] += val * ratio
                 
                 all_interpolated_points.extend(interpolated_points)
                 all_dirty_points.extend(dirty_points)
             
             total = sum(aggregated_values)
+
+            
+            total = sum(aggregated_values)
             
             result = {
-                "values": [round(v, 4) for v in aggregated_values],
-                "total": round(total, 4),
+                "values": [round(v, 3) for v in aggregated_values],
+                "total": round(total, 3),
                 "meter_count": actual_meter_count,
                 "missing_meters": sorted(list(missing)) if actual_meter_count < expected_meter_count else []
             }
@@ -425,6 +542,72 @@ class LoadAggregationService:
             logger.error(f"聚合电表数据失败 customer={customer_id} date={date}: {e}")
             return None
     
+    @staticmethod
+    def aggregate_account_load(customer_id: str, account_no: str, date: str) -> Dict:
+        """
+        聚合指定户号的 MP 负荷与 Meter 负荷, 并作为对比。
+        
+        Args:
+            customer_id: 客户ID
+            account_no: 户号
+            date: 日期 (YYYY-MM-DD)
+            
+        Returns:
+            {
+                "mp_load": Dict,        # aggregate_mp_load result
+                "meter_load": Dict,     # aggregate_meter_load result
+                "diff": float,          # Absolute diff volume
+                "diff_rate": float,     # Difference rate (abs(diff) / mp_total)
+                "status": str           # "balanced", "imbalanced", "missing_data"
+            }
+        """
+        structure = LoadAggregationService.get_customer_structure(customer_id)
+        if not structure:
+             return {"status": "missing_config", "message": "Customer not found"}
+             
+        target_account = next((acc for acc in structure["accounts"] if acc["account_no"] == account_no), None)
+        if not target_account:
+             return {"status": "missing_config", "message": "Account not found"}
+        
+        mp_ids = target_account["mp_ids"]
+        meters = target_account["meters"]
+        
+        # Aggregate MP
+        mp_res = LoadAggregationService.aggregate_mp_load(customer_id, date, mp_ids_override=mp_ids)
+        
+        # Aggregate Meter
+        meter_res = LoadAggregationService.aggregate_meter_load(customer_id, date, meter_configs_override=meters)
+        
+        # Handle cases where one or both are None/Empty
+        mp_total = mp_res.get("total", 0) if mp_res else 0
+        meter_total = meter_res.get("total", 0) if meter_res else 0
+        
+        if mp_total < 0.001 and meter_total < 0.001:
+             return {
+                "mp_load": mp_res,
+                "meter_load": meter_res,
+                "status": "balanced",
+                "diff": 0,
+                "diff_rate": 0
+            }
+
+        diff = abs(mp_total - meter_total)
+        # 只有当 MP 总量显著大于 0 时才计算偏差率
+        if mp_total > 0.001:
+            diff_rate = diff / mp_total
+        else:
+            diff_rate = 1.0 if diff > 0.001 else 0.0
+        
+        status = "imbalanced" if diff_rate > 0.02 else "balanced"
+        
+        return {
+            "mp_load": mp_res,
+            "meter_load": meter_res,
+            "diff": round(diff, 3),
+            "diff_rate": round(diff_rate, 3),
+            "status": status
+        }
+
     @staticmethod
     def calculate_deviation(mp_load: Optional[Dict], meter_load: Optional[Dict]) -> Optional[Dict]:
         """
@@ -448,7 +631,13 @@ class LoadAggregationService:
         mp_total = mp_load.get("total", 0)
         meter_total = meter_load.get("total", 0)
         
-        if meter_total == 0:
+        if meter_total < 0.001:
+            if mp_total < 0.001:
+                return {
+                    "daily_error": 0.0,
+                    "daily_error_abs": 0.0,
+                    "is_warning": False
+                }
             return None
         
         # 计算日电量误差
@@ -456,24 +645,25 @@ class LoadAggregationService:
         daily_error = daily_error_abs / meter_total
         
         # 判断是否超过阈值
-        is_warning = abs(daily_error) > ERROR_THRESHOLD
-        
+        # 初始结果
         result = {
-            "daily_error": round(daily_error, 4),
-            "daily_error_abs": round(daily_error_abs, 4),
-            "is_warning": is_warning
+            "daily_error": round(daily_error, 3),
+            "daily_error_abs": round(daily_error_abs, 3),
+            "is_warning": False # Placeholder
         }
         
         # 计算48点误差（可选，仅当两者都有48点数据时）
         mp_values = mp_load.get("values", [])
         meter_values = meter_load.get("values", [])
+        point_errors = []
+        max_point_error = 0.0
         
         if len(mp_values) == 48 and len(meter_values) == 48:
-            point_errors = []
             for mp_val, meter_val in zip(mp_values, meter_values):
                 if meter_val and meter_val != 0:
                     error = (mp_val - meter_val) / meter_val
-                    point_errors.append(round(error, 4))
+                    point_errors.append(round(error, 3))
+                    if abs(error) > max_point_error: max_point_error = abs(error)
                 elif mp_val == 0 and (meter_val == 0 or meter_val is None):
                     # 两边都是0，认为无误差
                     point_errors.append(0)
@@ -481,6 +671,12 @@ class LoadAggregationService:
                     # mp有值但meter为0，标记为特殊情况
                     point_errors.append(None)
             result["point_errors"] = point_errors
+        
+        # 判断是否超过阈值 (日电量 > 5% 或 单点 > 5%)
+        is_warning_daily = abs(daily_error) > ERROR_THRESHOLD
+        is_warning_point = max_point_error > ERROR_THRESHOLD
+        
+        result["is_warning"] = is_warning_daily or is_warning_point
         
         return result
     

@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict
 from bson import ObjectId
-from fastapi import APIRouter, Query, HTTPException, Depends, File, UploadFile
+from fastapi import APIRouter, Query, HTTPException, Depends, File, UploadFile, Form
 from webapp.tools.mongo import DATABASE
 from webapp.tools.security import get_current_active_user, User
 from webapp.services.meter_data_import_service import MeterDataImportService
@@ -28,181 +28,14 @@ RETAIL_CONTRACTS = DATABASE['retail_contracts']
 
 from webapp.models.load_enums import FusionStrategy
 from webapp.services.load_query_service import LoadQueryService
+from webapp.services.diagnosis_service import DiagnosisService
 
 
 # ##############################################################################
 # 主页面接口
 # ##############################################################################
 
-@router.get("/summary", summary="获取数据校核统计概览")
-async def get_load_data_summary(
-    current_user: User = Depends(get_current_active_user)
-):
-    """
-    获取统计卡片数据 (v3.0)：
-    - total_customers: 签约客户数
-    - pending_mp_days: 待聚合计量点数据天数
-    - pending_meter_days: 待聚合电表数据天数
-    - integrity_anomaly_count: 完整率异常 (<90%)
-    - reliability_anomaly_count: 可靠率异常 (<90%)
-    - accuracy_anomaly_count: 准确率异常 (误差>5%)
-    """
-    try:
-        from datetime import datetime as dt
-        today = dt.now().strftime("%Y-%m-%d")
-        
-        # 1. 签约客户
-        today_dt = dt.now()
-        signed_contracts = RETAIL_CONTRACTS.find({
-            "purchase_start_month": {"$lte": today_dt},
-            "purchase_end_month": {"$gte": today_dt}
-        })
-        signed_customer_ids = list(set(
-            c.get("customer_id") for c in signed_contracts if c.get("customer_id")
-        ))
-        total_customers = len(signed_customer_ids)
-        
-        # 2. 待聚合数据计算 (新逻辑: 对比原始数据 vs 聚合结果)
-        # 2.1 获取所有签约客户的计量点ID和电表ID
-        customer_mp_ids = {}  # customer_id -> [mp_id list]
-        customer_meter_ids = {}  # customer_id -> [meter_id list]
-        
-        for cust in CUSTOMER_ARCHIVES.find({"_id": {"$in": [ObjectId(cid) if len(cid) == 24 else cid for cid in signed_customer_ids]}}):
-            cid = str(cust.get("_id"))
-            mp_list = []
-            meter_list = []
-            for account in cust.get("accounts", []):
-                for mp in account.get("metering_points", []):
-                    if mp.get("mp_no"):
-                        mp_list.append(mp["mp_no"])
-                for meter in account.get("meters", []):
-                    if meter.get("meter_id"):
-                        meter_list.append(meter["meter_id"])
-            customer_mp_ids[cid] = mp_list
-            customer_meter_ids[cid] = meter_list
-        
-        # 2.2 获取原始数据的(customer_id, date)对
-        all_mp_ids = [mp for mps in customer_mp_ids.values() for mp in mps]
-        all_meter_ids = [m for ms in customer_meter_ids.values() for m in ms]
-        
-        # MP原始数据日期
-        raw_mp_dates_by_mp = {}
-        if all_mp_ids:
-            for doc in RAW_MP_DATA.find({"mp_id": {"$in": all_mp_ids}}, {"mp_id": 1, "date": 1}):
-                mp_id = doc.get("mp_id")
-                date = doc.get("date")
-                if mp_id and date:
-                    raw_mp_dates_by_mp.setdefault(mp_id, set()).add(date)
-        
-        # Meter原始数据日期
-        raw_meter_dates_by_meter = {}
-        if all_meter_ids:
-            for doc in RAW_METER_DATA.find({"meter_id": {"$in": all_meter_ids}}, {"meter_id": 1, "date": 1}):
-                meter_id = doc.get("meter_id")
-                date = doc.get("date")
-                if meter_id and date:
-                    raw_meter_dates_by_meter.setdefault(meter_id, set()).add(date)
-        
-        # 2.3 获取聚合结果的(customer_id, date)对
-        aggregated_mp_dates = {}  # customer_id -> set of dates with mp_load
-        aggregated_meter_dates = {}  # customer_id -> set of dates with meter_load
-        
-        for doc in UNIFIED_LOAD_CURVE.find(
-            {"customer_id": {"$in": signed_customer_ids}},
-            {"customer_id": 1, "date": 1, "mp_load": 1, "meter_load": 1}
-        ):
-            cid = doc.get("customer_id")
-            date = doc.get("date")
-            if doc.get("mp_load"):
-                aggregated_mp_dates.setdefault(cid, set()).add(date)
-            if doc.get("meter_load"):
-                aggregated_meter_dates.setdefault(cid, set()).add(date)
-        
-        # 2.4 计算待聚合客户数（有多少客户的原始数据天数 > 已聚合天数）
-        pending_mp_customers = 0
-        pending_meter_customers = 0
-        
-        for cid in signed_customer_ids:
-            # MP: 原始数据日期 - 已聚合日期
-            mp_ids = customer_mp_ids.get(cid, [])
-            raw_mp_dates = set()
-            for mp_id in mp_ids:
-                raw_mp_dates.update(raw_mp_dates_by_mp.get(mp_id, set()))
-            agg_mp_dates = aggregated_mp_dates.get(cid, set())
-            if len(raw_mp_dates) > len(agg_mp_dates):
-                pending_mp_customers += 1
-            
-            # Meter: 原始数据日期 - 已聚合日期
-            meter_ids = customer_meter_ids.get(cid, [])
-            raw_meter_dates = set()
-            for meter_id in meter_ids:
-                raw_meter_dates.update(raw_meter_dates_by_meter.get(meter_id, set()))
-            agg_meter_dates = aggregated_meter_dates.get(cid, set())
-            if len(raw_meter_dates) > len(agg_meter_dates):
-                pending_meter_customers += 1
-        
-        # 3. 统计异常
-        integrity_issue_count = 0
-        reliability_issue_count = 0
-        accuracy_issue_count = 0
-        
-        # 批量获取最近30天统计
-        pipeline = [
-             {"$match": {"customer_id": {"$in": signed_customer_ids}}},
-             {"$sort": {"date": -1}},
-             {"$group": {
-                 "_id": "$customer_id",
-                 "recent_docs": {"$push": "$$ROOT"}
-             }},
-             {"$project": {
-                 "recent_docs": {"$slice": ["$recent_docs", 30]}
-             }}
-        ]
 
-        cursor = UNIFIED_LOAD_CURVE.aggregate(pipeline)
-        
-        for doc in cursor:
-            recent_data = doc.get("recent_docs", [])
-            if not recent_data:
-                integrity_issue_count += 1
-                continue
-                
-            dates = {d.get("date") for d in recent_data}
-            total_days = 30 # Check last 30 days window
-            
-            # --- Integrity (完整率) ---
-            integrity_rate = len(dates) / total_days
-            if integrity_rate < 0.9:
-                integrity_issue_count += 1
-                
-            # --- Reliability (可靠率异常) ---
-            # 定义改为：只要最近30天内有任何一天存在计量点缺失，即计为异常
-            has_reliability_issue = any(
-                len(d.get("mp_load", {}).get("missing_mps", [])) > 0 
-                for d in recent_data if d.get("mp_load")
-            )
-            if has_reliability_issue:
-                reliability_issue_count += 1
-                
-            # --- Accuracy (准确率) ---
-            has_warning = any(
-                d.get("deviation", {}).get("is_warning", False)
-                for d in recent_data if d.get("deviation")
-            )
-            if has_warning:
-                accuracy_issue_count += 1
-
-        return {
-            "total_customers": total_customers,
-            "pending_mp_customers": pending_mp_customers,
-            "pending_meter_customers": pending_meter_customers,
-            "integrity_anomaly_count": integrity_issue_count,
-            "reliability_anomaly_count": reliability_issue_count,
-            "accuracy_anomaly_count": accuracy_issue_count
-        }
-    except Exception as e:
-        logger.error(f"获取统计概览失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取统计概览失败: {str(e)}")
 
 
 @router.get("/customers", summary="获取客户校核列表")
@@ -466,7 +299,6 @@ async def get_customer_detail(
                 } for m in account_meters],
                 "metering_points": [mp.get("mp_no") for mp in account_mps]
             })
-        
         # 获取该客户的所有负荷曲线数据（用于计算质量指标）
         curves = list(UNIFIED_LOAD_CURVE.find(
             {"customer_id": customer_id}
@@ -489,24 +321,81 @@ async def get_customer_detail(
             expected_days = 0
             actual_days = 0
         
-        # 计算MP缺失天数（coverage < 100%的天数）
-        mp_incomplete_days = 0
+        # 获取客户当前合同（当日在合同周期内）
+        RETAIL_CONTRACTS = DATABASE['retail_contracts']
+        today = datetime.now()
+        contract = RETAIL_CONTRACTS.find_one({
+            "customer_id": customer_id,
+            "purchase_start_month": {"$lte": today},
+            "purchase_end_month": {"$gte": today}
+        })
+        
+        # 如果没有当前合同，则取最新的合同
+        if not contract:
+            contract = RETAIL_CONTRACTS.find_one(
+                {"customer_id": customer_id},
+                sort=[("purchase_start_month", -1)]  # 取最新的合同
+            )
+        
+        # 确定MP期望日期范围：合同开始日期 → (当日-2)
+        mp_expected_end = today - timedelta(days=2)  # MP数据有2天延迟
+        
+        if contract and contract.get("purchase_start_month"):
+            mp_expected_start = contract["purchase_start_month"]
+            if isinstance(mp_expected_start, str):
+                mp_expected_start = datetime.strptime(mp_expected_start, "%Y-%m-%d")
+        else:
+            # 无合同则使用第一条数据日期作为起始
+            mp_expected_start = datetime.strptime(all_dates[0], "%Y-%m-%d") if all_dates else mp_expected_end
+        
+        # 生成期望的MP日期集合
+        expected_mp_dates = set()
+        curr = mp_expected_start
+        while curr <= mp_expected_end:
+            expected_mp_dates.add(curr.strftime("%Y-%m-%d"))
+            curr += timedelta(days=1)
+        
+        # 实际有完整MP数据的日期（actual == expected）
+        # 实际有部分MP数据的日期（0 < actual < expected）也算缺失
+        complete_mp_dates = set()
+        partial_mp_dates = set()
+        
         for c in curves:
+            date = c.get("date")
             if c.get("mp_load"):
-                mp = c["mp_load"]
-                mp_count = mp.get("mp_count", 0)
-                missing = len(mp.get("missing_mps", []))
-                # 如果有缺失点，则为不完整
-                if missing > 0:
-                    mp_incomplete_days += 1
+                mp_actual = c["mp_load"].get("mp_count", 0)
+                if mp_actual > 0:
+                    if mp_actual >= mp_count:
+                        complete_mp_dates.add(date)
+                    else:
+                        partial_mp_dates.add(date)  # 部分缺失
         
-        # 计算平均准确率
-        daily_errors = []
+        # MP缺失天数 = 
+        #   1. 期望日期中完全没有MP数据的天数
+        #   2. 加上有数据但部分缺失的天数
+        missing_mp_dates = expected_mp_dates - complete_mp_dates - partial_mp_dates
+        mp_incomplete_days = len(missing_mp_dates) + len(partial_mp_dates)
+        
+        # 计算电表缺失天数和最大误差（仍基于现有记录）
+        meter_incomplete_days = 0
+        max_error = 0.0
+        
         for c in curves:
-            if c.get("deviation") and c["deviation"].get("daily_error") is not None:
-                daily_errors.append(abs(c["deviation"]["daily_error"]))
-        
-        avg_accuracy = (1 - sum(daily_errors) / len(daily_errors)) * 100 if daily_errors else None
+            # Meter 缺失
+            if c.get("meter_load"):
+                meter_l = c["meter_load"]
+                # 修正逻辑：不再对比 meter_count < total_meter_count (因为档案可能变更)
+                # 而是检查聚合时记录的 missing_meters 是否存在且非空
+                if meter_l.get("missing_meters"):
+                    meter_incomplete_days += 1
+            
+            # 最大误差
+            if c.get("deviation"):
+                err = c["deviation"].get("daily_error")
+                if err is not None:
+                    abs_err = abs(err)
+                    if abs_err > max_error:
+                        max_error = abs_err
         
         # 获取日期范围
         date_range = f"{all_dates[0]} ~ {all_dates[-1]}" if all_dates else None
@@ -520,10 +409,11 @@ async def get_customer_detail(
                 "mp_count": mp_count
             },
             "quality": {
-                "gap_days": gap_days,  # 断点天数
-                "mp_incomplete_days": mp_incomplete_days,  # MP缺失天数
-                "avg_accuracy": round(avg_accuracy, 1) if avg_accuracy else None,  # 平均准确率
-                "total_days": actual_days  # 总数据天数
+                "gap_days": gap_days,  # 无数据
+                "mp_incomplete_days": mp_incomplete_days,  # 计量点缺失
+                "meter_incomplete_days": meter_incomplete_days,  # 电表缺失
+                "max_error": round(max_error * 100, 1),  # 误差 (%)
+                "total_days": actual_days
             },
             "date_range": date_range,
             "accounts": accounts
@@ -564,7 +454,24 @@ async def get_customer_calendar(
             start_date = (today - timedelta(days=30)).strftime("%Y-%m-%d")
             end_date = (today + timedelta(days=1)).strftime("%Y-%m-%d")
         
-        # 查询数据
+        # 先查询客户档案获取总计量点数和总电表数
+        customer = CUSTOMER_ARCHIVES.find_one({"_id": customer_id})
+        if not customer:
+            from bson import ObjectId
+            try:
+                customer = CUSTOMER_ARCHIVES.find_one({"_id": ObjectId(customer_id)})
+            except:
+                pass
+        
+        # 统计档案中的总计量点数和总电表数
+        total_mp_count = 0
+        total_meter_count = 0
+        if customer:
+            for account in customer.get("accounts", []):
+                total_mp_count += len(account.get("metering_points", []))
+                total_meter_count += len(account.get("meters", []))
+        
+        # 查询曲线数据
         query = {"customer_id": customer_id}
         if start_date and end_date:
             query["date"] = {"$gte": start_date, "$lt": end_date}
@@ -581,41 +488,33 @@ async def get_customer_calendar(
             mp_load = curve.get("mp_load", {})
             meter_load = curve.get("meter_load", {})
             
-            # 动态计算覆盖率
-            coverage = 0
-            if mp_load:
-                mp_cnt = mp_load.get("mp_count", 0)
-                missing_cnt = len(mp_load.get("missing_mps", []))
-                total_mps = mp_cnt + missing_cnt
-                coverage = mp_cnt / total_mps if total_mps > 0 else 0
-            has_meter = bool(meter_load)
+            # 计量点数据：实际值从曲线取，总数从档案取
+            mp_actual = mp_load.get("mp_count", 0) if mp_load else 0
+            mp_expected = total_mp_count
             
-            # 计算计量点实际/期望数量
-            missing_mps = mp_load.get("missing_mps", []) if mp_load else []
-            # 通过coverage反算: actual/expected = coverage, missing = expected - actual
-            # 即: mp_expected = len(missing_mps) / (1 - coverage) if coverage < 1
-            # 简化处理：直接返回覆盖率和缺失数
-            mp_missing = len(missing_mps)
+            # 电表数据：实际值从曲线取，总数从档案取
+            meter_actual = meter_load.get("meter_count", 0) if meter_load else 0
+            meter_expected = total_meter_count
             
-            # 计算当日准确率
+            # 计算当日误差
             deviation = curve.get("deviation", {})
             daily_error = deviation.get("daily_error") if deviation else None
-            daily_accuracy = round((1 - abs(daily_error)) * 100, 1) if daily_error is not None else None
             
-            # 电表数据统计
-            meter_count = meter_load.get("meter_count", 0) if meter_load else 0
-            expected_meters = meter_load.get("data_quality", {}).get("expected_meters", 0) if meter_load else 0
-            actual_meters = meter_load.get("data_quality", {}).get("actual_meters", 0) if meter_load else 0
+            # 判断是否有数据
+            has_mp = mp_actual > 0
+            has_meter = meter_actual > 0
             
             calendar_data.append({
                 "date": date,
-                "coverage": round(coverage * 100, 1),
+                "has_mp_data": has_mp,
                 "has_meter_data": has_meter,
-                "daily_accuracy": daily_accuracy,
-                "mp_missing": mp_missing,  # 缺失计量点数
-                "meter_actual": actual_meters,  # 实际有数据的电表数
-                "meter_expected": expected_meters,  # 期望电表数
-                "missing_mps": missing_mps
+                "daily_error": round(daily_error * 100, 2) if daily_error is not None else None,
+                "mp_actual": mp_actual,
+                "mp_expected": mp_expected,
+                "meter_actual": meter_actual,
+                "meter_expected": meter_expected,
+                "missing_mps": mp_load.get("missing_mps", []) if mp_load else [],
+                "missing_meters": meter_load.get("missing_meters", []) if meter_load else []
             })
         
         # 获取缺失日期列表（仅在指定日期范围时计算）
@@ -631,10 +530,14 @@ async def get_customer_calendar(
             existing_dates = {c["date"] for c in calendar_data}
             missing_dates = sorted(all_dates - existing_dates)
         
-        incomplete_dates = [c["date"] for c in calendar_data if c["coverage"] < 100]
+        # 不完整日期：计量点或电表数据不完整
+        incomplete_dates = [c["date"] for c in calendar_data 
+                          if c["mp_actual"] < c["mp_expected"] or c["meter_actual"] < c["meter_expected"]]
         
         return {
             "customer_id": customer_id,
+            "total_mp_count": total_mp_count,
+            "total_meter_count": total_meter_count,
             "calendar": calendar_data,
             "missing_dates": missing_dates,
             "incomplete_dates": incomplete_dates
@@ -658,69 +561,12 @@ async def get_customer_curves(
     - 否则返回日期范围内的日电量对比
     """
     try:
-        if detail_date:
-            # 返回48点曲线对比
-            logger.info(f"API get_customer_curves: customer_id={customer_id}, detail_date={detail_date}")
-            curve = UNIFIED_LOAD_CURVE.find_one({
-                "customer_id": customer_id,
-                "date": detail_date
-            })
-            logger.info(f"API get_customer_curves result: {bool(curve)}")
-            
-            if not curve:
-                return {"date": detail_date, "mp_values": [], "meter_values": [], "point_errors": []}
-            
-            mp_values = curve.get("mp_load", {}).get("values", []) if curve.get("mp_load") else []
-            meter_values = curve.get("meter_load", {}).get("values", []) if curve.get("meter_load") else []
-            deviation = curve.get("deviation") or {}
-            
-            return {
-                "date": detail_date,
-                "mp_values": mp_values,
-                "meter_values": meter_values,
-                "mp_total": curve.get("mp_load", {}).get("total") if curve.get("mp_load") else None,
-                "meter_total": curve.get("meter_load", {}).get("total") if curve.get("meter_load") else None,
-                "daily_error": deviation.get("daily_error"),
-                "point_errors": deviation.get("point_errors", [])
-            }
-        else:
-            # 返回日电量对比
-            curves = list(UNIFIED_LOAD_CURVE.find({
-                "customer_id": customer_id,
-                "date": {"$gte": start_date, "$lte": end_date}
-            }).sort("date", 1))
-            
-            daily_comparison = []
-            warning_dates = []
-            
-            for curve in curves:
-                date = curve.get("date")
-                mp_total = curve.get("mp_load", {}).get("total") if curve.get("mp_load") else None
-                meter_total = curve.get("meter_load", {}).get("total") if curve.get("meter_load") else None
-                deviation = curve.get("deviation", {})
-                daily_error = deviation.get("daily_error")
-                is_warning = deviation.get("is_warning", False)
-                
-                daily_comparison.append({
-                    "date": date,
-                    "mp_total": mp_total,
-                    "meter_total": meter_total,
-                    "daily_error": daily_error,
-                    "is_warning": is_warning
-                })
-                
-                if is_warning:
-                    warning_dates.append({
-                        "date": date,
-                        "error": daily_error
-                    })
-            
-            return {
-                "start_date": start_date,
-                "end_date": end_date,
-                "daily_comparison": daily_comparison,
-                "warning_dates": warning_dates
-            }
+        return LoadQueryService.get_diagnosis_curves(
+            customer_id=customer_id,
+            start_date=start_date,
+            end_date=end_date,
+            detail_date=detail_date
+        )
     except Exception as e:
         logger.error(f"获取曲线对比数据失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取曲线对比数据失败: {str(e)}")
@@ -816,31 +662,58 @@ async def trigger_reaggregate(
                 if meter_id and date:
                     raw_meter_dates.setdefault(meter_id, set()).add(date)
         
-        # 查询已聚合的日期
-        aggregated_dates = {}  # customer_id -> set of dates
+        # 查询已聚合的详细状态 (date -> {mp: bool, meter: bool})
+        aggregated_status = {}  # customer_id -> {date: {mp: bool, meter: bool}}
         if mode != "full":
             for doc in UNIFIED_LOAD_CURVE.find(
                 {"customer_id": {"$in": list(customer_info.keys())}},
-                {"customer_id": 1, "date": 1}
+                {"customer_id": 1, "date": 1, "mp_load": 1, "meter_load": 1}
             ):
                 cid = doc.get("customer_id")
                 date = doc.get("date")
                 if cid and date:
-                    aggregated_dates.setdefault(cid, set()).add(date)
+                    if cid not in aggregated_status:
+                        aggregated_status[cid] = {}
+                    
+                    has_mp = bool(doc.get("mp_load") and doc.get("mp_load").get("mp_count", 0) > 0)
+                    has_meter = bool(doc.get("meter_load") and doc.get("meter_load").get("meter_count", 0) > 0)
+                    
+                    aggregated_status[cid][date] = {"mp": has_mp, "meter": has_meter}
         
-        # 确定每个客户需要处理的日期（增量逻辑）
+        # 确定每个客户需要处理的日期（增强版增量逻辑）
         customer_pending_dates = {}  # customer_id -> set of pending dates
         for cid, info in customer_info.items():
-            # 收集该客户所有原始数据的日期
-            raw_dates = set()
+            current_raw_mp_dates = set()
             for mp_id in info["mp_ids"]:
-                raw_dates.update(raw_mp_dates.get(mp_id, set()))
+                current_raw_mp_dates.update(raw_mp_dates.get(mp_id, set()))
+                
+            current_raw_meter_dates = set()
             for meter_id in info["meter_ids"]:
-                raw_dates.update(raw_meter_dates.get(meter_id, set()))
+                current_raw_meter_dates.update(raw_meter_dates.get(meter_id, set()))
             
-            # 减去已聚合的日期
-            existing_dates = aggregated_dates.get(cid, set())
-            pending_dates = raw_dates - existing_dates
+            # 合并所有涉及的日期
+            all_raw_dates = current_raw_mp_dates | current_raw_meter_dates
+            cust_agg_status = aggregated_status.get(cid, {})
+            
+            pending_dates = set()
+            
+            for date in all_raw_dates:
+                if date not in cust_agg_status:
+                    # 记录完全不存在 -> 需要聚合
+                    pending_dates.add(date)
+                else:
+                    # 记录存在，检查完整性
+                    status = cust_agg_status[date]
+                    
+                    # 如果有原始MP数据但聚合结果无MP -> 需要聚合
+                    if date in current_raw_mp_dates and not status["mp"]:
+                        pending_dates.add(date)
+                        continue
+                        
+                    # 如果有原始Meter数据但聚合结果无Meter -> 需要聚合
+                    if date in current_raw_meter_dates and not status["meter"]:
+                        pending_dates.add(date)
+                        continue
             
             # 如果指定了日期范围，则进一步过滤
             if start_date:
@@ -902,30 +775,7 @@ async def trigger_reaggregate(
         raise HTTPException(status_code=500, detail=f"触发重新聚合失败: {str(e)}")
 
 
-@router.post("/reaggregate/mp", summary="触发计量点数据重新聚合")
-async def trigger_reaggregate_mp(
-    customer_id: Optional[str] = Query(None, description="指定客户ID"),
-    start_date: Optional[str] = Query(None, description="开始日期"),
-    end_date: Optional[str] = Query(None, description="结束日期"),
-    current_user: User = Depends(get_current_active_user)
-):
-    """
-    基于 raw_mp_data 重新计算 mp_load
-    """
-    return await trigger_reaggregate("mp", customer_id, start_date, end_date, current_user)
 
-
-@router.post("/reaggregate/meter", summary="触发电表数据重新聚合")
-async def trigger_reaggregate_meter(
-    customer_id: Optional[str] = Query(None, description="指定客户ID"),
-    start_date: Optional[str] = Query(None, description="开始日期"),
-    end_date: Optional[str] = Query(None, description="结束日期"),
-    current_user: User = Depends(get_current_active_user)
-):
-    """
-    基于 raw_meter_data 重新计算 meter_load
-    """
-    return await trigger_reaggregate("meter", customer_id, start_date, end_date, current_user)
 
 
 # ##############################################################################
@@ -935,6 +785,7 @@ async def trigger_reaggregate_meter(
 @router.post("/import/meter", summary="导入电表示度数据")
 async def import_meter_data(
     file: UploadFile = File(..., description="Excel 文件"),
+    overwrite: bool = Form(False, description="覆盖已存在数据"),
     current_user: User = Depends(get_current_active_user)
 ):
     """
@@ -943,7 +794,7 @@ async def import_meter_data(
     业务逻辑：
     1. 从文件名提取电表号
     2. 解析 Excel 内容（支持96点/1440点格式）
-    3. 无条件增量入库（按 meter_id + date 去重）
+    3. 入库（根据 overwrite 决定是否覆盖）
     """
     try:
         # 读取文件内容
@@ -951,7 +802,7 @@ async def import_meter_data(
         filename = file.filename
         
         # 调用导入服务
-        result = MeterDataImportService.import_excel_file(content, filename)
+        result = MeterDataImportService.import_excel_file(content, filename, overwrite)
         
         return result
     except Exception as e:
@@ -959,41 +810,13 @@ async def import_meter_data(
         raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")
 
 
-@router.get("/raw-meter-data", summary="查询原始电表数据")
-async def get_raw_meter_data(
-    meter_id: Optional[str] = Query(None, description="电表ID"),
-    date: Optional[str] = Query(None, description="日期"),
-    limit: int = Query(100, description="返回数量限制"),
-    current_user: User = Depends(get_current_active_user)
-):
-    """
-    查询原始电表数据
-    """
-    try:
-        query = {}
-        if meter_id:
-            query["meter_id"] = meter_id
-        if date:
-            query["date"] = date
-        
-        records = list(RAW_METER_DATA.find(query).sort("date", -1).limit(limit))
-        
-        # 转换 ObjectId
-        for r in records:
-            r["_id"] = str(r["_id"])
-        
-        return {
-            "total": RAW_METER_DATA.count_documents(query),
-            "records": records
-        }
-    except Exception as e:
-        logger.error(f"查询原始电表数据失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @router.post("/import/mp", summary="导入计量点负荷数据")
 async def import_mp_data(
     file: UploadFile = File(..., description="Excel 文件"),
+    overwrite: bool = Form(False, description="覆盖已存在数据"),
     current_user: User = Depends(get_current_active_user)
 ):
     """
@@ -1002,13 +825,13 @@ async def import_mp_data(
     业务逻辑：
     1. 解析 Excel 内容（支持24/48时段格式）
     2. 提取计量点ID、日期、时段电量
-    3. 无条件增量入库（按 mp_id + date 去重）
+    3. 入库（根据 overwrite 决定是否覆盖）
     """
     try:
         content = await file.read()
         filename = file.filename
         
-        result = MpDataImportService.import_excel_file(content, filename)
+        result = MpDataImportService.import_excel_file(content, filename, overwrite)
         
         return result
     except Exception as e:
@@ -1016,131 +839,53 @@ async def import_mp_data(
         raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")
 
 
-@router.get("/raw-mp-data", summary="查询原始计量点数据")
-async def get_raw_mp_data(
-    mp_id: Optional[str] = Query(None, description="计量点ID"),
-    date: Optional[str] = Query(None, description="日期"),
-    limit: int = Query(100, description="返回数量限制"),
-    current_user: User = Depends(get_current_active_user)
-):
-    """
-    查询原始计量点数据
-    """
-    try:
-        query = {}
-        if mp_id:
-            query["mp_id"] = mp_id
-        if date:
-            query["date"] = date
-        
-        records = list(RAW_MP_DATA.find(query).sort("date", -1).limit(limit))
-        
-        # 转换 ObjectId
-        for r in records:
-            r["_id"] = str(r["_id"])
-        
-        return {
-            "total": RAW_MP_DATA.count_documents(query),
-            "records": records
-        }
-    except Exception as e:
-        logger.error(f"查询原始计量点数据失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 # ##############################################################################
 # 负荷曲线查询接口
 # ##############################################################################
 
-@router.get("/curve", summary="获取单客户融合曲线")
-@router.get("/curve/{customer_id}", summary="获取单客户融合曲线")
-async def get_customer_curve(
-    customer_id: Optional[str] = None,
-    customer_name: Optional[str] = Query(None, description="客户名称 (与 ID 二选一)"),
-    start_date: str = Query(..., description="开始日期 YYYY-MM-DD"),
-    end_date: str = Query(..., description="结束日期 YYYY-MM-DD"),
-    strategy: FusionStrategy = Query(FusionStrategy.MP_PRIORITY, description="融合策略"),
-    current_user: User = Depends(get_current_active_user)
-):
-    """
-    获取单客户的融合负荷曲线
-    支持通过 customer_id 或 customer_name 查询
-    """
-    try:
-        return LoadQueryService.get_customer_curve(
-            customer_id=customer_id, 
-            customer_name=customer_name, 
-            start_date=start_date, 
-            end_date=end_date, 
-            strategy=strategy
-        )
-    except Exception as e:
-        logger.error(f"获取客户曲线失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.get("/curves/batch", summary="批量获取客户日电量和曲线")
-async def get_curves_batch(
-    start_date: str = Query(..., description="开始日期 YYYY-MM-DD"),
-    end_date: str = Query(..., description="结束日期 YYYY-MM-DD"),
-    customer_ids: Optional[str] = Query(None, description="客户ID列表，逗号分隔"),
-    month: Optional[str] = Query(None, description="月份 YYYY-MM，用于筛选签约客户"),
-    strategy: FusionStrategy = Query(FusionStrategy.MP_PRIORITY, description="融合策略"),
-    include_curves: bool = Query(False, description="是否返回48点曲线（数据量较大）"),
-    current_user: User = Depends(get_current_active_user)
-):
-    """
-    批量获取客户日电量和曲线
-    """
-    try:
-        target_ids = [id.strip() for id in customer_ids.split(",")] if customer_ids else None
-        
-        return LoadQueryService.get_batch_customer_curves(
-            start_date, end_date, target_ids, month, strategy, include_curves
-        )
-    except Exception as e:
-        logger.error(f"批量获取客户曲线失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/total-load", summary="获取总负荷日电量曲线")
-async def get_total_load(
-    start_date: str = Query(..., description="开始日期 YYYY-MM-DD"),
-    end_date: str = Query(..., description="结束日期 YYYY-MM-DD"),
-    month: Optional[str] = Query(None, description="月份 YYYY-MM，用于筛选签约客户"),
-    strategy: FusionStrategy = Query(FusionStrategy.MP_PRIORITY, description="融合策略"),
-    include_curves: bool = Query(False, description="是否返回48点曲线（数据量较大）"),
-    current_user: User = Depends(get_current_active_user)
-):
-    """
-    获取所有签约客户的总负荷日电量曲线
-    """
-    try:
-        return LoadQueryService.get_total_load_curve(
-            start_date, end_date, month, strategy, include_curves
-        )
-    except Exception as e:
-        logger.error(f"获取总负荷曲线失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ##############################################################################
 # 系数校核接口
 # ##############################################################################
 
-@router.post("/calibration/calculate", summary="计算推荐系数 (最小二乘法)")
-async def calculate_calibration_coefficients(
+@router.post("/calibration/preview", summary="预览校核状态")
+async def preview_calibration(
     customer_id: str = Query(..., description="客户ID"),
     start_date: str = Query(..., description="开始日期 (YYYY-MM-DD)"),
     end_date: str = Query(..., description="结束日期 (YYYY-MM-DD)"),
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    计算推荐的电表分配系数 (基于约束最小二乘法)
+    预览各个户号的校验状态 (平衡/偏差/缺数)
     """
     try:
         from webapp.services.calibration_service import CalibrationService
-        return CalibrationService.calculate_recommended_coefficients(customer_id, start_date, end_date)
+        return CalibrationService.preview_calibration_status(customer_id, start_date, end_date)
+    except Exception as e:
+        logger.error(f"预览校核状态失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/calibration/calculate", summary="计算推荐系数 (最小二乘法)")
+async def calculate_calibration_coefficients(
+    customer_id: str = Query(..., description="客户ID"),
+    start_date: str = Query(..., description="开始日期 (YYYY-MM-DD)"),
+    end_date: str = Query(..., description="结束日期 (YYYY-MM-DD)"),
+    account_no: Optional[str] = Query(None, description="指定户号 (可选)"),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    计算推荐的电表分配系数 (基于约束最小二乘法)
+    如果指定了 account_no，则只计算该户号下的电表系数
+    """
+    try:
+        from webapp.services.calibration_service import CalibrationService
+        return CalibrationService.calculate_recommended_coefficients(customer_id, start_date, end_date, account_no)
     except Exception as e:
         logger.error(f"计算推荐系数失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -1179,3 +924,266 @@ async def apply_calibration_coefficients(
     except Exception as e:
         logger.error(f"应用系数失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ##############################################################################
+# 诊断接口
+# ##############################################################################
+
+@router.get("/signed-customers", summary="获取签约客户列表")
+async def get_signed_customers(
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    获取当前所有签约客户列表（用于诊断初始化）
+    只返回客户ID和名称，不返回诊断数据
+    """
+    try:
+        customers = DiagnosisService.get_signed_customers()
+        return {
+            "total": len(customers),
+            "customers": customers
+        }
+    except Exception as e:
+        logger.error(f"获取签约客户列表失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/diagnose", summary="执行批量诊断")
+async def diagnose_all_customers(
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    诊断所有签约客户的数据质量
+    
+    返回:
+    - summary: 统计摘要（各类问题客户数）
+    - customers: 详细诊断结果列表
+    """
+    try:
+        result = DiagnosisService.diagnose_all_customers()
+        return result
+    except Exception as e:
+        logger.error(f"执行诊断失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+
+# ##############################################################################
+# 计量点缺失导出接口
+# ##############################################################################
+
+from fastapi.responses import StreamingResponse
+import io
+from urllib.parse import quote
+
+@router.get("/export/mp-missing", summary="导出计量点缺失明细")
+async def export_mp_missing(
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    导出所有签约客户的计量点缺失明细Excel
+    
+    表格格式：
+    - 客户名称
+    - 计量点号
+    - 缺失日期（逗号分隔）
+    - 缺失天数
+    """
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+        
+        # 获取所有签约客户
+        today = datetime.now()
+        signed_customers = list(RETAIL_CONTRACTS.find({
+            "purchase_start_month": {"$lte": today},
+            "purchase_end_month": {"$gte": today}
+        }))
+        
+        customer_ids = list(set(c.get("customer_id") for c in signed_customers if c.get("customer_id")))
+        
+        # 收集所有缺失数据
+        rows = []
+        
+        for customer_id in customer_ids:
+            # 获取客户档案
+            customer = CUSTOMER_ARCHIVES.find_one({"_id": customer_id})
+            if not customer:
+                try:
+                    from bson import ObjectId
+                    customer = CUSTOMER_ARCHIVES.find_one({"_id": ObjectId(customer_id)})
+                except:
+                    pass
+            
+            if not customer:
+                continue
+                
+            customer_name = customer.get("user_name", customer_id)
+            
+            # 获取所有计量点
+            mp_list = []
+            for account in customer.get("accounts", []):
+                for mp in account.get("metering_points", []):
+                    mp_no = mp.get("mp_no")
+                    if mp_no:
+                        mp_list.append(mp_no)
+            
+            if not mp_list:
+                continue
+            
+            # 获取合同周期
+            contract = RETAIL_CONTRACTS.find_one({
+                "customer_id": customer_id,
+                "purchase_start_month": {"$lte": today},
+                "purchase_end_month": {"$gte": today}
+            })
+            
+            if not contract:
+                contract = RETAIL_CONTRACTS.find_one(
+                    {"customer_id": customer_id},
+                    sort=[("purchase_start_month", -1)]
+                )
+            
+            if not contract:
+                continue
+            
+            mp_expected_start = contract.get("purchase_start_month")
+            if isinstance(mp_expected_start, str):
+                mp_expected_start = datetime.strptime(mp_expected_start, "%Y-%m-%d")
+            
+            mp_expected_end = today - timedelta(days=2)
+            
+            # 生成期望日期
+            expected_dates = set()
+            curr = mp_expected_start
+            while curr <= mp_expected_end:
+                expected_dates.add(curr.strftime("%Y-%m-%d"))
+                curr += timedelta(days=1)
+            
+            if not expected_dates:
+                continue
+            
+            # 获取该客户的曲线数据
+            curves = list(UNIFIED_LOAD_CURVE.find({"customer_id": customer_id}))
+            
+            # 1. 找出整天缺失的日期（完全没生成曲线记录的日期）
+            actual_curve_dates = set(c.get("date") for c in curves)
+            whole_day_missing = expected_dates - actual_curve_dates
+            
+            # 2. 找出有数据但MP缺失的日期（在missing_mps名单里的）
+            mp_specific_missing = {} # mp_no -> set of dates
+            for mp_no in mp_list:
+                mp_specific_missing[mp_no] = set()
+
+            for curve in curves:
+                date = curve.get("date")
+                if date not in expected_dates:
+                    continue
+
+                mp_load = curve.get("mp_load")
+                
+                # 如果 mp_load 不存在或为空（说明当天完全没有MP数据，但因为有电表数据所以生成了curve）
+                if not mp_load:
+                    for mp_no in mp_list:
+                        mp_specific_missing[mp_no].add(date)
+                    continue
+
+                # 获取该日期明确缺失的计量点
+                missing_mps_raw = mp_load.get("missing_mps", [])
+                missing_mps = set(str(x) for x in missing_mps_raw)
+                    
+                for mp_no in mp_list:
+                    if str(mp_no) in missing_mps:
+                        mp_specific_missing[mp_no].add(date)
+            
+            # 生成缺失记录
+            for mp_no in mp_list:
+                # 总缺失 = 整天缺失 + 有记录但该MP缺失
+                all_missing_dates = whole_day_missing | mp_specific_missing[mp_no]
+                
+                if all_missing_dates:
+                    # 格式化日期列表
+                    sorted_dates = sorted(all_missing_dates)
+                    # 简化格式：月-日
+                    formatted_dates = ", ".join(d[5:] for d in sorted_dates)  # 去掉年份 YYYY-
+                    
+                    rows.append({
+                        "customer_name": customer_name,
+                        "mp_no": mp_no,
+                        "missing_dates": formatted_dates,
+                        "missing_count": len(all_missing_dates)
+                    })
+        
+        # 过滤掉没有缺失的记录（虽然上面逻辑已经保证了missing_dates才添加，但为了双重保险）
+        rows = [r for r in rows if r["missing_count"] > 0]
+        
+        # 按客户名称和缺失天数排序
+        rows.sort(key=lambda x: (x["customer_name"], -x["missing_count"], x["mp_no"]))
+        
+        # 生成Excel
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "计量点缺失明细"
+        
+        # 表头
+        headers = ["客户名称", "计量点号", "缺失日期", "缺失天数"]
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = Font(name='微软雅黑', size=12, bold=True, color='FFFFFF')
+            cell.fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+        
+        # 数据行
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        for row_idx, row_data in enumerate(rows, 2):
+            ws.cell(row=row_idx, column=1, value=row_data["customer_name"])
+            ws.cell(row=row_idx, column=2, value=row_data["mp_no"])
+            ws.cell(row=row_idx, column=3, value=row_data["missing_dates"])
+            ws.cell(row=row_idx, column=4, value=row_data["missing_count"])
+            
+            for col in range(1, 5):
+                cell = ws.cell(row=row_idx, column=col)
+                cell.font = Font(name='微软雅黑', size=10)
+                cell.border = thin_border
+                if col == 4:  # 缺失天数列右对齐
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
+        
+        # 设置列宽
+        ws.column_dimensions['A'].width = 30
+        ws.column_dimensions['B'].width = 20
+        ws.column_dimensions['C'].width = 80
+        ws.column_dimensions['D'].width = 12
+        
+        # 冻结首行
+        ws.freeze_panes = 'A2'
+        
+        # 添加筛选
+        ws.auto_filter.ref = f"A1:D{len(rows) + 1}"
+        
+        # 保存到内存
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        filename = f"计量点缺失明细_{today.strftime('%Y%m%d')}.xlsx"
+        encoded_filename = quote(filename)
+        
+        return StreamingResponse(
+            io.BytesIO(output.getvalue()),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
+        )
+        
+    except Exception as e:
+        logger.error(f"导出计量点缺失明细失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"导出失败: {str(e)}")

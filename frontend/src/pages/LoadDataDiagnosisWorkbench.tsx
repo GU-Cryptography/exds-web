@@ -49,7 +49,8 @@ interface CustomerDetail {
     quality: {
         gap_days: number;
         mp_incomplete_days: number;
-        avg_accuracy: number | null;
+        meter_incomplete_days: number;
+        max_error: number;
         total_days: number;
     };
     date_range: string | null;
@@ -62,13 +63,15 @@ interface CustomerDetail {
 
 interface CalendarDay {
     date: string;
-    // coverage: number; // 移除百分比字段
+    has_mp_data: boolean;
     has_meter_data: boolean;
-    daily_accuracy: number | null;
-    mp_missing: number;
+    daily_error: number | null;  // 误差百分比
+    mp_actual: number;
+    mp_expected: number;
     meter_actual: number;
     meter_expected: number;
-    missing_mps: string[];
+    missing_mps?: string[];
+    missing_meters?: string[];
 }
 
 interface CurveData {
@@ -84,7 +87,8 @@ interface TimelineData {
     date: string;
     has_mp: boolean;
     has_meter: boolean;
-    mp_missing: number;
+    mp_actual: number;
+    mp_expected: number;
 }
 
 export const LoadDataDiagnosisWorkbench: React.FC<Props> = ({ customerId }) => {
@@ -142,6 +146,37 @@ export const LoadDataDiagnosisWorkbench: React.FC<Props> = ({ customerId }) => {
         setAggregationOpen(true);
     };
 
+    // 导出计量点缺失数据
+    const handleExportMpMissing = async () => {
+        try {
+            setLoading(true);
+            const response = await apiClient.get('/api/v1/load-data/export/mp-missing', {
+                responseType: 'blob'
+            });
+
+            // 下载文件
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            const contentDisposition = response.headers['content-disposition'];
+            let filename = '计量点缺失明细.xlsx';
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename\*=UTF-8''(.+)/);
+                if (filenameMatch) {
+                    filename = decodeURIComponent(filenameMatch[1]);
+                }
+            }
+            link.setAttribute('download', filename);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        } catch (err: any) {
+            setError(err.response?.data?.detail || err.message || '导出失败');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     // 加载客户详情
     const fetchDetail = async () => {
         try {
@@ -165,10 +200,10 @@ export const LoadDataDiagnosisWorkbench: React.FC<Props> = ({ customerId }) => {
             const calendar = response.data.calendar || [];
             setTimelineData(calendar.map((d: CalendarDay) => ({
                 date: d.date,
-                has_mp: d.mp_missing < (detail?.stats?.mp_count || 0), // 如果缺失数小于总数，说明有数据
+                has_mp: d.has_mp_data,
                 has_meter: d.has_meter_data,
-                // mp_coverage: d.coverage // 移除
-                mp_missing: d.mp_missing
+                mp_actual: d.mp_actual,
+                mp_expected: d.mp_expected
             })));
         } catch (err) {
             console.error('加载时间线失败:', err);
@@ -232,25 +267,50 @@ export const LoadDataDiagnosisWorkbench: React.FC<Props> = ({ customerId }) => {
         setCurveDate(parseISO(day.date));
     };
 
-    // 获取日期状态颜色（优先按准确率着色）
+    /**
+     * 日历颜色规则（优先级从高到低）：
+     * 1. 无数据 → 灰色 #e0e0e0
+     * 2. 误差 > 2% → 红色 #f44336
+     * 3. 电表或计量点数量不全 → 橙色 #ff9800
+     * 4. 只有电表或只有计量点数据 → 黄色 #ffeb3b（浅黄）
+     * 5. 电表和计量点数据都完整 → 绿色 #4caf50
+     */
     const getDayColor = (dateStr: string): string => {
         const dayData = calendarData.find(d => d.date === dateStr);
-        if (!dayData) return '#e0e0e0'; // 灰色 - 无数据
 
-        // 优先检查准确率：低于95%显示红色
-        if (dayData.daily_accuracy !== null && dayData.daily_accuracy < 95) {
-            return '#f44336'; // 红色 - 准确率不达标
+        // 1. 无数据
+        if (!dayData) return '#e0e0e0';
+
+        const hasMpData = dayData.mp_actual > 0;
+        const hasMeterData = dayData.meter_actual > 0;
+
+        // 没有任何数据也是灰色
+        if (!hasMpData && !hasMeterData) return '#e0e0e0';
+
+        // 2. 误差超过2%（需要同时有两种数据才能计算误差）
+        if (dayData.daily_error !== null && Math.abs(dayData.daily_error) > 2) {
+            return '#f44336'; // 红色
         }
 
-        // 然后按数据完整度着色
-        const totalMp = detail?.stats?.mp_count || 0;
-        const mpActual = Math.max(0, totalMp - dayData.mp_missing);
-        const isMpComplete = totalMp > 0 && mpActual === totalMp;
-        const hasMpData = mpActual > 0;
+        const isMpComplete = dayData.mp_expected > 0 && dayData.mp_actual === dayData.mp_expected;
+        const isMeterComplete = dayData.meter_expected > 0 && dayData.meter_actual === dayData.meter_expected;
 
-        if (isMpComplete && dayData.has_meter_data) return '#4caf50'; // 绿色 - 完整
-        if (hasMpData || dayData.has_meter_data) return '#ff9800'; // 橙色 - 部分
-        return '#f44336'; // 红色 - 缺失 (如果有天但没数据)
+        // 3. 电表或计量点数量不全
+        const mpIncomplete = hasMpData && !isMpComplete;
+        const meterIncomplete = hasMeterData && !isMeterComplete;
+        if (mpIncomplete || meterIncomplete) {
+            return '#ff9800'; // 橙色
+        }
+
+        // 4. 只有电表或只有计量点数据（另一种期望有但没有）
+        const expectMp = dayData.mp_expected > 0;
+        const expectMeter = dayData.meter_expected > 0;
+        if ((expectMp && !hasMpData) || (expectMeter && !hasMeterData)) {
+            return '#29b6f6'; // 浅蓝色 - 缺少一种数据源
+        }
+
+        // 5. 都有且完整
+        return '#4caf50'; // 绿色
     };
 
     // 渲染时间线
@@ -265,15 +325,15 @@ export const LoadDataDiagnosisWorkbench: React.FC<Props> = ({ customerId }) => {
             <Box>
                 {/* MP 时间线 */}
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
-                    <Typography variant="caption" sx={{ width: 50, flexShrink: 0 }}>MP</Typography>
+                    <Typography variant="caption" sx={{ width: 50, flexShrink: 0 }}>计量点</Typography>
                     <Box sx={{ display: 'flex', flex: 1, height: 16, borderRadius: 1, overflow: 'hidden' }}>
                         {timelineData.map((d, i) => (
-                            <Tooltip key={d.date} title={`${d.date}: ${d.has_mp ? `计量点 ${Math.max(0, (detail?.stats?.mp_count || 0) - d.mp_missing)}/${detail?.stats?.mp_count || 0}` : '无数据'}`}>
+                            <Tooltip key={d.date} title={`${d.date}: ${d.has_mp ? `计量点 ${d.mp_actual}/${d.mp_expected}` : '无数据'}`}>
                                 <Box
                                     sx={{
                                         flex: 1,
                                         backgroundColor: d.has_mp
-                                            ? (d.mp_missing === 0 ? '#4caf50' : '#ff9800')
+                                            ? (d.mp_actual === d.mp_expected ? '#4caf50' : '#ff9800')
                                             : '#e0e0e0',
                                         cursor: 'pointer',
                                         '&:hover': { opacity: 0.8 }
@@ -286,7 +346,7 @@ export const LoadDataDiagnosisWorkbench: React.FC<Props> = ({ customerId }) => {
                 </Box>
                 {/* Meter 时间线 */}
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <Typography variant="caption" sx={{ width: 50, flexShrink: 0 }}>Meter</Typography>
+                    <Typography variant="caption" sx={{ width: 50, flexShrink: 0 }}>电表</Typography>
                     <Box sx={{ display: 'flex', flex: 1, height: 16, borderRadius: 1, overflow: 'hidden' }}>
                         {timelineData.map((d, i) => (
                             <Tooltip key={d.date} title={`${d.date}: ${d.has_meter ? '有数据' : '无数据'}`}>
@@ -363,17 +423,27 @@ export const LoadDataDiagnosisWorkbench: React.FC<Props> = ({ customerId }) => {
                                         <Box>
                                             <Typography variant="caption" display="block" fontWeight="bold">{dateStr}</Typography>
                                             <Typography variant="caption" display="block">
-                                                计量点: {Math.max(0, (detail?.stats?.mp_count || 0) - dayData.mp_missing)}/{detail?.stats?.mp_count || 0}
+                                                计量点: {dayData.mp_actual}/{dayData.mp_expected}
+                                                {dayData.missing_mps && dayData.missing_mps.length > 0 && (
+                                                    <span style={{ color: '#ff9800', display: 'block', fontSize: '0.7rem' }}>
+                                                        缺失: {dayData.missing_mps.join(', ')}
+                                                    </span>
+                                                )}
                                             </Typography>
                                             <Typography variant="caption" display="block">
                                                 电表: {dayData.meter_actual}/{dayData.meter_expected}
+                                                {dayData.missing_meters && dayData.missing_meters.length > 0 && (
+                                                    <span style={{ color: '#ff9800', display: 'block', fontSize: '0.7rem' }}>
+                                                        缺失: {dayData.missing_meters.join(', ')}
+                                                    </span>
+                                                )}
                                             </Typography>
                                             <Typography
                                                 variant="caption"
                                                 display="block"
-                                                sx={{ color: dayData.daily_accuracy !== null && dayData.daily_accuracy < 95 ? '#ff6b6b' : 'inherit' }}
+                                                sx={{ color: dayData.daily_error !== null && Math.abs(dayData.daily_error) > 5 ? '#ff6b6b' : 'inherit' }}
                                             >
-                                                准确率: {dayData.daily_accuracy !== null ? `${dayData.daily_accuracy}%` : '-'}
+                                                误差: {dayData.daily_error !== null ? `${dayData.daily_error.toFixed(1)}%` : '-'}
                                             </Typography>
                                         </Box>
                                     ) : `${dateStr}: 无数据`
@@ -506,23 +576,29 @@ export const LoadDataDiagnosisWorkbench: React.FC<Props> = ({ customerId }) => {
                         <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
                             <Chip
                                 size="small"
-                                label={`断点: ${detail.quality.gap_days}天`}
+                                label={`无数据: ${detail.quality.gap_days}天`}
                                 color={detail.quality.gap_days > 0 ? 'error' : 'success'}
                             />
                             <Chip
                                 size="small"
-                                label={`MP异常: ${detail.quality.mp_incomplete_days}天`}
+                                label={`计量点缺失: ${detail.quality.mp_incomplete_days}天`}
                                 color={detail.quality.mp_incomplete_days > 0 ? 'warning' : 'success'}
                             />
                             <Chip
                                 size="small"
-                                label={`准确率: ${detail.quality.avg_accuracy ?? '-'}%`}
-                                color={detail.quality.avg_accuracy && detail.quality.avg_accuracy >= 95 ? 'success' : 'warning'}
+                                label={`电表缺失: ${detail.quality.meter_incomplete_days}天`}
+                                color={detail.quality.meter_incomplete_days > 0 ? 'warning' : 'success'}
+                            />
+                            <Chip
+                                size="small"
+                                label={`误差: ${detail.quality.max_error}%`}
+                                color={detail.quality.max_error > 2 ? 'warning' : 'success'}
                             />
                         </Box>
 
                         {/* 操作按钮 */}
                         <Box sx={{ display: 'flex', gap: 1 }}>
+
                             <Button variant="outlined" size="small" startIcon={<TuneIcon />} onClick={() => setCalibrationOpen(true)}>
                                 系数校核
                             </Button>
@@ -567,12 +643,16 @@ export const LoadDataDiagnosisWorkbench: React.FC<Props> = ({ customerId }) => {
                                                 <Typography variant="caption">完整</Typography>
                                             </Box>
                                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                                <Box sx={{ width: 12, height: 12, backgroundColor: '#29b6f6', borderRadius: 0.5 }} />
+                                                <Typography variant="caption">单源</Typography>
+                                            </Box>
+                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                                 <Box sx={{ width: 12, height: 12, backgroundColor: '#ff9800', borderRadius: 0.5 }} />
-                                                <Typography variant="caption">部分</Typography>
+                                                <Typography variant="caption">不全</Typography>
                                             </Box>
                                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                                 <Box sx={{ width: 12, height: 12, backgroundColor: '#f44336', borderRadius: 0.5 }} />
-                                                <Typography variant="caption">缺失</Typography>
+                                                <Typography variant="caption">误差&gt;2%</Typography>
                                             </Box>
                                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                                 <Box sx={{ width: 12, height: 12, backgroundColor: '#e0e0e0', borderRadius: 0.5 }} />
@@ -589,8 +669,7 @@ export const LoadDataDiagnosisWorkbench: React.FC<Props> = ({ customerId }) => {
                                                     </Typography>
                                                     <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mt: 0.5 }}>
                                                         <Typography variant="caption" color="text.secondary">
-                                                            计量点数据: {Math.max(0, (detail?.stats?.mp_count || 0) - selectedCalendarDay.mp_missing)}/{detail?.stats?.mp_count || 0}
-                                                            {selectedCalendarDay.mp_missing > 0 && ` (缺${selectedCalendarDay.mp_missing})`}
+                                                            计量点数据: {selectedCalendarDay.mp_actual}/{selectedCalendarDay.mp_expected}
                                                         </Typography>
                                                         <Typography variant="caption" color="text.secondary">
                                                             电表数据: {selectedCalendarDay.meter_actual}/{selectedCalendarDay.meter_expected}
@@ -599,9 +678,9 @@ export const LoadDataDiagnosisWorkbench: React.FC<Props> = ({ customerId }) => {
                                                     <Typography
                                                         variant="caption"
                                                         display="block"
-                                                        sx={{ mt: 0.5, color: selectedCalendarDay.daily_accuracy !== null && selectedCalendarDay.daily_accuracy < 95 ? 'error.main' : 'text.secondary' }}
+                                                        sx={{ mt: 0.5, color: selectedCalendarDay.daily_error !== null && Math.abs(selectedCalendarDay.daily_error) > 5 ? 'error.main' : 'text.secondary' }}
                                                     >
-                                                        准确率: {selectedCalendarDay.daily_accuracy !== null ? `${selectedCalendarDay.daily_accuracy}%` : '-'}
+                                                        误差: {selectedCalendarDay.daily_error !== null ? `${selectedCalendarDay.daily_error.toFixed(1)}%` : '-'}
                                                     </Typography>
                                                 </Box>
                                             ) : (
@@ -703,7 +782,9 @@ export const LoadDataDiagnosisWorkbench: React.FC<Props> = ({ customerId }) => {
                     open={calibrationOpen}
                     onClose={() => setCalibrationOpen(false)}
                     customerId={customerId}
-                    customerName={detail.customer_name}
+                    customerName={detail?.customer_name}
+                    startDate={curveDate}
+                    endDate={curveDate}
                     onSuccess={() => {
                         fetchDetail();
                         fetchTimeline();

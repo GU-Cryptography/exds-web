@@ -198,12 +198,13 @@ class MpDataImportService:
             return [], errors
     
     @staticmethod
-    def import_records(records: List[Dict]) -> Dict:
+    def import_records(records: List[Dict], overwrite: bool = False) -> Dict:
         """
         将记录导入数据库
         
         Args:
             records: 数据记录列表
+            overwrite: 是否覆盖已存在记录
         
         Returns:
             导入结果
@@ -225,12 +226,16 @@ class MpDataImportService:
                 })
                 
                 if existing:
-                    # 更新
-                    RAW_MP_DATA.update_one(
-                        {"mp_id": mp_id, "date": date},
-                        {"$set": record}
-                    )
-                    updated += 1
+                    if overwrite:
+                        # 更新
+                        RAW_MP_DATA.update_one(
+                            {"mp_id": mp_id, "date": date},
+                            {"$set": record}
+                        )
+                        updated += 1
+                    else:
+                        # 跳过
+                        skipped += 1
                 else:
                     # 新插入
                     RAW_MP_DATA.insert_one(record)
@@ -249,13 +254,14 @@ class MpDataImportService:
         }
     
     @staticmethod
-    def import_excel_file(file_content: bytes, filename: str) -> Dict:
+    def import_excel_file(file_content: bytes, filename: str, overwrite: bool = False) -> Dict:
         """
         导入 Excel 文件的完整流程
         
         Args:
             file_content: Excel 文件二进制内容
             filename: 文件名
+            overwrite: 是否覆盖
         
         Returns:
             导入结果
@@ -276,11 +282,17 @@ class MpDataImportService:
             }
         
         # 导入记录
-        result = MpDataImportService.import_records(records)
+        result = MpDataImportService.import_records(records, overwrite)
         result["parse_errors"] = parse_errors
         result["success"] = True
         result["total_records"] = len(records)
-        result["message"] = f"成功导入 {result['inserted']} 条，更新 {result['updated']} 条"
+        
+        msg_parts = []
+        if result['inserted'] > 0: msg_parts.append(f"新增 {result['inserted']} 条")
+        if result['updated'] > 0: msg_parts.append(f"更新 {result['updated']} 条")
+        if result['skipped'] > 0: msg_parts.append(f"跳过 {result['skipped']} 条")
+        
+        result["message"] = "，".join(msg_parts) if msg_parts else "未导入任何数据"
         
         return result
 
