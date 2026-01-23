@@ -443,6 +443,159 @@ class LoadQueryService:
         docs = list(UNIFIED_LOAD_CURVE.aggregate(pipeline))
         return [MonthlyTotal(**d) for d in docs]
 
+    @staticmethod
+    def batch_get_curve_series(
+        customer_ids: List[str], 
+        start_date: str, 
+        end_date: str, 
+        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY
+    ) -> Dict[str, List[DailyCurve]]:
+        """
+        批量获取多个客户的负荷曲线数据
+        返回: Dict[customer_id, List[DailyCurve]]
+        """
+        if not customer_ids:
+            return {}
+
+        pipeline = [
+            {"$match": {
+                "customer_id": {"$in": customer_ids},
+                "date": {"$gte": start_date, "$lte": end_date}
+            }},
+            {"$sort": {"date": 1}},
+            {"$project": {
+                "customer_id": 1,
+                "date": 1,
+                "effective": LoadQueryService._get_fusion_expression(strategy)
+            }},
+            {"$match": {"effective": {"$ne": None}}},
+            {"$project": {
+                "customer_id": 1,
+                "date": 1,
+                "values": "$effective.values",
+                "total": "$effective.total"
+            }}
+        ]
+        
+        docs = list(UNIFIED_LOAD_CURVE.aggregate(pipeline))
+        
+        result = {cid: [] for cid in customer_ids}
+        for d in docs:
+            cid = d.get("customer_id")
+            if cid in result:
+                result[cid].append(DailyCurve(
+                    date=d["date"],
+                    values=d["values"],
+                    total=d["total"]
+                ))
+        return result
+
+    @staticmethod
+    def batch_get_daily_totals(
+        customer_ids: List[str], 
+        start_date: str, 
+        end_date: str, 
+        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY
+    ) -> Dict[str, List[DailyTotal]]:
+        """
+        批量获取多个客户的日电量数据
+        返回: Dict[customer_id, List[DailyTotal]]
+        """
+        if not customer_ids:
+            return {}
+
+        pipeline = [
+            {"$match": {
+                "customer_id": {"$in": customer_ids},
+                "date": {"$gte": start_date, "$lte": end_date}
+            }},
+            {"$sort": {"date": 1}},
+            {"$project": {
+                "customer_id": 1,
+                "date": 1,
+                "effective": LoadQueryService._get_fusion_expression(strategy)
+            }},
+            {"$match": {"effective": {"$ne": None}}},
+            {"$project": {
+                "customer_id": 1,
+                "date": 1,
+                "total": "$effective.total"
+            }}
+        ]
+        
+        docs = list(UNIFIED_LOAD_CURVE.aggregate(pipeline))
+        
+        result = {cid: [] for cid in customer_ids}
+        for d in docs:
+            cid = d.get("customer_id")
+            if cid in result:
+                result[cid].append(DailyTotal(
+                    date=d["date"], 
+                    total=d["total"]
+                ))
+        return result
+
+    @staticmethod
+    def batch_get_monthly_totals(
+        customer_ids: List[str], 
+        start_month: str, 
+        end_month: str, 
+        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY
+    ) -> Dict[str, List[MonthlyTotal]]:
+        """
+        批量获取多个客户的月电量数据
+        返回: Dict[customer_id, List[MonthlyTotal]]
+        """
+        if not customer_ids:
+            return {}
+
+        # 构造日期范围
+        try:
+            sy, sm = map(int, start_month.split("-"))
+            ey, em = map(int, end_month.split("-"))
+            s_date = f"{sy:04d}-{sm:02d}-01"
+            if em == 12:
+                e_date = f"{ey+1:04d}-01-01"
+            else:
+                e_date = f"{ey:04d}-{em+1:02d}-01"
+        except:
+            return {}
+
+        pipeline = [
+            {"$match": {
+                "customer_id": {"$in": customer_ids},
+                "date": {"$gte": s_date, "$lt": e_date}
+            }},
+            {"$project": {
+                "customer_id": 1,
+                "month": {"$substr": ["$date", 0, 7]}, # YYYY-MM
+                "effective": LoadQueryService._get_fusion_expression(strategy)
+            }},
+            {"$match": {"effective": {"$ne": None}}},
+            {"$group": {
+                "_id": {"customer_id": "$customer_id", "month": "$month"},
+                "total": {"$sum": "$effective.total"},
+                "days_count": {"$sum": 1}
+            }},
+            {"$sort": {"_id.month": 1}},
+            {"$project": {
+                "customer_id": "$_id.customer_id",
+                "month": "$_id.month",
+                "total": 1,
+                "days_count": 1,
+                "_id": 0
+            }}
+        ]
+        
+        docs = list(UNIFIED_LOAD_CURVE.aggregate(pipeline))
+        
+        result = {cid: [] for cid in customer_ids}
+        for d in docs:
+            cid = d.get("customer_id")
+            if cid in result:
+                result[cid].append(MonthlyTotal(**d))
+        return result
+
     # =========================================================================
     # 3. 签约客户快捷接口
     # =========================================================================
