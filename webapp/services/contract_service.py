@@ -623,3 +623,46 @@ class ContractService:
         
         return customer_ids
 
+    def get_signed_customers_in_range(self, start_date: datetime, end_date: datetime) -> List[Dict[str, str]]:
+        """
+        获取指定时间范围内有有效合同的客户列表（包含ID和名称）
+        
+        Args:
+            start_date: 查询范围开始时间
+            end_date: 查询范围结束时间
+            
+        Returns:
+            客户列表 [{"customer_id": str, "customer_name": str}, ...]
+        """
+        # 确保时间类型正确
+        if isinstance(start_date, str):
+            try:
+                start_date = datetime.strptime(start_date, "%Y-%m-%d")
+            except ValueError:
+                start_date = datetime.strptime(start_date, "%Y-%m")
+                
+        if isinstance(end_date, str):
+            try:
+                end_date = datetime.strptime(end_date, "%Y-%m-%d")
+            except ValueError:
+                end_date = datetime.strptime(end_date, "%Y-%m")
+
+        # 查询条件：合同有效期与查询范围有重叠
+        query = {
+            "purchase_start_month": {"$lte": end_date},
+            "purchase_end_month": {"$gte": start_date}
+        }
+        
+        cursor = self.collection.find(query, {"customer_id": 1, "customer_name": 1})
+        
+        # 去重
+        customer_map = {}
+        for doc in cursor:
+            cid = str(doc.get("customer_id", ""))
+            if cid and cid not in customer_map:
+                customer_map[cid] = {
+                    "customer_id": cid,
+                    "customer_name": doc.get("customer_name", "未知")
+                }
+        
+        return list(customer_map.values())

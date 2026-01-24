@@ -12,7 +12,9 @@ import {
     ToggleButton,
     ToggleButtonGroup,
     Tooltip,
-    Snackbar
+    Snackbar,
+    Divider,
+    Stack
 } from '@mui/material';
 import {
     ArrowLeft as ArrowLeftIcon,
@@ -573,28 +575,37 @@ export const LoadDataDiagnosisWorkbench: React.FC<Props> = ({ customerId }) => {
                         </Box>
 
                         {/* 质量指标 */}
-                        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                            <Chip
-                                size="small"
-                                label={`无数据: ${detail.quality.gap_days}天`}
-                                color={detail.quality.gap_days > 0 ? 'error' : 'success'}
-                            />
-                            <Chip
-                                size="small"
-                                label={`计量点缺失: ${detail.quality.mp_incomplete_days}天`}
-                                color={detail.quality.mp_incomplete_days > 0 ? 'warning' : 'success'}
-                            />
-                            <Chip
-                                size="small"
-                                label={`电表缺失: ${detail.quality.meter_incomplete_days}天`}
-                                color={detail.quality.meter_incomplete_days > 0 ? 'warning' : 'success'}
-                            />
-                            <Chip
-                                size="small"
-                                label={`误差: ${detail.quality.max_error}%`}
-                                color={detail.quality.max_error > 2 ? 'warning' : 'success'}
-                            />
-                        </Box>
+                        <Paper variant="outlined" sx={{ px: 3, py: 1.5, bgcolor: 'action.hover', borderRadius: 2 }}>
+                            <Stack direction="row" spacing={3} alignItems="center" divider={<Divider orientation="vertical" flexItem variant="middle" />}>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                    <Typography variant="caption" color="text.secondary">无数据</Typography>
+                                    <Typography variant="body1" fontWeight="bold" color={detail.quality.gap_days > 0 ? 'error.main' : 'success.main'}>
+                                        {detail.quality.gap_days} 天
+                                    </Typography>
+                                </Box>
+
+                                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                    <Typography variant="caption" color="text.secondary">计量点缺失</Typography>
+                                    <Typography variant="body1" fontWeight="bold" color={detail.quality.mp_incomplete_days > 0 ? 'warning.main' : 'success.main'}>
+                                        {detail.quality.mp_incomplete_days} 天
+                                    </Typography>
+                                </Box>
+
+                                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                    <Typography variant="caption" color="text.secondary">电表缺失</Typography>
+                                    <Typography variant="body1" fontWeight="bold" color={detail.quality.meter_incomplete_days > 0 ? 'warning.main' : 'success.main'}>
+                                        {detail.quality.meter_incomplete_days} 天
+                                    </Typography>
+                                </Box>
+
+                                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                    <Typography variant="caption" color="text.secondary">最大误差</Typography>
+                                    <Typography variant="body1" fontWeight="bold" color={detail.quality.max_error > 2 ? 'warning.main' : 'success.main'}>
+                                        {detail.quality.max_error}%
+                                    </Typography>
+                                </Box>
+                            </Stack>
+                        </Paper>
 
                         {/* 操作按钮 */}
                         <Box sx={{ display: 'flex', gap: 1 }}>

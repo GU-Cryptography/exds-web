@@ -70,7 +70,7 @@ type Order = 'asc' | 'desc';
 // 可排序的列
 type SortableColumn = 'customer_name' | 'start_date' | 'end_date' | 'total_days' | 'breakpoint_days' | 'mp_incomplete' | 'meter_incomplete' | 'max_error';
 
-export const LoadDataCalibrationPage: React.FC = () => {
+export const LoadDataDiagnosisPage: React.FC = () => {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const { addTab } = useTabContext();
@@ -131,7 +131,10 @@ export const LoadDataCalibrationPage: React.FC = () => {
 
                 if (savedResults && savedSummary) {
                     setDiagnosisResults(JSON.parse(savedResults));
-                    setSummary(JSON.parse(savedSummary));
+                    const parsedSummary = JSON.parse(savedSummary);
+                    // 确保总数与最新获取的客户列表一致
+                    parsedSummary.total_customers = response.data.total || (response.data.customers || []).length;
+                    setSummary(parsedSummary);
                 } else {
                     // 初始化空的诊断结果
                     setDiagnosisResults([]);
@@ -780,4 +783,4 @@ export const LoadDataCalibrationPage: React.FC = () => {
     );
 };
 
-export default LoadDataCalibrationPage;
+export default LoadDataDiagnosisPage;

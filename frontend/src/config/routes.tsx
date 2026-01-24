@@ -14,7 +14,7 @@ import { ContractPriceTrendPage } from '../pages/ContractPriceTrendPage';
 import { RpaMonitorPage } from '../pages/RpaMonitorPage';
 import { DayAheadPriceForecastPage } from '../pages/DayAheadPriceForecastPage';
 import { WeatherDataPage } from '../pages/WeatherDataPage';
-import { LoadDataCalibrationPage } from '../pages/LoadDataCalibrationPage';
+import { LoadDataDiagnosisPage } from '../pages/LoadDataDiagnosisPage';
 
 // 路由配置接口
 export interface RouteConfig {
@@ -73,7 +73,7 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/basic-data/tou-definition', title: '时段电价分布', component: TouRulesPage },
     { path: '/basic-data/weather-data', title: '天气预测数据', component: WeatherDataPage },
     { path: '/basic-data/retail-packages', title: '零售套餐管理', component: RetailPackagePage },
-    { path: '/basic-data/load-validation', title: '负荷数据诊断', component: LoadDataCalibrationPage },
+    { path: '/basic-data/load-validation', title: '负荷数据诊断', component: LoadDataDiagnosisPage },
 
     // 系统管理
     { path: '/system-settings/user-permissions', title: '用户与权限', component: PlaceholderPage },

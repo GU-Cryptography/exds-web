@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from bson import ObjectId
 from webapp.tools.mongo import DATABASE
+from webapp.services.contract_service import ContractService
 
 logger = logging.getLogger(__name__)
 
@@ -25,30 +26,17 @@ class DiagnosisService:
     @staticmethod
     def get_signed_customers() -> List[Dict]:
         """
-        获取所有当前签约客户列表
+        获取本年度所有签约客户列表（无论当前是否在有效期内）
         
         Returns:
             客户列表 [{"customer_id": str, "customer_name": str}, ...]
         """
         today = datetime.now()
+        start_date = datetime(today.year, 1, 1)
+        end_date = datetime(today.year, 12, 31, 23, 59, 59)
         
-        # 查询当前有效的合同
-        contracts = list(RETAIL_CONTRACTS.find({
-            "purchase_start_month": {"$lte": today},
-            "purchase_end_month": {"$gte": today}
-        }, {"customer_id": 1, "customer_name": 1}))
-        
-        # 去重
-        customer_map = {}
-        for c in contracts:
-            cid = str(c.get("customer_id", ""))
-            if cid and cid not in customer_map:
-                customer_map[cid] = {
-                    "customer_id": cid,
-                    "customer_name": c.get("customer_name", "未知")
-                }
-        
-        return list(customer_map.values())
+        contract_service = ContractService(DATABASE)
+        return contract_service.get_signed_customers_in_range(start_date, end_date)
     
     @staticmethod
     def diagnose_customer(customer_id: str) -> Dict:
