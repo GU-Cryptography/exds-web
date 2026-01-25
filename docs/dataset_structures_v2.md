@@ -241,6 +241,12 @@
 | `total` | `Number` | 日总电量 (MWh, **保留4位小数**) |
 | `mp_count` | `Integer` | 实际参与聚合的计量点数量 |
 | `missing_mps` | `Array[String]` | 缺失的计量点编号 |
+| `tou_usage` | `Object` | **预计算时段电量** (MWh, 分时电价统计) |
+| `tou_usage.tip` | `Number` | 尖峰电量 |
+| `tou_usage.peak` | `Number` | 高峰电量 |
+| `tou_usage.flat` | `Number` | 平段电量 |
+| `tou_usage.valley` | `Number` | 低谷电量 |
+| `tou_usage.deep` | `Number` | 深谷电量 |
 
 #### `meter_load` 子对象结构
 
@@ -250,6 +256,12 @@
 | `total` | `Number` | 日总电量 (MWh, **保留4位小数**) |
 | `meter_count` | `Integer` | 实际参与聚合的电表数量 |
 | `missing_meters` | `Array[String]` | 缺失的电表资产编号 |
+| `tou_usage` | `Object` | **预计算时段电量** (MWh, 分时电价统计) |
+| `tou_usage.tip` | `Number` | 尖峰电量 |
+| `tou_usage.peak` | `Number` | 高峰电量 |
+| `tou_usage.flat` | `Number` | 平段电量 |
+| `tou_usage.valley` | `Number` | 低谷电量 |
+| `tou_usage.deep` | `Number` | 深谷电量 |
 | `data_quality` | `Object` | 数据质量标记（可选） |
 | `data_quality.interpolated_points` | `Array[Number]` | 被插值的时段索引 (0-47) |
 | `data_quality.dirty_points` | `Array[Number]` | 脏数据时段索引（无法处理） |

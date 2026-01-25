@@ -75,6 +75,9 @@ app.include_router(v1.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(v1_forecast_base_data.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(v1_rpa_monitor.router, prefix="/api/v1/rpa", tags=["RPA监控"])
 
+from webapp.api import v1_customer_analysis
+app.include_router(v1_customer_analysis.router, prefix="/api/v1/customer-analysis", tags=["Customer Analysis"])
+
 
 
 @app.get("/", tags=["Root"], summary="应用根路径")

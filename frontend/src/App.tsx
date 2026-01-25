@@ -5,6 +5,7 @@ import {
     Routes,
     Route,
 } from 'react-router-dom';
+import { CustomerLoadAnalysisPage } from './pages/CustomerLoadAnalysisPage';
 import {
     CssBaseline,
     useMediaQuery,
@@ -64,7 +65,7 @@ const ResponsiveLayout: React.FC = () => {
                     <Route path="customer/retail-contracts/create" element={<RetailContractPage />} />
                     <Route path="customer/retail-contracts/view/:contractId" element={<RetailContractPage />} />
                     <Route path="customer/retail-contracts/edit/:contractId" element={<RetailContractPage />} />
-                    <Route path="customer/load-analysis" element={<LoadAnalysisPage />} />
+                    <Route path="customer/load-analysis" element={<CustomerLoadAnalysisPage />} />
                     <Route path="customer/cluster-analysis" element={<PlaceholderPage />} />
 
                     {/* 负荷预测 */}

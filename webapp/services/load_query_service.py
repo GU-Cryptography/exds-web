@@ -256,7 +256,7 @@ class LoadQueryService:
             {"$sort": {"_id": 1}},
             {"$project": {
                 "month": "$_id",
-                "total": 1,
+                "total": {"$round": ["$total", 2]},
                 "days_count": 1,
                 "_id": 0
             }}
@@ -581,7 +581,7 @@ class LoadQueryService:
             {"$project": {
                 "customer_id": "$_id.customer_id",
                 "month": "$_id.month",
-                "total": 1,
+                "total": {"$round": ["$total", 2]},
                 "days_count": 1,
                 "_id": 0
             }}

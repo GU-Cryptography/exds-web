@@ -187,31 +187,47 @@ class CustomerService:
                         {
                             "$match": {
                                 "$expr": {
-                                    "$and": [
-                                        {"$eq": ["$customer_id", "$$cid_str"]},
-                                        {"$gte": ["$purchase_start_month", start_of_year]},
-                                        {"$lte": ["$purchase_start_month", end_of_year]}
-                                    ]
+                                    "$eq": ["$customer_id", "$$cid_str"]
                                 }
                             }
                         },
                         {
                             "$group": {
                                 "_id": None,
-                                "total_quantity": {"$sum": "$purchasing_electricity_quantity"}
+                                "total_quantity": {
+                                    "$sum": {
+                                        "$cond": [
+                                            {
+                                                "$and": [
+                                                    {"$gte": ["$purchase_start_month", start_of_year]},
+                                                    {"$lte": ["$purchase_start_month", end_of_year]}
+                                                ]
+                                            },
+                                            "$purchasing_electricity_quantity",
+                                            0
+                                        ]
+                                    }
+                                },
+                                "min_start_month": {"$min": "$purchase_start_month"}
                             }
                         }
                     ],
                     "as": "contract_stats"
                 }
             },
-            # 提取计算结果并转换单位
+            # 提取计算结果并转换单位 (kWh -> 万kWh)
             {
                 "$addFields": {
+                    "contract_stat_obj": {"$arrayElemAt": ["$contract_stats", 0]},
                     "current_year_contract_amount": {
-                        "$divide": [
-                            {"$ifNull": [{"$arrayElemAt": ["$contract_stats.total_quantity", 0]}, 0]},
-                            10000
+                        "$round": [
+                            {
+                                "$divide": [
+                                    {"$ifNull": [{"$arrayElemAt": ["$contract_stats.total_quantity", 0]}, 0]},
+                                    10000
+                                ]
+                            },
+                            2
                         ]
                     }
                 }
@@ -219,12 +235,9 @@ class CustomerService:
         ]
 
         # 添加排序阶段
-        allowed_sort_fields = ["created_at", "user_name", "short_name", "location", "current_year_contract_amount"]
-        if sort_field not in allowed_sort_fields:
-            sort_field = "created_at"
-        
+        # 默认按本年度签约电量大小由大到小排序
         skip = (page - 1) * page_size
-        pipeline.append({"$sort": {sort_field: direction}})
+        pipeline.append({"$sort": {"current_year_contract_amount": -1, "created_at": -1}})
         pipeline.append({"$skip": skip})
         pipeline.append({"$limit": page_size})
 
@@ -1218,6 +1231,91 @@ class CustomerService:
                 pass
                 
         return {"created": created_count, "updated": updated_count}
+
+    def add_tag(self, customer_id: str, tag_data: Dict[str, Any], operator: str) -> Dict[str, Any]:
+        """
+        添加客户标签
+        
+        Args:
+            customer_id: 客户ID
+            tag_data: 标签数据 {name, source, expire, reason}
+            operator: 操作人
+            
+        Returns:
+            更新后的客户信息
+        """
+        if not ObjectId.is_valid(customer_id):
+            raise ValueError("无效的客户ID")
+
+        # 校验必填字段
+        if not tag_data.get("name"):
+            raise ValueError("标签名称不能为空")
+        if not tag_data.get("source"):
+            tag_data["source"] = "MANUAL"
+
+        # 检查客户是否存在
+        customer = self.collection.find_one({"_id": ObjectId(customer_id)})
+        if not customer:
+            raise ValueError("客户不存在")
+            
+        # 检查标签是否已存在 (同名标签需更新而非重复添加)
+        tags = customer.get("tags", [])
+        tag_name = tag_data["name"]
+        
+        # 如果存在同名标签，先移除
+        tags = [t for t in tags if t.get("name") != tag_name]
+        
+        # 添加新标签
+        tags.append(tag_data)
+        
+        result = self.collection.update_one(
+            {"_id": ObjectId(customer_id)},
+            {
+                "$set": {
+                    "tags": tags,
+                    "updated_at": datetime.utcnow(),
+                    "updated_by": operator
+                }
+            }
+        )
+        
+        if result.matched_count == 0:
+             raise ValueError("客户不存在")
+             
+        updated_customer = self.collection.find_one({"_id": ObjectId(customer_id)})
+        return self._convert_to_dict(updated_customer)
+
+    def remove_tag(self, customer_id: str, tag_name: str, operator: str) -> Dict[str, Any]:
+        """
+        移除客户标签
+        
+        Args:
+            customer_id: 客户ID
+            tag_name: 标签名称
+            operator: 操作人
+            
+        Returns:
+            更新后的客户信息
+        """
+        if not ObjectId.is_valid(customer_id):
+            raise ValueError("无效的客户ID")
+            
+        result = self.collection.update_one(
+            {"_id": ObjectId(customer_id)},
+            {
+                "$pull": {"tags": {"name": tag_name}},
+                "$set": {
+                    "updated_at": datetime.utcnow(),
+                    "updated_by": operator
+                }
+            }
+        )
+        
+        if result.matched_count == 0:
+            raise ValueError("客户不存在")
+            
+        updated_customer = self.collection.find_one({"_id": ObjectId(customer_id)})
+        return self._convert_to_dict(updated_customer)
 
     # ==================== 辅助方法 ====================
 

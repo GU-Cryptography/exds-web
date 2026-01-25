@@ -10,6 +10,7 @@ from typing import List, Dict, Optional, Tuple
 from bson import ObjectId
 
 from webapp.tools.mongo import DATABASE
+from webapp.services.tou_service import get_tou_rule_by_date
 
 logger = logging.getLogger(__name__)
 
@@ -207,17 +208,63 @@ class LoadAggregationService:
             # 计算日总电量
             total = sum(aggregated_values)
             
-            # 计算覆盖率
+            # 分时电量统计
+            tou_usage = LoadAggregationService.calculate_tou_distribution(aggregated_values, date)
             
             return {
                 "values": [round(v, 3) for v in aggregated_values],
                 "total": round(total, 3),
+                "tou_usage": tou_usage,
                 "mp_count": len(found_mps),
                 "missing_mps": sorted(list(missing_mps))
             }
         except Exception as e:
             logger.error(f"聚合计量点数据失败 customer={customer_id} date={date}: {e}")
             return None
+
+    @staticmethod
+    def calculate_tou_distribution(values: List[float], date_str: str) -> Dict[str, float]:
+        """
+        根据 48 点负荷曲线和当日分时规则，计算各类电量 (tip, peak, flat, valley, deep)
+        每个点代表 30 分钟。
+        """
+        if not values or len(values) != 48:
+            return {"tip": 0.0, "peak": 0.0, "flat": 0.0, "valley": 0.0, "deep": 0.0}
+
+        try:
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+            tou_map = get_tou_rule_by_date(date_obj) # 96个点 00:00, 00:15 ...
+            
+            # 构造 96 个时间点序列用于索引
+            keys_96 = []
+            for h in range(24):
+                for m in [0, 15, 30, 45]:
+                    keys_96.append(f"{h:02d}:{m:02d}")
+            
+            # 时段映射
+            type_map = {
+                "尖峰": "tip",
+                "高峰": "peak",
+                "平段": "flat",
+                "低谷": "valley",
+                "深谷": "deep"
+            }
+            usage = {"tip": 0.0, "peak": 0.0, "flat": 0.0, "valley": 0.0, "deep": 0.0}
+            
+            for i, val in enumerate(values):
+                if val is None: continue
+                # 48点 i (如 i=0 代表 00:00-00:30) 对应 96点 2*i 和 2*i+1
+                # 理论上分时规则变化通常在整点或半点，所以两个 15min 片段类型基本一致
+                t_key = keys_96[2*i]
+                p_type = tou_map.get(t_key, "平段")
+                
+                mapped_key = type_map.get(p_type, "flat")
+                usage[mapped_key] += val
+                
+            return {k: round(v, 4) for k, v in usage.items()}
+        except Exception as e:
+            logger.error(f"计算分时电量分布失败: {e}")
+            return {"tip": 0.0, "peak": 0.0, "flat": 0.0, "valley": 0.0, "deep": 0.0}
     
     @staticmethod
     def _find_gaps(readings: list) -> list:
@@ -519,13 +566,13 @@ class LoadAggregationService:
                 all_dirty_points.extend(dirty_points)
             
             total = sum(aggregated_values)
-
-            
-            total = sum(aggregated_values)
+            # 分时电量统计
+            tou_usage = LoadAggregationService.calculate_tou_distribution(aggregated_values, date)
             
             result = {
                 "values": [round(v, 3) for v in aggregated_values],
                 "total": round(total, 3),
+                "tou_usage": tou_usage,
                 "meter_count": actual_meter_count,
                 "missing_meters": sorted(list(missing)) if actual_meter_count < expected_meter_count else []
             }
@@ -768,6 +815,7 @@ class LoadAggregationService:
 # 便捷函数
 aggregate_mp_load = LoadAggregationService.aggregate_mp_load
 aggregate_meter_load = LoadAggregationService.aggregate_meter_load
+calculate_tou_distribution = LoadAggregationService.calculate_tou_distribution
 calculate_deviation = LoadAggregationService.calculate_deviation
 generate_unified_load_curve = LoadAggregationService.generate_unified_load_curve
 upsert_unified_load_curve = LoadAggregationService.upsert_unified_load_curve

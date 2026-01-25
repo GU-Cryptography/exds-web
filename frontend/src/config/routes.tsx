@@ -15,6 +15,7 @@ import { RpaMonitorPage } from '../pages/RpaMonitorPage';
 import { DayAheadPriceForecastPage } from '../pages/DayAheadPriceForecastPage';
 import { WeatherDataPage } from '../pages/WeatherDataPage';
 import { LoadDataDiagnosisPage } from '../pages/LoadDataDiagnosisPage';
+import { CustomerLoadAnalysisPage } from '../pages/CustomerLoadAnalysisPage';
 
 // 路由配置接口
 export interface RouteConfig {
@@ -30,7 +31,7 @@ export const routeConfigs: RouteConfig[] = [
     // 客户管理
     { path: '/customer/profiles', title: '客户档案管理', component: CustomerManagementPage },
     { path: '/customer/retail-contracts', title: '零售合同管理', component: RetailContractPage },
-    { path: '/customer/load-analysis', title: '客户负荷分析', component: LoadAnalysisPage },
+    { path: '/customer/load-analysis', title: '客户负荷分析', component: CustomerLoadAnalysisPage },
     { path: '/customer/cluster-analysis', title: '客户聚类分析', component: PlaceholderPage },
 
     // 负荷预测
