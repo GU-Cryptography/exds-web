@@ -14,7 +14,7 @@ from webapp.tools.mongo import DATABASE
 from webapp.models.load_enums import FusionStrategy
 from webapp.services.contract_service import ContractService
 from webapp.schemas.load_structs import (
-    DailyCurve, DailyTotal, MonthlyTotal, CustomerLoadData
+    DailyCurve, DailyTotal, MonthlyTotal, CustomerLoadData, TouUsage
 )
 
 logger = logging.getLogger(__name__)
@@ -143,7 +143,8 @@ class LoadQueryService:
             return DailyCurve(
                 date=date, 
                 values=fused["values"], 
-                total=fused["total"]
+                total=fused["total"],
+                tou_usage=fused.get("tou_usage")
             )
         except Exception as e:
             logger.error(f"get_daily_curve failed: {e}")
@@ -173,7 +174,8 @@ class LoadQueryService:
             {"$project": {
                 "date": 1,
                 "values": "$effective.values",
-                "total": "$effective.total"
+                "total": "$effective.total",
+                "tou_usage": "$effective.tou_usage"
             }}
         ]
         
@@ -206,7 +208,8 @@ class LoadQueryService:
             {"$match": {"effective": {"$ne": None}}},
             {"$project": {
                 "date": 1,
-                "total": "$effective.total"
+                "total": "$effective.total",
+                "tou_usage": "$effective.tou_usage"
             }}
         ]
         
@@ -251,6 +254,11 @@ class LoadQueryService:
             {"$group": {
                 "_id": "$month",
                 "total": {"$sum": "$effective.total"},
+                "tou_tip": {"$sum": {"$ifNull": ["$effective.tou_usage.tip", 0]}},
+                "tou_peak": {"$sum": {"$ifNull": ["$effective.tou_usage.peak", 0]}},
+                "tou_flat": {"$sum": {"$ifNull": ["$effective.tou_usage.flat", 0]}},
+                "tou_valley": {"$sum": {"$ifNull": ["$effective.tou_usage.valley", 0]}},
+                "tou_deep": {"$sum": {"$ifNull": ["$effective.tou_usage.deep", 0]}},
                 "days_count": {"$sum": 1}
             }},
             {"$sort": {"_id": 1}},
@@ -258,6 +266,13 @@ class LoadQueryService:
                 "month": "$_id",
                 "total": {"$round": ["$total", 2]},
                 "days_count": 1,
+                "tou_usage": {
+                    "tip": {"$round": ["$tou_tip", 3]},
+                    "peak": {"$round": ["$tou_peak", 3]},
+                    "flat": {"$round": ["$tou_flat", 3]},
+                    "valley": {"$round": ["$tou_valley", 3]},
+                    "deep": {"$round": ["$tou_deep", 3]}
+                },
                 "_id": 0
             }}
         ]
@@ -295,6 +310,7 @@ class LoadQueryService:
             {"$group": {
                 "_id": "$date",
                 "total": {"$sum": "$effective.total"},
+                "tou_usage_matrix": {"$push": "$effective.tou_usage"},
                 # 假设所有有效曲线长度一致 (48或96)，使用 $reduce 进行数组相加比较复杂
                 # 这里使用 unwind -> group 的方式虽然不是最高效，但最通用
                 "values_matrix": {"$push": "$effective.values"}
@@ -342,7 +358,23 @@ class LoadQueryService:
                         # 其他情况暂忽略
                     final_values = [round(x, 4) for x in sum_arr]
             
-            result.append(DailyCurve(date=date, values=final_values, total=round(total, 4)))
+            # TOU 细项叠加
+            final_tou = {"tip": 0.0, "peak": 0.0, "flat": 0.0, "valley": 0.0, "deep": 0.0}
+            tou_matrices = doc.get("tou_usage_matrix", [])
+            for tou in tou_matrices:
+                if not tou: continue
+                for k in final_tou.keys():
+                    final_tou[k] += tou.get(k, 0.0)
+            
+            # 四舍五入
+            final_tou = {k: round(v, 4) for k, v in final_tou.items()}
+            
+            result.append(DailyCurve(
+                date=date, 
+                values=final_values, 
+                total=round(total, 4),
+                tou_usage=final_tou
+            ))
             
         if return_df:
             return LoadQueryService._format_dataframe(result)
@@ -372,12 +404,24 @@ class LoadQueryService:
             {"$match": {"effective": {"$ne": None}}},
             {"$group": {
                 "_id": "$date",
-                "total": {"$sum": "$effective.total"}
+                "total": {"$sum": "$effective.total"},
+                "tou_tip": {"$sum": {"$ifNull": ["$effective.tou_usage.tip", 0]}},
+                "tou_peak": {"$sum": {"$ifNull": ["$effective.tou_usage.peak", 0]}},
+                "tou_flat": {"$sum": {"$ifNull": ["$effective.tou_usage.flat", 0]}},
+                "tou_valley": {"$sum": {"$ifNull": ["$effective.tou_usage.valley", 0]}},
+                "tou_deep": {"$sum": {"$ifNull": ["$effective.tou_usage.deep", 0]}}
             }},
             {"$sort": {"_id": 1}},
             {"$project": {
                 "date": "$_id",
                 "total": 1,
+                "tou_usage": {
+                    "tip": {"$round": ["$tou_tip", 3]},
+                    "peak": {"$round": ["$tou_peak", 3]},
+                    "flat": {"$round": ["$tou_flat", 3]},
+                    "valley": {"$round": ["$tou_valley", 3]},
+                    "deep": {"$round": ["$tou_deep", 3]}
+                },
                 "_id": 0
             }}
         ]
@@ -426,9 +470,11 @@ class LoadQueryService:
             {"$group": {
                 "_id": "$month",
                 "total": {"$sum": "$effective.total"},
-                # 注意：days_count 这里含义变成了 "人天数"，可能不是想要 "当月包含多少天"
-                # 如果要统计当月实际有数据的天数（并集），需要更复杂逻辑
-                # 这里简单返回 记录条数 (records count)，或者不返回 days_count
+                "tou_tip": {"$sum": {"$ifNull": ["$effective.tou_usage.tip", 0]}},
+                "tou_peak": {"$sum": {"$ifNull": ["$effective.tou_usage.peak", 0]}},
+                "tou_flat": {"$sum": {"$ifNull": ["$effective.tou_usage.flat", 0]}},
+                "tou_valley": {"$sum": {"$ifNull": ["$effective.tou_usage.valley", 0]}},
+                "tou_deep": {"$sum": {"$ifNull": ["$effective.tou_usage.deep", 0]}},
                 "days_count": {"$sum": 1} 
             }},
             {"$sort": {"_id": 1}},
@@ -436,6 +482,13 @@ class LoadQueryService:
                 "month": "$_id",
                 "total": 1,
                 "days_count": 1,
+                "tou_usage": {
+                    "tip": {"$round": ["$tou_tip", 3]},
+                    "peak": {"$round": ["$tou_peak", 3]},
+                    "flat": {"$round": ["$tou_flat", 3]},
+                    "valley": {"$round": ["$tou_valley", 3]},
+                    "deep": {"$round": ["$tou_deep", 3]}
+                },
                 "_id": 0
             }}
         ]
@@ -473,7 +526,8 @@ class LoadQueryService:
                 "customer_id": 1,
                 "date": 1,
                 "values": "$effective.values",
-                "total": "$effective.total"
+                "total": "$effective.total",
+                "tou_usage": "$effective.tou_usage"
             }}
         ]
         
@@ -486,7 +540,8 @@ class LoadQueryService:
                 result[cid].append(DailyCurve(
                     date=d["date"],
                     values=d["values"],
-                    total=d["total"]
+                    total=d["total"],
+                    tou_usage=d.get("tou_usage")
                 ))
         return result
 
@@ -519,7 +574,8 @@ class LoadQueryService:
             {"$project": {
                 "customer_id": 1,
                 "date": 1,
-                "total": "$effective.total"
+                "total": "$effective.total",
+                "tou_usage": "$effective.tou_usage"
             }}
         ]
         
@@ -531,7 +587,8 @@ class LoadQueryService:
             if cid in result:
                 result[cid].append(DailyTotal(
                     date=d["date"], 
-                    total=d["total"]
+                    total=d["total"],
+                    tou_usage=d.get("tou_usage")
                 ))
         return result
 
@@ -575,6 +632,11 @@ class LoadQueryService:
             {"$group": {
                 "_id": {"customer_id": "$customer_id", "month": "$month"},
                 "total": {"$sum": "$effective.total"},
+                "tou_tip": {"$sum": {"$ifNull": ["$effective.tou_usage.tip", 0]}},
+                "tou_peak": {"$sum": {"$ifNull": ["$effective.tou_usage.peak", 0]}},
+                "tou_flat": {"$sum": {"$ifNull": ["$effective.tou_usage.flat", 0]}},
+                "tou_valley": {"$sum": {"$ifNull": ["$effective.tou_usage.valley", 0]}},
+                "tou_deep": {"$sum": {"$ifNull": ["$effective.tou_usage.deep", 0]}},
                 "days_count": {"$sum": 1}
             }},
             {"$sort": {"_id.month": 1}},
@@ -583,6 +645,13 @@ class LoadQueryService:
                 "month": "$_id.month",
                 "total": {"$round": ["$total", 2]},
                 "days_count": 1,
+                "tou_usage": {
+                    "tip": {"$round": ["$tou_tip", 3]},
+                    "peak": {"$round": ["$tou_peak", 3]},
+                    "flat": {"$round": ["$tou_flat", 3]},
+                    "valley": {"$round": ["$tou_valley", 3]},
+                    "deep": {"$round": ["$tou_deep", 3]}
+                },
                 "_id": 0
             }}
         ]
@@ -748,19 +817,39 @@ class LoadQueryService:
         
         if strategy == FusionStrategy.MP_ONLY:
             if mp_load:
-                return {"values": mp_load.get("values", []), "total": mp_load.get("total", 0), "source": "mp"}
+                return {
+                    "values": mp_load.get("values", []), 
+                    "total": mp_load.get("total", 0), 
+                    "tou_usage": mp_load.get("tou_usage"),
+                    "source": "mp"
+                }
             return {"values": [], "total": 0, "source": "none"}
         
         elif strategy == FusionStrategy.METER_ONLY:
             if meter_load:
-                return {"values": meter_load.get("values", []), "total": meter_load.get("total", 0), "source": "meter"}
+                return {
+                    "values": meter_load.get("values", []), 
+                    "total": meter_load.get("total", 0), 
+                    "tou_usage": meter_load.get("tou_usage"),
+                    "source": "meter"
+                }
             return {"values": [], "total": 0, "source": "none"}
         
         elif strategy == FusionStrategy.METER_PRIORITY:
             if meter_load:
-                return {"values": meter_load.get("values", []), "total": meter_load.get("total", 0), "source": "meter"}
+                return {
+                    "values": meter_load.get("values", []), 
+                    "total": meter_load.get("total", 0), 
+                    "tou_usage": meter_load.get("tou_usage"),
+                    "source": "meter"
+                }
             elif mp_load:
-                return {"values": mp_load.get("values", []), "total": mp_load.get("total", 0), "source": "mp"}
+                return {
+                    "values": mp_load.get("values", []), 
+                    "total": mp_load.get("total", 0), 
+                    "tou_usage": mp_load.get("tou_usage"),
+                    "source": "mp"
+                }
             return {"values": [], "total": 0, "source": "none"}
             
         elif strategy == FusionStrategy.MP_COMPLETE:
@@ -768,17 +857,42 @@ class LoadQueryService:
                 mp_count = mp_load.get("mp_count", 0)
                 missing_count = len(mp_load.get("missing_mps", []))
                 if mp_count > 0 and missing_count == 0:
-                    return {"values": mp_load.get("values", []), "total": mp_load.get("total", 0), "source": "mp"}
+                    return {
+                        "values": mp_load.get("values", []), 
+                        "total": mp_load.get("total", 0), 
+                        "tou_usage": mp_load.get("tou_usage"),
+                        "source": "mp"
+                    }
             
             if meter_load:
-                return {"values": meter_load.get("values", []), "total": meter_load.get("total", 0), "source": "meter"}
+                return {
+                    "values": meter_load.get("values", []), 
+                    "total": meter_load.get("total", 0), 
+                    "tou_usage": meter_load.get("tou_usage"),
+                    "source": "meter"
+                }
             if mp_load:
-                return {"values": mp_load.get("values", []), "total": mp_load.get("total", 0), "source": "mp"}
+                return {
+                    "values": mp_load.get("values", []), 
+                    "total": mp_load.get("total", 0), 
+                    "tou_usage": mp_load.get("tou_usage"),
+                    "source": "mp"
+                }
             return {"values": [], "total": 0, "source": "none"}
         
         else:  # MP_PRIORITY (默认)
             if mp_load:
-                return {"values": mp_load.get("values", []), "total": mp_load.get("total", 0), "source": "mp"}
+                return {
+                    "values": mp_load.get("values", []), 
+                    "total": mp_load.get("total", 0), 
+                    "tou_usage": mp_load.get("tou_usage"),
+                    "source": "mp"
+                }
             if meter_load:
-                return {"values": meter_load.get("values", []), "total": meter_load.get("total", 0), "source": "meter"}
+                return {
+                    "values": meter_load.get("values", []), 
+                    "total": meter_load.get("total", 0), 
+                    "tou_usage": meter_load.get("tou_usage"),
+                    "source": "meter"
+                }
             return {"values": [], "total": 0, "source": "none"}

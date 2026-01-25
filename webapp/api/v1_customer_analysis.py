@@ -10,25 +10,20 @@ from webapp.api.v1 import get_current_active_user
 from webapp.services.customer_service import CustomerService
 from webapp.services.load_query_service import LoadQueryService, FusionStrategy
 from webapp.services.tou_service import get_tou_rule_by_date
+from webapp.schemas.load_structs import TouUsage
 from webapp.tools.mongo import DATABASE
 
 router = APIRouter()
 customer_service = CustomerService(DATABASE)
 
 # Models
+# Local models
 class HourlyDataPoint(BaseModel):
     time: str
     current: Optional[float]
     last_day: Optional[float]
     benchmark: Optional[float]
     period_type: str = "平段"  # TOU period type (e.g., 尖峰/高峰/平段/低谷/深谷)
-
-class TouUsage(BaseModel):
-    tip: float = 0.0
-    peak: float = 0.0
-    flat: float = 0.0
-    valley: float = 0.0
-    deep: float = 0.0
 
 class AnalysisStats(BaseModel):
     annual_contract: float
@@ -210,19 +205,8 @@ async def get_daily_view(
     yesterday_total = yesterday_curve.total if yesterday_curve else 0.0
     
     # TOU Usage
-    # 直接从数据库的预计算字段中提取 (根据融合策略逻辑)
-    tou_usage_data = {"tip": 0.0, "peak": 0.0, "flat": 0.0, "valley": 0.0, "deep": 0.0}
-    
-    # 查找 unified_load_curve 记录
-    curve_doc = DATABASE['unified_load_curve'].find_one({"customer_id": customer_id, "date": date})
-    if curve_doc:
-        # 参考 LoadQueryService 的优先级逻辑：电表优先
-        if curve_doc.get("meter_load") and curve_doc["meter_load"].get("tou_usage"):
-            tou_usage_data = curve_doc["meter_load"]["tou_usage"]
-        elif curve_doc.get("mp_load") and curve_doc["mp_load"].get("tou_usage"):
-            tou_usage_data = curve_doc["mp_load"]["tou_usage"]
-    
-    tou_usage = TouUsage(**tou_usage_data)
+    # Directly use tou_usage from current_curve (now correctly aggregated/retrieved by service)
+    tou_usage = current_curve.tou_usage if current_curve and current_curve.tou_usage else TouUsage()
     
     # 峰谷比: (尖峰 + 高峰) / (低谷 + 深谷)
     numerator = tou_usage.tip + tou_usage.peak
