@@ -124,45 +124,36 @@ class CustomerOverviewService:
         Returns:
             {"total": float, "tou_usage": TouUsage}
         """
-        # 使用聚合管道计算
-        pipeline = [
-            {
-                "$match": {
-                    "customer_id": customer_id,
-                    "date": {"$gte": start_date, "$lte": end_date}
-                }
-            },
-            {
-                "$group": {
-                    "_id": None,
-                    "total": {"$sum": "$meter_load.total"},
-                    "tip": {"$sum": "$meter_load.tou_usage.tip"},
-                    "peak": {"$sum": "$meter_load.tou_usage.peak"},
-                    "flat": {"$sum": "$meter_load.tou_usage.flat"},
-                    "valley": {"$sum": "$meter_load.tou_usage.valley"},
-                    "deep": {"$sum": "$meter_load.tou_usage.deep"}
-                }
-            }
-        ]
-        
-        result = list(self.load_collection.aggregate(pipeline))
-        
-        if not result:
+        # 使用 LoadQueryService 获取数据，确保与详情页逻辑一致 (支持 MP/Meter 融合策略)
+        # 默认策略 MP_PRIORITY (优先使用MP数据，缺失则使用表计)
+        try:
+            daily_totals = self.load_service.get_daily_totals(customer_id, start_date, end_date)
+        except Exception as e:
+            logger.error(f"Error calling LoadQueryService for {customer_id}: {e}")
+            daily_totals = []
+            
+        if not daily_totals:
             return {
                 "total": 0.0,
                 "tou_usage": TouUsage()
             }
         
-        r = result[0]
+        # 在应用层汇总
+        total_val = 0.0
+        tou_agg = TouUsage()
+        
+        for dt in daily_totals:
+            total_val += dt.total
+            if dt.tou_usage:
+                tou_agg.tip += dt.tou_usage.tip
+                tou_agg.peak += dt.tou_usage.peak
+                tou_agg.flat += dt.tou_usage.flat
+                tou_agg.valley += dt.tou_usage.valley
+                tou_agg.deep += dt.tou_usage.deep
+        
         return {
-            "total": r.get("total", 0) or 0,
-            "tou_usage": TouUsage(
-                tip=r.get("tip", 0) or 0,
-                peak=r.get("peak", 0) or 0,
-                flat=r.get("flat", 0) or 0,
-                valley=r.get("valley", 0) or 0,
-                deep=r.get("deep", 0) or 0
-            )
+            "total": total_val,
+            "tou_usage": tou_agg
         }
     
     def _calc_peak_valley_ratio(self, tou: TouUsage) -> float:
@@ -173,6 +164,49 @@ class CustomerOverviewService:
             return 0.0
         return round(peak_usage / valley_usage, 2)
     
+    def _get_last_year_comparison_range(self, year: int, month: int, view_mode: str) -> tuple:
+        """
+        计算去年同期的日期范围。
+        如果是当前月份，则限制去年同期的结束日期为"同月同日"（MTD对比），避免用全月对比半月。
+        
+        Returns:
+            (ly_start_date, ly_end_date)
+        """
+        last_year = year - 1
+        now = datetime.now()
+        is_current_month = (year == now.year and month == now.month)
+        
+        # 1. 确定去年的由始至终 (Full Range)
+        if view_mode == 'ytd':
+            ly_start = f"{last_year}-01-01"
+        else:
+            ly_start = f"{last_year}-{month:02d}-01"
+            
+        _, ly_last_day = monthrange(last_year, month)
+        ly_end = f"{last_year}-{month:02d}-{ly_last_day:02d}"
+        
+        # 2. 如果是当月，进行截断 (Cap to Today)
+        if is_current_month:
+            # 去年同期的结束日期应该也是今天（的对应日）
+            # 注意处理闰年2月29的情况
+            try:
+                # 尝试构建去年同月同日
+                cap_date = datetime(last_year, now.month, now.day)
+                # 如果计算出的截断日期比全月最后一天还早，就使用截断日期
+                # (逻辑上肯定是早的，或者是同一天)
+                ly_end_cap = cap_date.strftime("%Y-%m-%d")
+                
+                # 双重保险：取 min(ly_end, ly_end_cap)
+                if ly_end_cap < ly_end:
+                    ly_end = ly_end_cap
+            except ValueError:
+                # 只有一种情况：今天2月29，去年只有28天 -> 使用2月28
+                if now.month == 2 and now.day == 29:
+                    # ly_end 已经是2-28了，无需操作
+                    pass
+
+        return ly_start, ly_end
+
     def get_overview_kpi(self, year: int, month: int, view_mode: str) -> Dict:
         """
         获取KPI卡片数据
@@ -223,12 +257,8 @@ class CustomerOverviewService:
             total_tou.deep += usage["tou_usage"].deep
         
         # 计算去年同期实测电量（用于同比）
-        if view_mode == 'ytd':
-            ly_start_date = f"{last_year}-01-01"
-        else:
-            ly_start_date = f"{last_year}-{month:02d}-01"
-        _, ly_last_day = monthrange(last_year, month)
-        ly_end_date = f"{last_year}-{month:02d}-{ly_last_day:02d}"
+        # 使用统一的 MTD 逻辑
+        ly_start_date, ly_end_date = self._get_last_year_comparison_range(year, month, view_mode)
         
         last_year_total = 0.0
         for c in signed_customers:
@@ -319,13 +349,7 @@ class CustomerOverviewService:
         start_date, end_date = self._get_date_range(year, month, view_mode)
         
         # 计算去年同期日期范围
-        last_year = year - 1
-        if view_mode == 'ytd':
-            ly_start = f"{last_year}-01-01"
-        else:
-            ly_start = f"{last_year}-{month:02d}-01"
-        _, ly_last_day = monthrange(last_year, month)
-        ly_end = f"{last_year}-{month:02d}-{ly_last_day:02d}"
+        ly_start, ly_end = self._get_last_year_comparison_range(year, month, view_mode)
         
         # 获取各客户今年和去年电量
         changes = []
@@ -426,13 +450,7 @@ class CustomerOverviewService:
         start_date, end_date = self._get_date_range(year, month, view_mode)
         
         # 计算去年同期日期范围
-        last_year = year - 1
-        if view_mode == 'ytd':
-            ly_start = f"{last_year}-01-01"
-        else:
-            ly_start = f"{last_year}-{month:02d}-01"
-        _, ly_last_day = monthrange(last_year, month)
-        ly_end = f"{last_year}-{month:02d}-{ly_last_day:02d}"
+        ly_start, ly_end = self._get_last_year_comparison_range(year, month, view_mode)
         
         # 构建列表数据
         items = []
@@ -449,9 +467,17 @@ class CustomerOverviewService:
             last_year_usage = self._get_customer_actual_usage(c["customer_id"], ly_start, ly_end)
             
             # 签约涨幅（vs 去年同期实测，按签约期范围）
-            ly_contract_start = f"{last_year}-{c['contract_start_month']:02d}-01"
-            _, ly_contract_last_day = monthrange(last_year, c['contract_end_month'])
-            ly_contract_end = f"{last_year}-{c['contract_end_month']:02d}-{ly_contract_last_day:02d}"
+            # 注意：这里的签约期对比可能跨月，暂不使用 ly_end 的逻辑，而是保持按合同月完整对比
+            # 因为签约电量通常是"月度"签约，应与"去年全月"对比才合理？
+            # 不，如果当前只走了半个月，拿签约量(全月)去比去年半个月，不合理。
+            # 但拿签约量(全月)去比去年全月，也不合理(如果想看进度)。
+            # 通常：签约偏离度 = (签约 - 去年同期实际) / 去年同期实际
+            # 这里的"去年同期实际"通常指去年那个完整月的实际。
+            # 所以这里保持原逻辑，使用 contract_start/end_month 对应的去年完整月。
+            
+            ly_contract_start = f"{year - 1}-{c['contract_start_month']:02d}-01"
+            _, ly_contract_last_day = monthrange(year - 1, c['contract_end_month'])
+            ly_contract_end = f"{year - 1}-{c['contract_end_month']:02d}-{ly_contract_last_day:02d}"
             ly_contract_usage = self._get_customer_actual_usage(
                 c["customer_id"], ly_contract_start, ly_contract_end
             )
@@ -465,7 +491,7 @@ class CustomerOverviewService:
                 )
                 signed_yoy_warning = abs(signed_yoy) > 50
             
-            # 实测同比
+            # 实测同比 (Using adjusted ly_end)
             actual_yoy = None
             if last_year_usage["total"] > 0:
                 actual_yoy = round(

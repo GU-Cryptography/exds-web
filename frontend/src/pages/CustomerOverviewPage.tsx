@@ -51,7 +51,8 @@ import {
     People as PeopleIcon,
     ElectricBolt as ElectricBoltIcon,
     Speed as SpeedIcon,
-    Assessment as AssessmentIcon
+    Assessment as AssessmentIcon,
+    Refresh as RefreshIcon
 } from '@mui/icons-material';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
 
@@ -138,8 +139,9 @@ export const CustomerOverviewPage: React.FC = () => {
     const { addTab } = useTabContext();
 
     // 状态
-    // 缓存 Key
-    const CACHE_KEY = 'customer_overview_cache_v1';
+    // 状态
+    // 缓存 Key - 升级版本以清理旧缓存
+    const CACHE_KEY = 'customer_overview_cache_v2';
 
     // 状态初始化辅助函数
     const getInitialParam = <T,>(key: string, defaultValue: T): T => {
@@ -157,6 +159,21 @@ export const CustomerOverviewPage: React.FC = () => {
         return defaultValue;
     };
 
+    const getInitialData = <T,>(key: string): T | null => {
+        try {
+            const cache = sessionStorage.getItem(CACHE_KEY);
+            if (cache) {
+                const parsed = JSON.parse(cache);
+                if (parsed.data && Date.now() - parsed.timestamp < 30 * 60 * 1000) {
+                    return parsed.data[key] ?? null;
+                }
+            }
+        } catch (e) {
+            console.error('读取缓存数据失败', e);
+        }
+        return null;
+    };
+
     const [month, setMonth] = useState<number>(() => getInitialParam('month', 1));
     const [viewMode, setViewMode] = useState<ViewMode>(() => getInitialParam('viewMode', 'monthly'));
     const [search, setSearch] = useState(() => getInitialParam('search', ''));
@@ -168,44 +185,29 @@ export const CustomerOverviewPage: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // 数据
-    const getInitialData = <T,>(key: string): T | null => {
-        try {
-            const cache = sessionStorage.getItem(CACHE_KEY);
-            if (cache) {
-                const parsed = JSON.parse(cache);
-                if (Date.now() - parsed.timestamp < 30 * 60 * 1000) {
-                    return parsed.data[key] ?? null;
-                }
-            }
-        } catch (e) {
-            console.error('读取缓存数据失败', e);
-        }
-        return null;
-    };
-
-    // 原始全量数据
+    // 数据 - 尝试从缓存读取
     const [kpi, setKpi] = useState<OverviewKpi | null>(() => getInitialData('kpi'));
     const [contribution, setContribution] = useState<ContributionData | null>(() => getInitialData('contribution'));
     const [growthRanking, setGrowthRanking] = useState<GrowthRankingData | null>(() => getInitialData('growthRanking'));
     const [efficiencyRanking, setEfficiencyRanking] = useState<EfficiencyRankingData | null>(() => getInitialData('efficiencyRanking'));
-    // 存储全量客户列表
-    const [allCustomers, setAllCustomers] = useState<CustomerListItem[]>(() => {
-        const listData = getInitialData<CustomerListResponse>('customerList');
-        return listData?.items || [];
-    });
+
+    // 客户列表缓存结构特殊 ({ items: [], ... })
+    const cachedList = getInitialData<any>('customerList');
+    const [allCustomers, setAllCustomers] = useState<CustomerListItem[]>(() => cachedList?.items || []);
 
     // 用于跳过不必要的 Fetch
     const lastFetchKey = useRef<string>('');
 
-    // 初始化 ref
+    // 初始化 ref - 仅恢复上次的 fetchKey 标记，避免参数未变时重复请求（但若数据为空仍会请求）
     useEffect(() => {
         const cache = sessionStorage.getItem(CACHE_KEY);
         if (cache) {
             try {
                 const parsed = JSON.parse(cache);
                 if (parsed.params && Date.now() - parsed.timestamp < 30 * 60 * 1000) {
-                    // 仅关注决定数据的参数：month, viewMode
+                    // 仅恢复 lastFetchKey，但不恢复数据
+                    // 注意：由于数据状态初始化为 null，fetchData 中的检查 (kpi && ...) 会失败，从而强制刷新数据
+                    // 这符合"不再缓存旧数据"的需求
                     lastFetchKey.current = `${parsed.params.month}-${parsed.params.viewMode}`;
                 }
             } catch (e) { /* ignore */ }
@@ -217,6 +219,8 @@ export const CustomerOverviewPage: React.FC = () => {
         const fetchKey = `${month}-${viewMode}`;
 
         // 如果参数没变，且数据都有，则跳过
+        // 注意：由于移除了数据缓存，kpi 等初始为 null，这里的条件通常为 false，会触发请求
+        // 只有在组件内部状态更新（如搜索/排序）导致重渲染时，数据已存在，才会命中此缓存
         if (fetchKey === lastFetchKey.current && kpi && contribution && allCustomers.length > 0) {
             return;
         }
@@ -278,7 +282,7 @@ export const CustomerOverviewPage: React.FC = () => {
                     contribution,
                     growthRanking,
                     efficiencyRanking,
-                    customerList: { items: allCustomers, total: allCustomers.length, page: 1, page_size: -1 } // 保持一定结构兼容
+                    customerList: { items: allCustomers, total: allCustomers.length, page: 1, page_size: -1 }
                 },
                 timestamp: Date.now()
             };
@@ -317,6 +321,12 @@ export const CustomerOverviewPage: React.FC = () => {
             setSortOrder('desc');
         }
         setPage(0);
+    };
+
+    // 手动刷新
+    const handleRefresh = () => {
+        lastFetchKey.current = ''; // 重置 key 强制刷新
+        fetchData();
     };
 
     // ---- 前端处理数据 ----
@@ -413,14 +423,14 @@ export const CustomerOverviewPage: React.FC = () => {
                 title: '签约客户',
                 value: kpi.signed_customers_count,
                 unit: '户',
-                icon: <PeopleIcon fontSize="small" />,
+                icon: <PeopleIcon sx={{ fontSize: 'inherit' }} />,
                 color: '#1976d2',
             },
             {
                 title: '签约规模',
                 value: formatNumber(kpi.signed_total_quantity),
                 unit: 'MWh',
-                icon: <AssessmentIcon fontSize="small" />,
+                icon: <AssessmentIcon sx={{ fontSize: 'inherit' }} />,
                 color: '#7b1fa2',
                 yoy: kpi.signed_quantity_yoy,
             },
@@ -428,7 +438,7 @@ export const CustomerOverviewPage: React.FC = () => {
                 title: '当前总电量',
                 value: formatNumber(kpi.actual_total_usage),
                 unit: 'MWh',
-                icon: <ElectricBoltIcon fontSize="small" />,
+                icon: <ElectricBoltIcon sx={{ fontSize: 'inherit' }} />,
                 color: '#388e3c',
                 yoy: kpi.actual_usage_yoy,
             },
@@ -436,7 +446,7 @@ export const CustomerOverviewPage: React.FC = () => {
                 title: '综合峰谷比',
                 value: kpi.avg_peak_valley_ratio.toFixed(2),
                 unit: '',
-                icon: <SpeedIcon fontSize="small" />,
+                icon: <SpeedIcon sx={{ fontSize: 'inherit' }} />,
                 color: '#f57c00',
             }
         ];
@@ -453,36 +463,106 @@ export const CustomerOverviewPage: React.FC = () => {
                                 bgcolor: 'background.paper'
                             }}
                         >
-                            <CardContent sx={{ p: '12px !important', position: 'relative' }}>
-                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <CardContent
+                                sx={{
+                                    p: { xs: 1.5, sm: 2 },
+                                    pb: { xs: 1.5, sm: 2 } + ' !important',
+                                    position: 'relative'
+                                }}
+                            >
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: { xs: 0.5, sm: 1 } }}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 1 } }}>
                                         <Box sx={{
                                             color: card.color,
                                             display: 'flex',
                                             p: 0.5,
                                             borderRadius: 1,
-                                            bgcolor: `${card.color}15`
+                                            bgcolor: `${card.color}15`,
+                                            fontSize: { xs: 18, sm: 22 }
                                         }}>
                                             {card.icon}
                                         </Box>
-                                        <Typography variant="body2" color="text.secondary" fontWeight="medium">
+                                        <Typography
+                                            variant="body2"
+                                            color="text.secondary"
+                                            fontWeight="medium"
+                                            noWrap
+                                            sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}
+                                        >
                                             {card.title}
                                         </Typography>
                                     </Box>
                                     {(card as any).yoy !== undefined && (
-                                        <Box sx={{ display: 'flex', alignItems: 'center', bgcolor: 'action.hover', px: 0.8, py: 0.2, borderRadius: 1 }}>
+                                        <Box sx={{
+                                            display: { xs: 'none', sm: 'flex' },
+                                            alignItems: 'center',
+                                            bgcolor: 'action.hover',
+                                            px: 0.5,
+                                            py: 0.2,
+                                            borderRadius: 0.5
+                                        }}>
                                             {formatYoy((card as any).yoy).icon}
-                                            <Typography variant="caption" sx={{ color: formatYoy((card as any).yoy).color, ml: 0.5, fontWeight: 'bold' }}>
+                                            <Typography
+                                                variant="caption"
+                                                sx={{
+                                                    color: formatYoy((card as any).yoy).color,
+                                                    ml: 0.3,
+                                                    fontWeight: 'bold',
+                                                    fontSize: { xs: '0.65rem', sm: '0.75rem' }
+                                                }}
+                                            >
                                                 {formatYoy((card as any).yoy).text}
                                             </Typography>
                                         </Box>
                                     )}
                                 </Box>
-                                <Typography variant="h5" fontWeight="bold" sx={{ color: 'text.primary' }}>
+                                <Typography
+                                    variant="h5"
+                                    fontWeight="bold"
+                                    sx={{
+                                        color: 'text.primary',
+                                        fontSize: { xs: '1.25rem', sm: '1.5rem' },
+                                        lineHeight: 1.2
+                                    }}
+                                >
                                     {card.value}
-                                    <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+                                    <Typography
+                                        component="span"
+                                        variant="caption"
+                                        color="text.secondary"
+                                        sx={{ ml: 0.5, fontSize: { xs: '0.7rem', sm: '0.75rem' } }}
+                                    >
                                         {card.unit}
                                     </Typography>
+
+                                    {/* 移动端：同比数据 (与单位同处一行) */}
+                                    {(card as any).yoy !== undefined && (
+                                        <Box component="span" sx={{
+                                            display: { xs: 'inline-flex', sm: 'none' },
+                                            alignItems: 'center',
+                                            bgcolor: 'action.hover',
+                                            px: 0.5,
+                                            py: 0.1,
+                                            borderRadius: 0.5,
+                                            ml: 1,
+                                            verticalAlign: 'text-bottom'
+                                        }}>
+                                            {formatYoy((card as any).yoy).icon}
+                                            <Typography
+                                                component="span"
+                                                variant="caption"
+                                                sx={{
+                                                    color: formatYoy((card as any).yoy).color,
+                                                    ml: 0.2, // 紧凑一点
+                                                    fontWeight: 'bold',
+                                                    fontSize: '0.65rem',
+                                                    lineHeight: 1
+                                                }}
+                                            >
+                                                {formatYoy((card as any).yoy).text}
+                                            </Typography>
+                                        </Box>
+                                    )}
                                 </Typography>
                             </CardContent>
                         </Card>
@@ -984,6 +1064,12 @@ export const CustomerOverviewPage: React.FC = () => {
                         <ToggleButton value="monthly">月度视图</ToggleButton>
                         <ToggleButton value="ytd">年累计视图</ToggleButton>
                     </ToggleButtonGroup>
+
+                    <Tooltip title="刷新数据">
+                        <IconButton onClick={handleRefresh} disabled={loading} size="small">
+                            <RefreshIcon />
+                        </IconButton>
+                    </Tooltip>
 
                     {loading && <CircularProgress size={24} />}
                 </Box>

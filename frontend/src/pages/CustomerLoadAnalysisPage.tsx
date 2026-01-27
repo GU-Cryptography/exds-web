@@ -86,10 +86,13 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
     // 是否为Tab模式（有propCustomerId传入时不显示客户选择器）
     const isTabMode = !!propCustomerId;
 
+    // Date String for Title
+    const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
+
     // Hooks
     const { FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, NavigationButtons, isFullscreen } = useChartFullscreen({
         chartRef,
-        title: selectedCustomer ? `${selectedCustomer.user_name} 负荷分析` : '客户负荷分析',
+        title: selectedCustomer ? `${selectedCustomer.user_name} 负荷分析 ${dateStr}` : `客户负荷分析 ${dateStr}`,
         onPrevious: () => handleDateShift(-1),
         onNext: () => handleDateShift(1)
     });
@@ -123,13 +126,11 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
                                 user_name: custData.user_name,
                                 short_name: custData.short_name || custData.user_name,
                                 tags: custData.tags || [],
-                                account_count: custData.accounts?.length || 0,
-                                meter_count: 0,
-                                mp_count: 0,
+                                accounts: custData.accounts,
                                 current_year_contract_amount: 0,
                                 created_at: custData.created_at,
                                 updated_at: custData.updated_at
-                            });
+                            } as any);
                         }).catch(err => {
                             console.error('获取指定客户失败:', err);
                         });
@@ -142,23 +143,32 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
         });
     }, [propCustomerId]);
 
-    // Fetch Daily View
+    // Unified Data Fetching
     useEffect(() => {
         if (!selectedCustomer || !selectedDate) return;
 
         const fetchData = async () => {
             setLoading(true);
             setError(null);
+            // Reset dailyData to ensure UI doesn't show stale top part while bottom is loading (or vice versa)
+            // But to achieve "show together", we can keep old data until new comes, OR clear it to show loading spinner.
+            // User requested "show together", likely implies a clean transition.
+            setDailyData(null);
+
             try {
                 const dateStr = format(selectedDate, 'yyyy-MM-dd');
-                const res = await customerAnalysisApi.fetchDailyView(selectedCustomer.id, dateStr);
-                setDailyData(res.data);
 
-                // Update Tags from Customer Object (Need to re-fetch customer or assume latest?)
-                // Actually `daily-view` doesn't return tags. We should probably fetch customer details separately to get latest tags
-                // Or we rely on `selectedCustomer.tags` but that might be stale if we add/remove.
-                // Let's fetch customer details to get fresh tags.
-                const custRes = await customerApi.getCustomer(selectedCustomer.id);
+                // Parallel requests
+                const [dailyRes, historyRes, custRes] = await Promise.all([
+                    customerAnalysisApi.fetchDailyView(selectedCustomer.id, dateStr),
+                    customerAnalysisApi.fetchHistory(selectedCustomer.id, historyType, dateStr),
+                    customerApi.getCustomer(selectedCustomer.id)
+                ]);
+
+                setDailyData(dailyRes.data);
+                setHistoryData(historyRes.data);
+
+                // Process Tags
                 const tags = custRes.data.tags || [];
                 setManualTags(tags.filter((t: Tag) => t.source === 'MANUAL'));
                 setAutoTags(tags.filter((t: Tag) => t.source === 'AUTO'));
@@ -170,13 +180,16 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
                 setLoading(false);
             }
         };
-        fetchData();
-    }, [selectedCustomer, selectedDate]);
 
-    // Fetch History
+        fetchData();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedCustomer, selectedDate]); // Remove historyType from here
+
+    // Separate effect for History Type toggle to avoid full reload
     useEffect(() => {
-        if (!selectedCustomer || !selectedDate) return;
-        const fetchHistory = async () => {
+        if (!selectedCustomer || !selectedDate || !dailyData) return; // Only run if main data is loaded
+
+        const updateHistory = async () => {
             try {
                 const dateStr = format(selectedDate, 'yyyy-MM-dd');
                 const res = await customerAnalysisApi.fetchHistory(selectedCustomer.id, historyType, dateStr);
@@ -185,8 +198,9 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
                 console.error(err);
             }
         };
-        fetchHistory();
-    }, [selectedCustomer, selectedDate, historyType]);
+        updateHistory();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [historyType]);
 
     const handleDateShift = (days: number) => {
         if (selectedDate) {
@@ -202,16 +216,6 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
             const res = await customerAnalysisApi.triggerAiDiagnose(selectedCustomer.id, dateStr);
             setAiSummary(res.data.summary);
 
-            // Add suggested tags automatically? Or just show them?
-            // "AI Mode Recognition" button usually implies applying the analysis.
-            // Let's assume we want to sync these tags to the backend immediately or refresh.
-            // For this implementation, we'll refresh the tags after AI runs if AI updates backend (the API I mocked just returns summary, doesn't save?).
-            // Wait, the API mock just returns Response. It does NOT save to DB in my mock implementation of `triggerAiDiagnose`.
-            // So we need to save them. FE should call `addTag`.
-            // BUT, the requirement says "AI识别结果以芯片形式展示" and "自动标签可手工删除".
-            // So we should save them.
-
-            // Let's save them sequentially
             for (const tag of res.data.auto_tags) {
                 try {
                     await customerAnalysisApi.addTag(selectedCustomer.id, {
@@ -239,12 +243,6 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
 
     const handleManualTagChange = async (newTags: Tag[]) => {
         if (!selectedCustomer) return;
-
-        // TagSelector passes the NEW full list of tags. 
-        // We need to diff to find what was added or removed. 
-        // Or simpler: TagSelector in `CustomerEditorDialog` manages the list state locally and calls `onChange`.
-        // Here, `TagSelector` is controlled. `tags={manualTags}`.
-        // When `onChange` fires with `newTags`, we figure out the delta.
 
         const currentNames = new Set(manualTags.map(t => t.name));
         const newNames = new Set(newTags.map(t => t.name));
@@ -347,15 +345,72 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
                                     position: 'relative',
                                     ...(isFullscreen && { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1400, bgcolor: 'background.paper', height: '100vh', p: 2 })
                                 }}>
-                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: 32, mb: 1, flexShrink: 0 }}>
-                                        <Stack direction="row" alignItems="center">
-                                            <Stack direction="row" alignItems="center" spacing={1}>
-                                                <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', borderRadius: 1 }} />
-                                                <Typography variant="h6" fontSize="0.95rem" fontWeight="bold">日内48点负荷曲线</Typography>
-                                            </Stack>
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', mb: isFullscreen ? 1 : 0, flexShrink: 0 }}>
+                                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: 32 }}>
+                                            {!isFullscreen && (
+                                                <Stack direction="row" alignItems="center">
+                                                    <Stack direction="row" alignItems="center" spacing={1}>
+                                                        <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', borderRadius: 1 }} />
+                                                        <Typography variant="h6" fontSize="0.95rem" fontWeight="bold">
+                                                            <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>日内48点负荷曲线</Box>
+                                                            <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }}>日内曲线</Box>
+                                                        </Typography>
+                                                    </Stack>
 
+                                                    <Box sx={{
+                                                        display: { xs: 'none', sm: 'flex' },
+                                                        alignItems: 'center',
+                                                        bgcolor: 'grey.50',
+                                                        borderRadius: 2,
+                                                        px: 0.5,
+                                                        py: 0.25,
+                                                        border: '1px solid',
+                                                        borderColor: 'divider',
+                                                        ml: 2
+                                                    }}>
+                                                        <IconButton size="small" onClick={() => handleDateShift(-1)} disabled={loading}>
+                                                            <ArrowLeftIcon fontSize="small" />
+                                                        </IconButton>
+                                                        <DatePicker
+                                                            value={selectedDate}
+                                                            onChange={(date) => setSelectedDate(date)}
+                                                            disabled={loading}
+                                                            slotProps={{
+                                                                textField: {
+                                                                    variant: 'standard',
+                                                                    size: 'small',
+                                                                    InputProps: { disableUnderline: true },
+                                                                    sx: {
+                                                                        width: 170,
+                                                                        '& .MuiInputBase-input': {
+                                                                            textAlign: 'center',
+                                                                            fontSize: '0.875rem',
+                                                                            fontWeight: 500,
+                                                                            py: 0.3,
+                                                                            cursor: 'pointer'
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }}
+                                                        />
+                                                        <IconButton size="small" onClick={() => handleDateShift(1)} disabled={loading}>
+                                                            <ArrowRightIcon fontSize="small" />
+                                                        </IconButton>
+                                                    </Box>
+                                                </Stack>
+                                            )}
+
+                                            <Stack direction="row" alignItems="center" spacing={1} sx={{ ml: isFullscreen ? 'auto' : 0 }}>
+                                                <Box>
+                                                    <FullscreenEnterButton />
+                                                    <FullscreenExitButton />
+                                                </Box>
+                                            </Stack>
+                                        </Box>
+
+                                        {!isFullscreen && (
                                             <Box sx={{
-                                                display: 'flex',
+                                                display: { xs: 'flex', sm: 'none' },
                                                 alignItems: 'center',
                                                 bgcolor: 'grey.50',
                                                 borderRadius: 2,
@@ -363,7 +418,9 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
                                                 py: 0.25,
                                                 border: '1px solid',
                                                 borderColor: 'divider',
-                                                ml: 2
+                                                mt: 1,
+                                                mb: 1.5,
+                                                alignSelf: 'flex-start'
                                             }}>
                                                 <IconButton size="small" onClick={() => handleDateShift(-1)} disabled={loading}>
                                                     <ArrowLeftIcon fontSize="small" />
@@ -378,12 +435,12 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
                                                             size: 'small',
                                                             InputProps: { disableUnderline: true },
                                                             sx: {
-                                                                width: 100,
+                                                                width: 130,
                                                                 '& .MuiInputBase-input': {
                                                                     textAlign: 'center',
-                                                                    fontSize: '0.875rem',
+                                                                    fontSize: '0.75rem',
                                                                     fontWeight: 500,
-                                                                    py: 0.5,
+                                                                    py: 0.3,
                                                                     cursor: 'pointer'
                                                                 }
                                                             }
@@ -394,14 +451,7 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
                                                     <ArrowRightIcon fontSize="small" />
                                                 </IconButton>
                                             </Box>
-                                        </Stack>
-
-                                        <Stack direction="row" alignItems="center" spacing={1}>
-                                            <Box>
-                                                <FullscreenEnterButton />
-                                                <FullscreenExitButton />
-                                            </Box>
-                                        </Stack>
+                                        )}
                                     </Box>
                                     <FullscreenTitle />
                                     <NavigationButtons />
@@ -660,7 +710,8 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
                             </Paper>
                         </Grid>
                     </Grid>
-                )}
+                )
+                }
 
                 <Grid container spacing={2}>
                     {/* Tags & AI */}

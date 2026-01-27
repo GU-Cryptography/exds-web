@@ -199,8 +199,38 @@ class LoadAggregationService:
             
             # 聚合48点数据
             aggregated_values = [0.0] * 48
+            data_resolution = 48  # 默认48点
+
             for doc in mp_data:
                 load_values = doc.get("load_values", [])
+                
+                # 特殊处理：2025年9月1日之前的数据
+                # 数据库中可能存储为48位数组，但只有前24位有值（代表24小时），后24位为0或None
+                if date < "2025-09-01" and load_values and len(load_values) == 48:
+                    # 检查后24位是否全为0或None
+                    is_actually_24 = True
+                    for v in load_values[24:]:
+                        if v is not None and v > 0:
+                            is_actually_24 = False
+                            break
+                    
+                    if is_actually_24:
+                        # 截断为前24位，复用下方的上采样逻辑
+                        load_values = load_values[:24]
+
+                # 数据标准化处理：24点 -> 48点
+                if load_values and len(load_values) == 24:
+                    data_resolution = 24  # 标记源数据为24点
+                    expanded = []
+                    for v in load_values:
+                        if v is not None:
+                            # 将1小时电量平分到2个30分钟时段
+                            half_val = v / 2.0
+                            expanded.extend([half_val, half_val])
+                        else:
+                            expanded.extend([None, None])
+                    load_values = expanded
+                    
                 for i, val in enumerate(load_values[:48]):
                     if val is not None:
                         aggregated_values[i] += val
@@ -213,6 +243,7 @@ class LoadAggregationService:
             
             return {
                 "values": [round(v, 3) for v in aggregated_values],
+                "data_resolution": data_resolution,
                 "total": round(total, 3),
                 "tou_usage": tou_usage,
                 "mp_count": len(found_mps),
@@ -267,6 +298,40 @@ class LoadAggregationService:
             return {"tip": 0.0, "peak": 0.0, "flat": 0.0, "valley": 0.0, "deep": 0.0}
     
     @staticmethod
+    def _clean_abnormal_zeros(readings: List[float], prev_readings: List[float] = None) -> List[float]:
+        """
+        清洗异常的0值：
+        如果一个非0值之后紧接着是0，且后续又恢复非0（或者只是单纯的中间断掉变成0），
+        通常意味着这是通讯中断或表计故障导致的缺数，而非读数真为0（电表读数通常是累加的，极少归零）。
+        这里采取保守策略：
+        只要前一个有效读数 > 0，当前读数为 0，则视为异常，置为 None。
+        """
+        if not readings:
+            return []
+            
+        cleaned = list(readings)
+        
+        # 确定初始的 last_valid
+        last_valid = 0.0
+        if prev_readings:
+            # 找前一日最后一个非None且>0的值
+            for v in reversed(prev_readings):
+                if v is not None and v > 0:
+                    last_valid = v
+                    break
+        
+        for i in range(len(cleaned)):
+            curr = cleaned[i]
+            if curr is not None:
+                if curr == 0 and last_valid > 0:
+                    # 异常0值，视为缺失
+                    cleaned[i] = None
+                elif curr > 0:
+                    last_valid = curr
+        
+        return cleaned
+
+    @staticmethod
     def _find_gaps(readings: list) -> list:
         """找出示数数组中的缺口（None值的连续区间）"""
         gaps = []  # [(start_idx, length), ...]
@@ -300,6 +365,9 @@ class LoadAggregationService:
         """
         if not readings or len(readings) < 2:
             return {"values": [0.0]*48, "interpolated_indices": [], "dirty_indices": [], "is_valid": False}
+        
+        # 0. 预处理：清洗异常0值 (将实际上是缺失的0值置为None)
+        readings = LoadAggregationService._clean_abnormal_zeros(readings, prev_readings)
             
         readings = list(readings)
         interpolated_points = []
@@ -728,6 +796,41 @@ class LoadAggregationService:
         return result
     
     @staticmethod
+    def _refine_mp_with_meter_profile(mp_values: List[float], meter_values: List[float]) -> List[float]:
+        """
+        利用电表数据曲线形状修正24点平摊后的计量点数据
+        确保每小时内 MP 总量不变，但分配比例跟随 Meter
+        """
+        refined = list(mp_values)
+        if len(refined) != 48 or len(meter_values) != 48:
+            return refined
+            
+        # 按小时处理 (0,1), (2,3) ...
+        for h in range(24):
+            idx1 = h * 2
+            idx2 = h * 2 + 1
+            
+            # 获取该小时的MP总量 (由于之前是平分的，V1=V2，总量=V1+V2)
+            mp_sum = refined[idx1] + refined[idx2]
+            
+            if mp_sum == 0:
+                continue
+                
+            # 获取该小时的Meter分布
+            m1 = meter_values[idx1]
+            m2 = meter_values[idx2]
+            meter_sum = m1 + m2
+            
+            if meter_sum > 0:
+                # 按照Meter比例重新分配MP总量
+                new_v1 = mp_sum * (m1 / meter_sum)
+                new_v2 = mp_sum * (m2 / meter_sum)
+                refined[idx1] = new_v1
+                refined[idx2] = new_v2
+                
+        return refined
+
+    @staticmethod
     def generate_unified_load_curve(
         customer_id: str, 
         date: str, 
@@ -749,6 +852,22 @@ class LoadAggregationService:
         
         # 聚合电表数据
         meter_load = LoadAggregationService.aggregate_meter_load(customer_id, date)
+        
+        # 优化：如果MP数据是24点上采样的，且存在有效的Meter数据，利用Meter廓形修正MP
+        if mp_load and mp_load.get("data_resolution") == 24 and meter_load and meter_load.get("values"):
+            try:
+                original_values = mp_load["values"]
+                meter_vals = meter_load["values"]
+                refined_values = LoadAggregationService._refine_mp_with_meter_profile(original_values, meter_vals)
+                
+                # 更新值和分时统计
+                mp_load["values"] = [round(v, 3) for v in refined_values]
+                mp_load["tou_usage"] = LoadAggregationService.calculate_tou_distribution(refined_values, date)
+                mp_load["refine_method"] = "meter_profile" # 标记已做廓形优化
+            except Exception as e:
+                logger.warning(f"廓形修正失败: {e}")
+
+        # 如果都没有数据，返回None
         
         # 如果都没有数据，返回None
         if not mp_load and not meter_load:
