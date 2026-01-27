@@ -16,6 +16,7 @@ import { DayAheadPriceForecastPage } from '../pages/DayAheadPriceForecastPage';
 import { WeatherDataPage } from '../pages/WeatherDataPage';
 import { LoadDataDiagnosisPage } from '../pages/LoadDataDiagnosisPage';
 import { CustomerLoadAnalysisPage } from '../pages/CustomerLoadAnalysisPage';
+import { CustomerOverviewPage } from '../pages/CustomerOverviewPage';
 
 // 路由配置接口
 export interface RouteConfig {
@@ -31,14 +32,16 @@ export const routeConfigs: RouteConfig[] = [
     // 客户管理
     { path: '/customer/profiles', title: '客户档案管理', component: CustomerManagementPage },
     { path: '/customer/retail-contracts', title: '零售合同管理', component: RetailContractPage },
-    { path: '/customer/load-analysis', title: '客户负荷分析', component: CustomerLoadAnalysisPage },
-    { path: '/customer/cluster-analysis', title: '客户聚类分析', component: PlaceholderPage },
+    { path: '/customer/retail-packages', title: '零售套餐管理', component: RetailPackagePage },
+    { path: '/customer/load-analysis', title: '客户负荷分析', component: CustomerOverviewPage },
+    { path: '/customer/cluster-analysis', title: '负荷特征分析', component: PlaceholderPage },
+    { path: '/customer/external-diagnosis', title: '外部客户诊断', component: PlaceholderPage },
 
     // 负荷预测
     { path: '/load-forecast/overall-analysis', title: '总体负荷分析', component: LoadAnalysisPage },
     { path: '/load-forecast/short-term', title: '短期负荷预测', component: PlaceholderPage },
     { path: '/load-forecast/accuracy-analysis', title: '预测精度分析', component: PlaceholderPage },
-    { path: '/load-forecast/long-term', title: '中长期负荷预测', component: PlaceholderPage },
+    { path: '/load-forecast/long-term', title: '年度负荷预测', component: PlaceholderPage },
 
     // 价格分析
     { path: '/price-analysis/spot-market', title: '现货日内分析', component: MarketPriceAnalysisPage },
@@ -73,7 +76,6 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/basic-data/grid-price', title: '国网代理购电', component: GridAgencyPricePage },
     { path: '/basic-data/tou-definition', title: '时段电价分布', component: TouRulesPage },
     { path: '/basic-data/weather-data', title: '天气预测数据', component: WeatherDataPage },
-    { path: '/basic-data/retail-packages', title: '零售套餐管理', component: RetailPackagePage },
     { path: '/basic-data/load-validation', title: '负荷数据诊断', component: LoadDataDiagnosisPage },
 
     // 系统管理

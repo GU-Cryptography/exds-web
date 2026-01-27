@@ -26,15 +26,33 @@ class HourlyDataPoint(BaseModel):
     period_type: str = "平段"  # TOU period type (e.g., 尖峰/高峰/平段/低谷/深谷)
 
 class AnalysisStats(BaseModel):
-    annual_contract: float
-    annual_cumulative: float
-    day_total: float
-    yesterday_total: float
+    this_year_contract: float
+    contract_yoy: Optional[float] = None
+    last_year_total: float
+    
+    cumulative_usage: float
+    cumulative_yoy: Optional[float] = None
+    cumulative_tou: TouUsage
+    cumulative_pv_ratio: float
+    
+    this_month_usage: float
+    month_yoy: Optional[float] = None
+    month_tou: TouUsage
+    month_pv_ratio: float
+    
+    # Latest/Today stats for the general dashboard
+    latest_day_total: float
+    latest_day_tou: TouUsage
+    latest_pv_ratio: float
+
+class SelectedDateStats(BaseModel):
+    total: float
     tou_usage: TouUsage
     peak_valley_ratio: float
 
 class DailyViewResponse(BaseModel):
     main_curve: List[HourlyDataPoint]
+    selected_date_stats: SelectedDateStats
     stats: AnalysisStats
 
 class HistoryDataPoint(BaseModel):
@@ -158,7 +176,60 @@ def _get_annual_cumulative(customer_id: str, year: int, up_to_date: str) -> floa
             
     # Call LoadQueryService to sum up daily totals
     totals = LoadQueryService.get_daily_totals(customer_id, calc_start_date, up_to_date)
-    return sum([t.total for t in totals]) if totals else 0.0
+    total = round(sum([t.total for t in totals]), 2) if totals else 0.0
+    return total, calc_start_date
+
+def _get_last_year_total(customer_id: str, year: int) -> float:
+    """获取客户去年的全年用电量"""
+    last_year = year - 1
+    start_date = f"{last_year}-01-01"
+    end_date = f"{last_year}-12-31"
+    
+    totals = LoadQueryService.get_daily_totals(customer_id, start_date, end_date)
+    return round(sum([t.total for t in totals]), 2) if totals else 0.0
+
+def _get_usage_with_tou(customer_id: str, start_date: str, end_date: str) -> tuple[float, TouUsage]:
+    """获取指定区间的总电量和分时细项"""
+    totals = LoadQueryService.get_daily_totals(customer_id, start_date, end_date)
+    total_val = round(sum([t.total for t in totals]), 2) if totals else 0.0
+    
+    tou = TouUsage()
+    if totals:
+        for t in totals:
+            if t.tou_usage:
+                tou.tip += t.tou_usage.tip
+                tou.peak += t.tou_usage.peak
+                tou.flat += t.tou_usage.flat
+                tou.valley += t.tou_usage.valley
+                tou.deep += t.tou_usage.deep
+    
+    tou.tip = round(tou.tip, 2)
+    tou.peak = round(tou.peak, 2)
+    tou.flat = round(tou.flat, 2)
+    tou.valley = round(tou.valley, 2)
+    tou.deep = round(tou.deep, 2)
+    
+    return total_val, tou
+
+def _this_calc_pv_ratio(tou: TouUsage) -> float:
+    numerator = tou.tip + tou.peak
+    denominator = tou.valley + tou.deep
+    if denominator > 0.0001:
+        return round(numerator / denominator, 2)
+    return 0.0
+    end_date = f"{last_year}-12-31"
+    
+    totals = LoadQueryService.get_daily_totals(customer_id, start_date, end_date)
+    return round(sum([t.total for t in totals]), 2) if totals else 0.0
+
+def _get_this_month_usage(customer_id: str) -> float:
+    """获取客户本月（实时的）累计用电量"""
+    now = datetime.now()
+    start_date = now.strftime("%Y-%m-01")
+    end_date = now.strftime("%Y-%m-%d")
+    
+    totals = LoadQueryService.get_daily_totals(customer_id, start_date, end_date)
+    return round(sum([t.total for t in totals]), 2) if totals else 0.0
 
 
 # ---- Endpoints ----
@@ -199,38 +270,78 @@ async def get_daily_view(
             period_type=period_type
         ))
         
-    # 3. Calculate Stats
-    # Day Total
-    day_total = current_curve.total if current_curve else 0.0
-    yesterday_total = yesterday_curve.total if yesterday_curve else 0.0
+    # Selection-Dependent Stats
+    selected_total = current_curve.total if current_curve else 0.0
+    selected_tou = current_curve.tou_usage if current_curve and current_curve.tou_usage else TouUsage()
+    selected_pv_ratio = _this_calc_pv_ratio(selected_tou)
     
-    # TOU Usage
-    # Directly use tou_usage from current_curve (now correctly aggregated/retrieved by service)
-    tou_usage = current_curve.tou_usage if current_curve and current_curve.tou_usage else TouUsage()
+    # Global/Latest Stats (Real-time today)
+    real_today = datetime.now()
+    real_today_str = real_today.strftime("%Y-%m-%d")
+    current_year = real_today.year
     
-    # 峰谷比: (尖峰 + 高峰) / (低谷 + 深谷)
-    numerator = tou_usage.tip + tou_usage.peak
-    denominator = tou_usage.valley + tou_usage.deep
+    # Fetch Latest Day (Real today)
+    latest_curve = LoadQueryService.get_daily_curve(customer_id, real_today_str)
+    latest_day_total = latest_curve.total if latest_curve else 0.0
+    latest_day_tou = latest_curve.tou_usage if latest_curve and latest_curve.tou_usage else TouUsage()
+    latest_pv_ratio = _this_calc_pv_ratio(latest_day_tou)
     
-    if denominator > 0.0001:
-        pv_ratio = numerator / denominator
-    else:
-        pv_ratio = 0.0
-        
-    # Annual Stats
-    year = target_date_obj.year
-    annual_contract = _get_annual_contract_amount(customer_id, year) # Returns MWh
-    annual_cumulative = _get_annual_cumulative(customer_id, year, date) # Returns MWh
+    # 1. 本年签约量与去年总量
+    this_year_contract = _get_annual_contract_amount(customer_id, current_year)
+    last_year_total = _get_last_year_total(customer_id, current_year)
+    
+    # 2. 累计用电量与当月用电量 (Real-time context)
+    cumulative_usage, this_year_start_date = _get_annual_cumulative(customer_id, current_year, real_today_str)
+    this_month_usage, month_tou = _get_usage_with_tou(customer_id, real_today.strftime("%Y-%m-01"), real_today_str)
+    
+    # Cumulative TOU from start to today
+    _, cumulative_tou = _get_usage_with_tou(customer_id, this_year_start_date, real_today_str)
+    
+    # 同期（去年）对比
+    last_year_today_str = (real_today - timedelta(days=365)).strftime("%Y-%m-%d")
+    try:
+        this_year_start_dt = datetime.strptime(this_year_start_date, "%Y-%m-%d")
+        last_year_start_str = f"{current_year - 1}-{this_year_start_dt.month:02d}-{this_year_start_dt.day:02d}"
+        totals_last = LoadQueryService.get_daily_totals(customer_id, last_year_start_str, last_year_today_str)
+        cumulative_usage_last = round(sum([t.total for t in totals_last]), 2) if totals_last else 0.0
+    except:
+        cumulative_usage_last = 0.0
+    
+    # 上年同月
+    last_year_month_start = (real_today - timedelta(days=365)).strftime("%Y-%m-01")
+    totals_month_last = LoadQueryService.get_daily_totals(customer_id, last_year_month_start, last_year_today_str)
+    this_month_usage_last = round(sum([t.total for t in totals_month_last]), 2) if totals_month_last else 0.0
+    
+    # 计算同比增长率
+    def calc_yoy(current: float, previous: float) -> Optional[float]:
+        return round((current - previous) / previous * 100, 1) if previous > 0 else None
+
+    contract_yoy = calc_yoy(this_year_contract, last_year_total)
+    cumulative_yoy = calc_yoy(cumulative_usage, cumulative_usage_last)
+    month_yoy = calc_yoy(this_month_usage, this_month_usage_last)
     
     return DailyViewResponse(
         main_curve=points,
+        selected_date_stats=SelectedDateStats(
+            total=selected_total,
+            tou_usage=selected_tou,
+            peak_valley_ratio=selected_pv_ratio
+        ),
         stats=AnalysisStats(
-            annual_contract=annual_contract,
-            annual_cumulative=annual_cumulative,
-            day_total=day_total,
-            yesterday_total=yesterday_total,
-            tou_usage=tou_usage,
-            peak_valley_ratio=round(pv_ratio, 2)
+            this_year_contract=this_year_contract,
+            contract_yoy=contract_yoy,
+            last_year_total=last_year_total,
+            cumulative_usage=cumulative_usage,
+            cumulative_yoy=cumulative_yoy,
+            cumulative_tou=cumulative_tou,
+            cumulative_pv_ratio=_this_calc_pv_ratio(cumulative_tou),
+            this_month_usage=this_month_usage,
+            month_yoy=month_yoy,
+            month_tou=month_tou,
+            month_pv_ratio=_this_calc_pv_ratio(month_tou),
+            latest_day_total=latest_day_total,
+            latest_day_tou=latest_day_tou,
+            latest_pv_ratio=latest_pv_ratio
         )
     )
 

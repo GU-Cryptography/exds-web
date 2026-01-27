@@ -73,6 +73,7 @@ type SortableColumn = 'customer_name' | 'start_date' | 'end_date' | 'total_days'
 export const LoadDataDiagnosisPage: React.FC = () => {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+    const isTablet = useMediaQuery(theme.breakpoints.down('md'));
     const { addTab } = useTabContext();
 
     // 状态
@@ -644,11 +645,18 @@ export const LoadDataDiagnosisPage: React.FC = () => {
 
     return (
         <Box sx={{ width: '100%' }}>
-            {/* 移动端标题 */}
-            {isMobile && (
-                <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-                    <Typography variant="h6">负荷数据诊断</Typography>
-                </Paper>
+            {/* 移动端面包屑标题 */}
+            {isTablet && (
+                <Typography
+                    variant="subtitle1"
+                    sx={{
+                        mb: 2,
+                        fontWeight: 'bold',
+                        color: 'text.primary'
+                    }}
+                >
+                    基础数据 / 负荷数据诊断
+                </Typography>
             )}
 
             {/* 第一行: 统计卡片 */}

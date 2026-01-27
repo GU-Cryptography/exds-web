@@ -6,6 +6,7 @@ import {
     Route,
 } from 'react-router-dom';
 import { CustomerLoadAnalysisPage } from './pages/CustomerLoadAnalysisPage';
+import { CustomerOverviewPage } from './pages/CustomerOverviewPage';
 import {
     CssBaseline,
     useMediaQuery,
@@ -65,8 +66,14 @@ const ResponsiveLayout: React.FC = () => {
                     <Route path="customer/retail-contracts/create" element={<RetailContractPage />} />
                     <Route path="customer/retail-contracts/view/:contractId" element={<RetailContractPage />} />
                     <Route path="customer/retail-contracts/edit/:contractId" element={<RetailContractPage />} />
-                    <Route path="customer/load-analysis" element={<CustomerLoadAnalysisPage />} />
+                    <Route path="customer/retail-packages" element={<RetailPackagePage />} />
+                    <Route path="customer/retail-packages/create" element={<RetailPackagePage />} />
+                    <Route path="customer/retail-packages/view/:packageId" element={<RetailPackagePage />} />
+                    <Route path="customer/retail-packages/edit/:packageId" element={<RetailPackagePage />} />
+                    <Route path="customer/retail-packages/copy/:packageId" element={<RetailPackagePage />} />
+                    <Route path="customer/load-analysis" element={<CustomerOverviewPage />} />
                     <Route path="customer/cluster-analysis" element={<PlaceholderPage />} />
+                    <Route path="customer/external-diagnosis" element={<PlaceholderPage />} />
 
                     {/* 负荷预测 */}
                     <Route path="load-forecast/overall-analysis" element={<LoadAnalysisPage />} />
@@ -107,11 +114,6 @@ const ResponsiveLayout: React.FC = () => {
                     {/* 基础数据 */}
                     <Route path="basic-data/grid-price" element={<GridAgencyPricePage />} />
                     <Route path="basic-data/tou-definition" element={<TouRulesPage />} />
-                    <Route path="basic-data/retail-packages" element={<RetailPackagePage />} />
-                    <Route path="basic-data/retail-packages/create" element={<RetailPackagePage />} />
-                    <Route path="basic-data/retail-packages/view/:packageId" element={<RetailPackagePage />} />
-                    <Route path="basic-data/retail-packages/edit/:packageId" element={<RetailPackagePage />} />
-                    <Route path="basic-data/retail-packages/copy/:packageId" element={<RetailPackagePage />} />
                     <Route path="basic-data/weather-data" element={<WeatherDataPage />} />
                     <Route path="basic-data/load-validation" element={<LoadDataDiagnosisPage />} />
 

@@ -18,16 +18,35 @@ export interface TouUsage {
 }
 
 export interface AnalysisStats {
-    annual_contract: number;
-    annual_cumulative: number;
-    day_total: number;
-    yesterday_total: number;
+    this_year_contract: number;
+    contract_yoy: number | null;
+    last_year_total: number;
+
+    cumulative_usage: number;
+    cumulative_yoy: number | null;
+    cumulative_tou: TouUsage;
+    cumulative_pv_ratio: number;
+
+    this_month_usage: number;
+    month_yoy: number | null;
+    month_tou: TouUsage;
+    month_pv_ratio: number;
+
+    // Latest/Today stats for the general dashboard
+    latest_day_total: number;
+    latest_day_tou: TouUsage;
+    latest_pv_ratio: number;
+}
+
+export interface SelectedDateStats {
+    total: number;
     tou_usage: TouUsage;
     peak_valley_ratio: number;
 }
 
 export interface DailyViewResponse {
     main_curve: HourlyDataPoint[];
+    selected_date_stats: SelectedDateStats;
     stats: AnalysisStats;
 }
 

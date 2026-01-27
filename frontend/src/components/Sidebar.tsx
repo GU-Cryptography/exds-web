@@ -70,18 +70,26 @@ const menuItems: MenuItem[] = [
         subItems: [
             { text: '客户档案管理', path: '/customer/profiles', icon: <AccountBoxOutlined /> },
             { text: '零售合同管理', path: '/customer/retail-contracts', icon: <StyleOutlined /> },
+            { text: '零售套餐管理', path: '/customer/retail-packages', icon: <StyleOutlined /> },
+        ],
+    },
+    {
+        text: '负荷分析',
+        icon: <ShowChartOutlined />,
+        subItems: [
+            { text: '总体负荷分析', path: '/load-forecast/overall-analysis', icon: <StackedLineChartOutlined /> },
             { text: '客户负荷分析', path: '/customer/load-analysis', icon: <ShowChartOutlined /> },
-            { text: '客户聚类分析', path: '/customer/cluster-analysis', icon: <BubbleChartOutlined /> },
+            { text: '负荷特征分析', path: '/customer/cluster-analysis', icon: <BubbleChartOutlined /> },
+            { text: '外部客户诊断', path: '/customer/external-diagnosis', icon: <VerifiedUserOutlined /> },
         ],
     },
     {
         text: '负荷预测',
         icon: <TimelineIcon />,
         subItems: [
-            { text: '总体负荷分析', path: '/load-forecast/overall-analysis', icon: <StackedLineChartOutlined /> },
+            { text: '年度负荷预测', path: '/load-forecast/long-term', icon: <CalendarMonthOutlined /> },
             { text: '短期负荷预测', path: '/load-forecast/short-term', icon: <QueryStatsOutlined /> },
             { text: '预测精度分析', path: '/load-forecast/accuracy-analysis', icon: <RuleOutlined /> },
-            { text: '中长期负荷预测', path: '/load-forecast/long-term', icon: <CalendarMonthOutlined /> },
         ],
     },
     {
@@ -140,7 +148,6 @@ const menuItems: MenuItem[] = [
             { text: '国网代理购电', path: '/basic-data/grid-price', icon: <PriceChangeIcon /> },
             { text: '时段电价分布', path: '/basic-data/tou-definition', icon: <StyleOutlined /> },
             { text: '天气预测数据', path: '/basic-data/weather-data', icon: <AnalyticsOutlined /> },
-            { text: '零售套餐管理', path: '/basic-data/retail-packages', icon: <StyleOutlined /> },
             { text: '负荷数据诊断', path: '/basic-data/load-validation', icon: <VerifiedUserOutlined /> },
         ],
     },

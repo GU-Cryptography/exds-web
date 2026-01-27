@@ -41,6 +41,8 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import ArrowLeftIcon from '@mui/icons-material/ArrowLeft';
 import ArrowRightIcon from '@mui/icons-material/ArrowRight';
 import DeleteIcon from '@mui/icons-material/Delete';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import { CustomTooltip } from '../components/CustomTooltip';
 
 import { customerAnalysisApi, DailyViewResponse, AnalysisStats, AutoTag } from '../api/customerAnalysis';
@@ -49,9 +51,15 @@ import { useTouPeriodBackground } from '../hooks/useTouPeriodBackground';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
 import TagSelector from '../components/customer/TagSelector';
 
-export const CustomerLoadAnalysisPage: React.FC = () => {
+// Props 接口：支持从总览页面 Tab 传入 customerId
+interface CustomerLoadAnalysisPageProps {
+    customerId?: string;  // 从Tab传入时使用
+}
+
+export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> = ({ customerId: propCustomerId }) => {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+    const isTablet = useMediaQuery(theme.breakpoints.down('md'));
 
     // State
     const [selectedDate, setSelectedDate] = useState<Date | null>(subDays(new Date(), 2));
@@ -75,6 +83,9 @@ export const CustomerLoadAnalysisPage: React.FC = () => {
 
     const chartRef = useRef<HTMLDivElement>(null);
 
+    // 是否为Tab模式（有propCustomerId传入时不显示客户选择器）
+    const isTabMode = !!propCustomerId;
+
     // Hooks
     const { FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, NavigationButtons, isFullscreen } = useChartFullscreen({
         chartRef,
@@ -96,11 +107,40 @@ export const CustomerLoadAnalysisPage: React.FC = () => {
         }).then(res => {
             if (res.data.items && res.data.items.length > 0) {
                 setCustomers(res.data.items);
-                // Default select first one for convenience
-                setSelectedCustomer(res.data.items[0]);
+
+                // 如果有 propCustomerId，自动选中对应客户
+                if (propCustomerId) {
+                    const targetCustomer = res.data.items.find(c => c.id === propCustomerId);
+                    if (targetCustomer) {
+                        setSelectedCustomer(targetCustomer);
+                    } else {
+                        // 如果在列表中找不到，尝试单独获取
+                        customerApi.getCustomer(propCustomerId).then(custRes => {
+                            // 构造一个兼容的对象
+                            const custData = custRes.data;
+                            setSelectedCustomer({
+                                id: custData.id,
+                                user_name: custData.user_name,
+                                short_name: custData.short_name || custData.user_name,
+                                tags: custData.tags || [],
+                                account_count: custData.accounts?.length || 0,
+                                meter_count: 0,
+                                mp_count: 0,
+                                current_year_contract_amount: 0,
+                                created_at: custData.created_at,
+                                updated_at: custData.updated_at
+                            });
+                        }).catch(err => {
+                            console.error('获取指定客户失败:', err);
+                        });
+                    }
+                } else {
+                    // Default select first one for convenience
+                    setSelectedCustomer(res.data.items[0]);
+                }
             }
         });
-    }, []);
+    }, [propCustomerId]);
 
     // Fetch Daily View
     useEffect(() => {
@@ -258,29 +298,35 @@ export const CustomerLoadAnalysisPage: React.FC = () => {
     return (
         <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
             <Box sx={{ width: '100%' }}>
-                <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-                    <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center">
-                        <Autocomplete
-                            options={customers}
-                            getOptionLabel={(option) => option.user_name}
-                            value={selectedCustomer}
-                            onChange={(_, newValue) => setSelectedCustomer(newValue)}
-                            renderInput={(params) => <TextField {...params} label="选择客户" size="small" />}
-                            sx={{ width: { xs: '100%', md: 300 } }}
-                        />
+                {/* 移动端面包屑标题 - 仅非 Tab 模式下显示 */}
+                {isTablet && !isTabMode && (
+                    <Typography
+                        variant="subtitle1"
+                        sx={{
+                            mb: 2,
+                            fontWeight: 'bold',
+                            color: 'text.primary'
+                        }}
+                    >
+                        客户管理 / 客户负荷分析 / {selectedCustomer?.short_name || '请选择客户'}
+                    </Typography>
+                )}
 
-                        <Stack direction="row" spacing={1} alignItems="center">
-                            <IconButton onClick={() => handleDateShift(-1)} disabled={loading}><ArrowLeftIcon /></IconButton>
-                            <DatePicker
-                                label="选择日期"
-                                value={selectedDate}
-                                onChange={(date) => setSelectedDate(date)}
-                                slotProps={{ textField: { size: 'small', sx: { width: 160 } } }}
+                {/* 客户选择器 - Tab模式下隐藏 */}
+                {!isTabMode && (
+                    <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+                        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center">
+                            <Autocomplete
+                                options={customers}
+                                getOptionLabel={(option) => option.user_name}
+                                value={selectedCustomer}
+                                onChange={(_, newValue) => setSelectedCustomer(newValue)}
+                                renderInput={(params) => <TextField {...params} label="选择客户" size="small" />}
+                                sx={{ width: { xs: '100%', md: 400 } }}
                             />
-                            <IconButton onClick={() => handleDateShift(1)} disabled={loading}><ArrowRightIcon /></IconButton>
                         </Stack>
-                    </Stack>
-                </Paper>
+                    </Paper>
+                )}
 
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
@@ -294,22 +340,68 @@ export const CustomerLoadAnalysisPage: React.FC = () => {
                     <Grid container spacing={2} sx={{ mb: 2 }}>
                         {/* Main Chart */}
                         <Grid size={{ xs: 12, md: 8 }}>
-                            <Paper variant="outlined" sx={{ p: 1, height: '100%', position: 'relative' }}>
+                            <Paper variant="outlined" sx={{ p: 1.5, height: '100%', position: 'relative' }}>
                                 <Box ref={chartRef} sx={{
-                                    height: 440,
+                                    height: 390,
                                     display: 'flex', flexDirection: 'column',
                                     position: 'relative',
                                     ...(isFullscreen && { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1400, bgcolor: 'background.paper', height: '100vh', p: 2 })
                                 }}>
-                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2, flexShrink: 0 }}>
-                                        <Stack direction="row" alignItems="center" spacing={1}>
-                                            <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', borderRadius: 1 }} />
-                                            <Typography variant="h6" fontSize="1rem" fontWeight="bold">日内48点负荷曲线</Typography>
+                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: 32, mb: 1, flexShrink: 0 }}>
+                                        <Stack direction="row" alignItems="center">
+                                            <Stack direction="row" alignItems="center" spacing={1}>
+                                                <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', borderRadius: 1 }} />
+                                                <Typography variant="h6" fontSize="0.95rem" fontWeight="bold">日内48点负荷曲线</Typography>
+                                            </Stack>
+
+                                            <Box sx={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                bgcolor: 'grey.50',
+                                                borderRadius: 2,
+                                                px: 0.5,
+                                                py: 0.25,
+                                                border: '1px solid',
+                                                borderColor: 'divider',
+                                                ml: 2
+                                            }}>
+                                                <IconButton size="small" onClick={() => handleDateShift(-1)} disabled={loading}>
+                                                    <ArrowLeftIcon fontSize="small" />
+                                                </IconButton>
+                                                <DatePicker
+                                                    value={selectedDate}
+                                                    onChange={(date) => setSelectedDate(date)}
+                                                    disabled={loading}
+                                                    slotProps={{
+                                                        textField: {
+                                                            variant: 'standard',
+                                                            size: 'small',
+                                                            InputProps: { disableUnderline: true },
+                                                            sx: {
+                                                                width: 100,
+                                                                '& .MuiInputBase-input': {
+                                                                    textAlign: 'center',
+                                                                    fontSize: '0.875rem',
+                                                                    fontWeight: 500,
+                                                                    py: 0.5,
+                                                                    cursor: 'pointer'
+                                                                }
+                                                            }
+                                                        }
+                                                    }}
+                                                />
+                                                <IconButton size="small" onClick={() => handleDateShift(1)} disabled={loading}>
+                                                    <ArrowRightIcon fontSize="small" />
+                                                </IconButton>
+                                            </Box>
                                         </Stack>
-                                        <Box>
-                                            <FullscreenEnterButton />
-                                            <FullscreenExitButton />
-                                        </Box>
+
+                                        <Stack direction="row" alignItems="center" spacing={1}>
+                                            <Box>
+                                                <FullscreenEnterButton />
+                                                <FullscreenExitButton />
+                                            </Box>
+                                        </Stack>
                                     </Box>
                                     <FullscreenTitle />
                                     <NavigationButtons />
@@ -338,7 +430,7 @@ export const CustomerLoadAnalysisPage: React.FC = () => {
                                                     axisLine={{ stroke: '#ccc' }}
                                                     tickCount={5}
                                                 />
-                                                <RechartsTooltip content={<CustomTooltip unit="kW" />} />
+                                                <RechartsTooltip content={<CustomTooltip unit="MWh" />} />
                                                 <Legend
                                                     verticalAlign="top"
                                                     align="right"
@@ -352,6 +444,52 @@ export const CustomerLoadAnalysisPage: React.FC = () => {
                                             </LineChart>
                                         </ResponsiveContainer>
                                     </Box>
+
+                                    {/* 当日指标展示条 */}
+                                    <Box sx={{
+                                        mt: 0.2,
+                                        p: 0.8,
+                                        bgcolor: 'grey.50',
+                                        borderRadius: 1,
+                                        display: 'flex',
+                                        flexWrap: 'wrap',
+                                        gap: { xs: 1, sm: 2 },
+                                        alignItems: 'center',
+                                        border: '1px solid',
+                                        borderColor: 'grey.200'
+                                    }}>
+                                        {/* 总量 */}
+                                        <Box>
+                                            <Typography variant="caption" color="text.secondary" display="block" sx={{ fontSize: '0.7rem' }}>当日总量</Typography>
+                                            <Typography sx={{ fontWeight: 'bold', lineHeight: 1, fontSize: '1.1rem' }}>
+                                                {dailyData.selected_date_stats.total} <Typography component="span" sx={{ fontSize: '0.7rem', fontWeight: 'normal', color: 'text.secondary' }}>MWh</Typography>
+                                            </Typography>
+                                        </Box>
+
+                                        {/* 分时结构 - 紧凑型 */}
+                                        <Box sx={{ display: 'flex', gap: 0.8, flex: 1, minWidth: { xs: '100%', sm: 'auto' }, borderLeft: { sm: '1px solid' }, borderRight: { sm: '1px solid' }, borderColor: { sm: 'divider' }, px: { sm: 2 } }}>
+                                            {[
+                                                { label: '尖', value: dailyData.selected_date_stats.tou_usage.tip, color: '#ff5252' },
+                                                { label: '峰', value: dailyData.selected_date_stats.tou_usage.peak, color: '#ff9800' },
+                                                { label: '平', value: dailyData.selected_date_stats.tou_usage.flat, color: '#4caf50' },
+                                                { label: '谷', value: dailyData.selected_date_stats.tou_usage.valley, color: '#2196f3' },
+                                                { label: '深', value: dailyData.selected_date_stats.tou_usage.deep, color: '#3f51b5' },
+                                            ].map((item) => (
+                                                <Box key={item.label} sx={{ textAlign: 'center', flex: 1 }}>
+                                                    <Typography variant="caption" sx={{ color: item.color, fontWeight: 'bold', display: 'block', fontSize: '0.7rem', lineHeight: 1 }}>{item.label}</Typography>
+                                                    <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: '0.85rem', color: 'text.primary', lineHeight: 1.2 }}>{item.value || 0}</Typography>
+                                                </Box>
+                                            ))}
+                                        </Box>
+
+                                        {/* 峰谷比 */}
+                                        <Box sx={{ textAlign: { xs: 'left', sm: 'right' }, minWidth: '80px' }}>
+                                            <Typography variant="caption" color="text.secondary" display="block" sx={{ fontSize: '0.7rem' }}>当日峰谷比</Typography>
+                                            <Typography sx={{ fontWeight: 'bold', color: 'primary.main', lineHeight: 1, fontSize: '1.1rem' }}>
+                                                {dailyData.selected_date_stats.peak_valley_ratio}
+                                            </Typography>
+                                        </Box>
+                                    </Box>
                                 </Box>
                             </Paper>
                         </Grid>
@@ -359,89 +497,166 @@ export const CustomerLoadAnalysisPage: React.FC = () => {
                         {/* Statistics */}
                         <Grid size={{ xs: 12, md: 4 }}>
                             <Paper variant="outlined" sx={{ p: 1.5, height: '100%' }}>
-                                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                                    <Stack direction="row" alignItems="center" spacing={1}>
-                                        <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', borderRadius: 1 }} />
-                                        <Typography variant="h6" fontSize="1rem" fontWeight="bold">统计指标</Typography>
+                                <Box sx={{ height: 390, display: 'flex', flexDirection: 'column' }}>
+                                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ height: 32, mb: 1, flexShrink: 0 }}>
+                                        <Stack direction="row" alignItems="center" spacing={1}>
+                                            <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', borderRadius: 1 }} />
+                                            <Typography variant="h6" fontSize="0.95rem" fontWeight="bold">统计指标</Typography>
+                                        </Stack>
                                     </Stack>
-                                </Stack>
 
-                                <Stack spacing={1.5}>
-                                    {/* 本年度合同电量 */}
-                                    <Card variant="outlined" sx={{ bgcolor: 'grey.50' }}>
-                                        <CardContent sx={{ p: '12px !important', '&:last-child': { pb: '12px !important' } }}>
-                                            <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                                <Typography variant="caption" color="text.secondary">本年度合同电量</Typography>
-                                            </Stack>
-                                            <Typography variant="h5" sx={{ fontWeight: 'bold', color: 'text.primary', mt: 0.5 }}>
-                                                {dailyData.stats.annual_contract} <Typography component="span" variant="body2" color="text.secondary">MWh</Typography>
-                                            </Typography>
-                                        </CardContent>
-                                    </Card>
+                                    <Stack spacing={1} sx={{ flex: 1, minHeight: 0 }}>
+                                        {/* 第一排：去年总量 & 本年签约量 */}
+                                        <Box sx={{ height: 72 }}>
+                                            <Grid container spacing={1} sx={{ height: '100%' }}>
+                                                {[
+                                                    { label: '去年用电量', value: dailyData.stats.last_year_total, unit: 'MWh', color: 'info' as const },
+                                                    { label: '本年签约量', value: dailyData.stats.this_year_contract, unit: 'MWh', color: 'primary' as const, yoy: dailyData.stats.contract_yoy }
+                                                ].map((item) => (
+                                                    <Grid key={item.label} size={6} sx={{ height: '100%' }}>
+                                                        <Card variant="outlined" sx={{ bgcolor: 'grey.50', height: '100%', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', border: '1px solid', borderColor: 'grey.200' }}>
+                                                            <CardContent sx={{ p: '6px 10px !important', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                                                                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, fontSize: '0.75rem' }}>{item.label}</Typography>
+                                                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 0.1 }}>
+                                                                    <Typography variant="h6" sx={{ fontWeight: 800, color: 'text.primary', fontSize: '1.15rem', lineHeight: 1 }}>
+                                                                        {item.value} <Typography component="span" variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>{item.unit}</Typography>
+                                                                    </Typography>
+                                                                    {item.yoy !== undefined && item.yoy !== null && (
+                                                                        <Box sx={{
+                                                                            display: 'flex',
+                                                                            alignItems: 'center',
+                                                                            color: item.yoy >= 0 ? 'error.main' : 'success.main',
+                                                                            bgcolor: item.yoy >= 0 ? 'error.lighter' : 'success.lighter',
+                                                                            px: 0.5,
+                                                                            py: 0.1,
+                                                                            borderRadius: 0.5,
+                                                                            ml: 0.5
+                                                                        }}>
+                                                                            {item.yoy >= 0 ? <TrendingUpIcon sx={{ fontSize: '0.75rem' }} /> : <TrendingDownIcon sx={{ fontSize: '0.75rem' }} />}
+                                                                            <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem', ml: 0.2 }}>
+                                                                                {Math.abs(item.yoy)}%
+                                                                            </Typography>
+                                                                        </Box>
+                                                                    )}
+                                                                </Box>
+                                                            </CardContent>
+                                                        </Card>
+                                                    </Grid>
+                                                ))}
+                                            </Grid>
+                                        </Box>
 
-                                    {/* 累计用电量 */}
-                                    <Card variant="outlined" sx={{ bgcolor: 'grey.50' }}>
-                                        <CardContent sx={{ p: '12px !important', '&:last-child': { pb: '12px !important' } }}>
-                                            <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                                <Typography variant="caption" color="text.secondary">累计用电量</Typography>
-                                            </Stack>
-                                            <Typography variant="h5" sx={{ fontWeight: 'bold', color: 'text.primary', mt: 0.5 }}>
-                                                {dailyData.stats.annual_cumulative} <Typography component="span" variant="body2" color="text.secondary">MWh</Typography>
-                                            </Typography>
-                                        </CardContent>
-                                    </Card>
+                                        {/* 第二排：累计用电量 */}
+                                        <Card variant="outlined" sx={{ bgcolor: 'grey.50', flex: 1, minHeight: 0, boxShadow: '0 2px 4px rgba(0,0,0,0.02)', border: '1px solid', borderColor: 'grey.200' }}>
+                                            <CardContent sx={{ p: '8px 12px !important', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                                                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                                    <Box>
+                                                        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, fontSize: '0.7rem' }}>累计用电量</Typography>
+                                                        <Typography variant="h6" sx={{ fontWeight: 800, color: 'text.primary', fontSize: '1.2rem', lineHeight: 1 }}>
+                                                            {dailyData.stats.cumulative_usage} <Typography component="span" variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>MWh</Typography>
+                                                        </Typography>
+                                                    </Box>
+                                                    {dailyData.stats.cumulative_yoy !== null && (
+                                                        <Box sx={{
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            color: dailyData.stats.cumulative_yoy >= 0 ? 'error.main' : 'success.main',
+                                                            bgcolor: dailyData.stats.cumulative_yoy >= 0 ? 'error.lighter' : 'success.lighter',
+                                                            px: 0.6,
+                                                            py: 0.1,
+                                                            borderRadius: 0.5
+                                                        }}>
+                                                            {dailyData.stats.cumulative_yoy >= 0 ? <TrendingUpIcon sx={{ fontSize: '0.8rem' }} /> : <TrendingDownIcon sx={{ fontSize: '0.8rem' }} />}
+                                                            <Typography variant="caption" sx={{ fontWeight: 'bold', fontSize: '0.75rem', ml: 0.3 }}>
+                                                                {Math.abs(dailyData.stats.cumulative_yoy)}%
+                                                            </Typography>
+                                                        </Box>
+                                                    )}
+                                                </Stack>
 
-                                    {/* 当日用电量与结构 */}
-                                    <Card variant="outlined" sx={{ bgcolor: 'grey.50' }}>
-                                        <CardContent sx={{ p: '12px !important', '&:last-child': { pb: '12px !important' } }}>
-                                            <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
-                                                {/* 左侧：总量显示 */}
-                                                <Box>
-                                                    <Typography variant="caption" color="text.secondary">当日用电量</Typography>
-                                                    <Typography variant="h5" sx={{ fontWeight: 'bold', color: 'text.primary', mt: 0.2 }}>
-                                                        {dailyData.stats.day_total} <Typography component="span" variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem' }}>MWh</Typography>
-                                                    </Typography>
-                                                </Box>
-
-                                                {/* 右侧：分时细项 */}
-                                                <Box sx={{ borderLeft: '1px solid', borderColor: 'divider', pl: 1, ml: 1, flexShrink: 0 }}>
-                                                    <Grid container spacing={0.5} sx={{ width: '135px' }}>
+                                                <Box sx={{ mt: 1, pt: 0.8, borderTop: '1px solid', borderColor: 'divider' }}>
+                                                    <Grid container spacing={0}>
                                                         {[
-                                                            { label: '尖', value: dailyData.stats.tou_usage.tip, color: '#ff5252' },
-                                                            { label: '峰', value: dailyData.stats.tou_usage.peak, color: '#ff9800' },
-                                                            { label: '平', value: dailyData.stats.tou_usage.flat, color: '#4caf50' },
-                                                            { label: '谷', value: dailyData.stats.tou_usage.valley, color: '#2196f3' },
-                                                            { label: '深', value: dailyData.stats.tou_usage.deep, color: '#3f51b5' },
-                                                        ].map((item) => (
-                                                            <Grid size={{ xs: 6 }} key={item.label} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                                                <Typography variant="caption" sx={{ color: item.color, fontWeight: 'bold', fontSize: '0.65rem' }}>
-                                                                    {item.label}
-                                                                </Typography>
-                                                                <Typography variant="body2" sx={{ fontSize: '0.75rem', color: 'text.secondary', whiteSpace: 'nowrap' }}>
-                                                                    {item.value || 0}
+                                                            { label: '尖', val: dailyData.stats.cumulative_tou.tip, color: '#ff5252' },
+                                                            { label: '峰', val: dailyData.stats.cumulative_tou.peak, color: '#ff9800' },
+                                                            { label: '平', val: dailyData.stats.cumulative_tou.flat, color: '#4caf50' },
+                                                            { label: '谷', val: dailyData.stats.cumulative_tou.valley, color: '#2196f3' },
+                                                            { label: '深', val: dailyData.stats.cumulative_tou.deep, color: '#3f51b5' },
+                                                        ].map((t) => (
+                                                            <Grid key={t.label} size={2.4}>
+                                                                <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary', display: 'block', textAlign: 'center', lineHeight: 1.2 }}>
+                                                                    <span style={{ color: t.color, fontWeight: 'bold' }}>{t.label}</span>
+                                                                    <Box sx={{ fontSize: '0.75rem', fontWeight: 700, color: 'text.primary' }}>{t.val}</Box>
                                                                 </Typography>
                                                             </Grid>
                                                         ))}
+                                                        <Grid size={12} sx={{ mt: 0.8 }}>
+                                                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: 'rgba(237, 108, 2, 0.08)', px: 0.8, py: 0.3, borderRadius: 0.5 }}>
+                                                                <Typography variant="caption" sx={{ fontWeight: 700, color: '#ed6c02', fontSize: '0.65rem' }}>累计峰谷比:</Typography>
+                                                                <Typography variant="caption" sx={{ fontWeight: 800, color: '#ed6c02', fontSize: '0.8rem' }}>{dailyData.stats.cumulative_pv_ratio}</Typography>
+                                                            </Box>
+                                                        </Grid>
                                                     </Grid>
                                                 </Box>
-                                            </Stack>
-                                        </CardContent>
-                                    </Card>
+                                            </CardContent>
+                                        </Card>
 
-                                    {/* 峰谷比 */}
-                                    <Card variant="outlined" sx={{ bgcolor: 'grey.50' }}>
-                                        <CardContent sx={{ p: '12px !important', '&:last-child': { pb: '12px !important' } }}>
-                                            <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                                <Typography variant="caption" color="text.secondary">峰谷比</Typography>
-                                                <Chip label="平稳" size="small" color="success" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
-                                            </Stack>
-                                            <Typography variant="h5" sx={{ fontWeight: 'bold', color: 'text.primary', mt: 0.5 }}>
-                                                {dailyData.stats.peak_valley_ratio}
-                                            </Typography>
-                                            <Typography variant="caption" color="text.secondary">(尖峰+高峰) / (低谷+深谷)</Typography>
-                                        </CardContent>
-                                    </Card>
-                                </Stack>
+                                        {/* 第三排：当月用电量 */}
+                                        <Card variant="outlined" sx={{ bgcolor: 'grey.50', flex: 1, minHeight: 0, boxShadow: '0 2px 4px rgba(0,0,0,0.02)', border: '1px solid', borderColor: 'grey.200' }}>
+                                            <CardContent sx={{ p: '8px 12px !important', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                                                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                                    <Box>
+                                                        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, fontSize: '0.7rem' }}>当月用电量</Typography>
+                                                        <Typography variant="h6" sx={{ fontWeight: 800, color: 'text.primary', fontSize: '1.2rem', lineHeight: 1 }}>
+                                                            {dailyData.stats.this_month_usage} <Typography component="span" variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>MWh</Typography>
+                                                        </Typography>
+                                                    </Box>
+                                                    {dailyData.stats.month_yoy !== null && (
+                                                        <Box sx={{
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            color: dailyData.stats.month_yoy >= 0 ? 'error.main' : 'success.main',
+                                                            bgcolor: dailyData.stats.month_yoy >= 0 ? 'error.lighter' : 'success.lighter',
+                                                            px: 0.6,
+                                                            py: 0.1,
+                                                            borderRadius: 0.5
+                                                        }}>
+                                                            {dailyData.stats.month_yoy >= 0 ? <TrendingUpIcon sx={{ fontSize: '0.8rem' }} /> : <TrendingDownIcon sx={{ fontSize: '0.8rem' }} />}
+                                                            <Typography variant="caption" sx={{ fontWeight: 'bold', fontSize: '0.75rem', ml: 0.3 }}>
+                                                                {Math.abs(dailyData.stats.month_yoy)}%
+                                                            </Typography>
+                                                        </Box>
+                                                    )}
+                                                </Stack>
+
+                                                <Box sx={{ mt: 1, pt: 0.8, borderTop: '1px solid', borderColor: 'divider' }}>
+                                                    <Grid container spacing={0}>
+                                                        {[
+                                                            { label: '尖', val: dailyData.stats.month_tou.tip, color: '#ff5252' },
+                                                            { label: '峰', val: dailyData.stats.month_tou.peak, color: '#ff9800' },
+                                                            { label: '平', val: dailyData.stats.month_tou.flat, color: '#4caf50' },
+                                                            { label: '谷', val: dailyData.stats.month_tou.valley, color: '#2196f3' },
+                                                            { label: '深', val: dailyData.stats.month_tou.deep, color: '#3f51b5' },
+                                                        ].map((t) => (
+                                                            <Grid key={t.label} size={2.4}>
+                                                                <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary', display: 'block', textAlign: 'center', lineHeight: 1.2 }}>
+                                                                    <span style={{ color: t.color, fontWeight: 'bold' }}>{t.label}</span>
+                                                                    <Box sx={{ fontSize: '0.75rem', fontWeight: 700, color: 'text.primary' }}>{t.val}</Box>
+                                                                </Typography>
+                                                            </Grid>
+                                                        ))}
+                                                        <Grid size={12} sx={{ mt: 0.8 }}>
+                                                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: 'rgba(46, 125, 50, 0.08)', px: 0.8, py: 0.3, borderRadius: 0.5 }}>
+                                                                <Typography variant="caption" sx={{ fontWeight: 700, color: '#2e7d32', fontSize: '0.65rem' }}>本月峰谷比:</Typography>
+                                                                <Typography variant="caption" sx={{ fontWeight: 800, color: '#2e7d32', fontSize: '0.8rem' }}>{dailyData.stats.month_pv_ratio}</Typography>
+                                                            </Box>
+                                                        </Grid>
+                                                    </Grid>
+                                                </Box>
+                                            </CardContent>
+                                        </Card>
+                                    </Stack>
+                                </Box>
                             </Paper>
                         </Grid>
                     </Grid>
@@ -450,7 +665,7 @@ export const CustomerLoadAnalysisPage: React.FC = () => {
                 <Grid container spacing={2}>
                     {/* Tags & AI */}
                     <Grid size={{ xs: 12, md: 5 }}>
-                        <Paper variant="outlined" sx={{ p: 1, height: '100%' }}>
+                        <Paper variant="outlined" sx={{ p: 1.5, height: '100%' }}>
                             <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
                                 <Stack direction="row" alignItems="center" spacing={1}>
                                     <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', borderRadius: 1 }} />
@@ -560,7 +775,7 @@ export const CustomerLoadAnalysisPage: React.FC = () => {
                         </Paper>
                     </Grid>
                 </Grid>
-            </Box>
-        </LocalizationProvider>
+            </Box >
+        </LocalizationProvider >
     );
 };
