@@ -1,52 +1,71 @@
-
 import React, { useState } from 'react';
 import {
     Box,
     Typography,
-    Tabs,
-    Tab,
-    Paper,
+    Grid,
     useTheme,
     useMediaQuery,
 } from '@mui/material';
-import { ConsumptionTrendTab } from '../components/ConsumptionTrendTab';
-import { MonthlyLoadCurveAnalysisTab } from '../components/MonthlyLoadCurveAnalysisTab';
-import { DailyLoadCurveAnalysisTab } from '../components/DailyLoadCurveAnalysisTab';
+import { format, addDays } from 'date-fns';
+import {
+    MonthlyConsumptionChart,
+    DailyConsumptionChart,
+    IntradayCurveChart,
+    LoadStatisticsPanel,
+} from '../components/total-load';
 
-// TabPanel组件
-interface TabPanelProps {
-    children?: React.ReactNode;
-    index: number;
-    value: number;
-}
-
-function TabPanel(props: TabPanelProps) {
-    const { children, value, index, ...other } = props;
-    return (
-        <div
-            role="tabpanel"
-            hidden={value !== index}
-            id={`overall-analysis-tabpanel-${index}`}
-            aria-labelledby={`overall-analysis-tab-${index}`}
-            {...other}
-        >
-            {value === index && (
-                <Box sx={{ pt: 3 }}>
-                    {children}
-                </Box>
-            )}
-        </div>
-    );
-}
-
+/**
+ * 整体负荷分析页面
+ * 
+ * 布局：
+ * - 第一行左侧：月度电量柱状图
+ * - 第一行右侧：日电量柱状图
+ * - 第二行左侧：日内电量曲线
+ * - 第二行右侧：统计面板
+ */
 export const LoadAnalysisPage: React.FC = () => {
-    const [overallActiveTab, setOverallActiveTab] = useState(0);
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
-    const handleOverallTabChange = (event: React.SyntheticEvent, newValue: number) => {
-        setOverallActiveTab(newValue);
-    };
+    // 状态管理
+    const [selectedMonth, setSelectedMonth] = useState<string>(
+        format(addDays(new Date(), -1), 'yyyy-MM')
+    );
+    const [selectedDate, setSelectedDate] = useState<string>(
+        format(addDays(new Date(), -1), 'yyyy-MM-dd')
+    );
+
+    // 月份选择时更新日期为该月第一天（或最近一天）
+    const handleMonthSelect = React.useCallback((month: string) => {
+        setSelectedMonth(month);
+        // 如果选择的是当前月份，默认选昨天；否则选月初
+        const today = new Date();
+        const currentMonth = format(today, 'yyyy-MM');
+        if (month === currentMonth) {
+            setSelectedDate(format(addDays(today, -1), 'yyyy-MM-dd'));
+        } else {
+            setSelectedDate(`${month}-01`);
+        }
+    }, [setSelectedMonth, setSelectedDate]);
+
+    // 日期选择
+    const handleDaySelect = React.useCallback((date: string) => {
+        setSelectedDate(date);
+        // 同步更新月份
+        const month = date.substring(0, 7);
+        if (month !== selectedMonth) {
+            setSelectedMonth(month);
+        }
+    }, [selectedMonth, setSelectedDate, setSelectedMonth]);
+
+    // 日期变化（来自日内曲线组件）
+    const handleDateChange = React.useCallback((date: string) => {
+        setSelectedDate(date);
+        const month = date.substring(0, 7);
+        if (month !== selectedMonth) {
+            setSelectedMonth(month);
+        }
+    }, [selectedMonth, setSelectedDate, setSelectedMonth]);
 
     return (
         <Box sx={{ width: '100%' }}>
@@ -54,33 +73,43 @@ export const LoadAnalysisPage: React.FC = () => {
             {isMobile && (
                 <Typography
                     variant="subtitle1"
-                    sx={{
-                        mb: 2,
-                        fontWeight: 'bold',
-                        color: 'text.primary'
-                    }}
+                    sx={{ mb: 2, fontWeight: 'bold', color: 'text.primary' }}
                 >
-                    负荷预测 / 总体负荷分析
+                    负荷预测 / 整体负荷分析
                 </Typography>
             )}
 
-            {/* 主内容卡片 */}
-            <Paper variant="outlined" sx={{ borderColor: 'divider' }}>
-                <Tabs value={overallActiveTab} onChange={handleOverallTabChange} aria-label="overall load analysis tabs">
-                    <Tab label="电量趋势" id="overall-analysis-tab-0" aria-controls="overall-analysis-tabpanel-0" />
-                    <Tab label="月度曲线分析" id="overall-analysis-tab-1" aria-controls="overall-analysis-tabpanel-1" />
-                    <Tab label="日负荷曲线分析" id="overall-analysis-tab-2" aria-controls="overall-analysis-tabpanel-2" />
-                </Tabs>
-            </Paper>
-            <TabPanel value={overallActiveTab} index={0}>
-                <ConsumptionTrendTab />
-            </TabPanel>
-            <TabPanel value={overallActiveTab} index={1}>
-                <MonthlyLoadCurveAnalysisTab />
-            </TabPanel>
-            <TabPanel value={overallActiveTab} index={2}>
-                <DailyLoadCurveAnalysisTab />
-            </TabPanel>
+            {/* 两行四区块布局 */}
+            <Grid container spacing={{ xs: 1, sm: 2 }}>
+                {/* 第一行：月度 + 日电量 */}
+                <Grid size={{ xs: 12, md: 4 }}>
+                    <MonthlyConsumptionChart
+                        selectedMonth={selectedMonth}
+                        onMonthSelect={handleMonthSelect}
+                    />
+                </Grid>
+                <Grid size={{ xs: 12, md: 8 }}>
+                    <DailyConsumptionChart
+                        month={selectedMonth}
+                        onMonthChange={setSelectedMonth}
+                        selectedDate={selectedDate}
+                        onDaySelect={handleDaySelect}
+                    />
+                </Grid>
+
+                {/* 第二行：日内曲线 + 统计面板 */}
+                <Grid size={{ xs: 12, md: 8 }}>
+                    <IntradayCurveChart
+                        selectedDate={selectedDate}
+                        onDateChange={handleDateChange}
+                    />
+                </Grid>
+                <Grid size={{ xs: 12, md: 4 }}>
+                    <LoadStatisticsPanel selectedDate={selectedDate} />
+                </Grid>
+            </Grid>
         </Box>
     );
 };
+
+export default LoadAnalysisPage;
