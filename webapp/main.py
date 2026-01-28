@@ -78,8 +78,8 @@ app.include_router(v1_rpa_monitor.router, prefix="/api/v1/rpa", tags=["RPA监控
 from webapp.api import v1_customer_analysis
 app.include_router(v1_customer_analysis.router, prefix="/api/v1/customer-analysis", tags=["Customer Analysis"])
 
-from webapp.api import v1_customer_overview
-app.include_router(v1_customer_overview.router, prefix="/api/v1/customer", tags=["Customer Overview"])
+from webapp.api import v1_customer_load_overview
+app.include_router(v1_customer_load_overview.router, prefix="/api/v1/customer-load-overview", tags=["Customer Load Overview"])
 
 from webapp.api import v1_total_load
 app.include_router(v1_total_load.router, tags=["Total Load Analysis"], dependencies=[Depends(get_current_active_user)])

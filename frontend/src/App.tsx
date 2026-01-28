@@ -6,7 +6,7 @@ import {
     Route,
 } from 'react-router-dom';
 import { CustomerLoadAnalysisPage } from './pages/CustomerLoadAnalysisPage';
-import { CustomerOverviewPage } from './pages/CustomerOverviewPage';
+import { CustomerLoadOverviewPage } from './pages/CustomerLoadOverviewPage';
 import {
     CssBaseline,
     useMediaQuery,
@@ -71,7 +71,7 @@ const ResponsiveLayout: React.FC = () => {
                     <Route path="customer/retail-packages/view/:packageId" element={<RetailPackagePage />} />
                     <Route path="customer/retail-packages/edit/:packageId" element={<RetailPackagePage />} />
                     <Route path="customer/retail-packages/copy/:packageId" element={<RetailPackagePage />} />
-                    <Route path="customer/load-analysis" element={<CustomerOverviewPage />} />
+                    <Route path="customer/load-analysis" element={<CustomerLoadOverviewPage />} />
                     <Route path="customer/cluster-analysis" element={<PlaceholderPage />} />
                     <Route path="customer/external-diagnosis" element={<PlaceholderPage />} />
 

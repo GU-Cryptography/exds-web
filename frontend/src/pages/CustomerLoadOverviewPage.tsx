@@ -58,7 +58,8 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, L
 
 import { useTabContext } from '../contexts/TabContext';
 import { CustomerLoadAnalysisPage } from './CustomerLoadAnalysisPage';
-import customerOverviewApi, {
+import customerLoadOverviewApi, {
+    DashboardData,
     OverviewKpi,
     ContributionData,
     GrowthRankingData,
@@ -67,7 +68,7 @@ import customerOverviewApi, {
     CustomerListItem,
     ViewMode,
     TouUsage
-} from '../api/customerOverview';
+} from '../api/customerLoadOverview';
 
 // ---- 常量 ----
 const YEAR = 2026;  // 固定年份
@@ -132,7 +133,7 @@ const TouStackBar: React.FC<{ tou: TouUsage }> = ({ tou }) => {
 };
 
 // ---- 主组件 ----
-export const CustomerOverviewPage: React.FC = () => {
+export const CustomerLoadOverviewPage: React.FC = () => {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
@@ -228,20 +229,16 @@ export const CustomerOverviewPage: React.FC = () => {
         setLoading(true);
         setError(null);
         try {
-            const [kpiData, contribData, growthData, effData, listData] = await Promise.all([
-                customerOverviewApi.getKpi(YEAR, month, viewMode),
-                customerOverviewApi.getContribution(YEAR, month, viewMode),
-                customerOverviewApi.getGrowthRanking(YEAR, month, viewMode),
-                customerOverviewApi.getEfficiencyRanking(YEAR, month, viewMode),
-                customerOverviewApi.getCustomerList(YEAR, month, viewMode, {
-                    page_size: -1 // 获取全量
-                })
-            ]);
-            setKpi(kpiData);
-            setContribution(contribData);
-            setGrowthRanking(growthData);
-            setEfficiencyRanking(effData);
-            setAllCustomers(listData.items);
+            // 使用统一看板接口获取所有数据
+            const dashboardData = await customerLoadOverviewApi.getDashboardData(YEAR, month, viewMode, {
+                page_size: -1 // 获取全量列表供前端分页
+            });
+
+            setKpi(dashboardData.kpi);
+            setContribution(dashboardData.contribution);
+            setGrowthRanking(dashboardData.rankings.growth);
+            setEfficiencyRanking(dashboardData.rankings.efficiency);
+            setAllCustomers(dashboardData.customer_list.items);
 
             lastFetchKey.current = fetchKey;
 
@@ -1119,4 +1116,4 @@ export const CustomerOverviewPage: React.FC = () => {
     );
 };
 
-export default CustomerOverviewPage;
+export default CustomerLoadOverviewPage;

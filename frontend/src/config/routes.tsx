@@ -16,7 +16,7 @@ import { DayAheadPriceForecastPage } from '../pages/DayAheadPriceForecastPage';
 import { WeatherDataPage } from '../pages/WeatherDataPage';
 import { LoadDataDiagnosisPage } from '../pages/LoadDataDiagnosisPage';
 import { CustomerLoadAnalysisPage } from '../pages/CustomerLoadAnalysisPage';
-import { CustomerOverviewPage } from '../pages/CustomerOverviewPage';
+import { CustomerLoadOverviewPage } from '../pages/CustomerLoadOverviewPage';
 
 // 路由配置接口
 export interface RouteConfig {
@@ -33,7 +33,7 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/customer/profiles', title: '客户档案管理', component: CustomerManagementPage },
     { path: '/customer/retail-contracts', title: '零售合同管理', component: RetailContractPage },
     { path: '/customer/retail-packages', title: '零售套餐管理', component: RetailPackagePage },
-    { path: '/customer/load-analysis', title: '客户负荷分析', component: CustomerOverviewPage },
+    { path: '/customer/load-analysis', title: '客户负荷分析', component: CustomerLoadOverviewPage },
     { path: '/customer/cluster-analysis', title: '负荷特征分析', component: PlaceholderPage },
     { path: '/customer/external-diagnosis', title: '外部客户诊断', component: PlaceholderPage },
 

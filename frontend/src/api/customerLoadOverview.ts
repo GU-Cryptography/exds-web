@@ -81,55 +81,27 @@ export interface CustomerListResponse {
     items: CustomerListItem[];
 }
 
+export interface RankingsData {
+    growth: GrowthRankingData;
+    efficiency: EfficiencyRankingData;
+}
+
+export interface DashboardData {
+    kpi: OverviewKpi;
+    contribution: ContributionData;
+    rankings: RankingsData;
+    customer_list: CustomerListResponse;
+}
+
 export type ViewMode = 'monthly' | 'ytd';
 
 // ---- API Functions ----
 
-export const customerOverviewApi = {
+export const customerLoadOverviewApi = {
     /**
-     * 获取KPI卡片数据
+     * 统一获取看板所有数据
      */
-    getKpi: async (year: number, month: number, viewMode: ViewMode): Promise<OverviewKpi> => {
-        const response = await apiClient.get<OverviewKpi>('/api/v1/customer/overview/kpi', {
-            params: { year, month, view_mode: viewMode }
-        });
-        return response.data;
-    },
-
-    /**
-     * 获取电量贡献构成图表数据
-     */
-    getContribution: async (year: number, month: number, viewMode: ViewMode): Promise<ContributionData> => {
-        const response = await apiClient.get<ContributionData>('/api/v1/customer/overview/contribution', {
-            params: { year, month, view_mode: viewMode }
-        });
-        return response.data;
-    },
-
-    /**
-     * 获取涨跌龙虎榜数据
-     */
-    getGrowthRanking: async (year: number, month: number, viewMode: ViewMode): Promise<GrowthRankingData> => {
-        const response = await apiClient.get<GrowthRankingData>('/api/v1/customer/overview/growth-ranking', {
-            params: { year, month, view_mode: viewMode }
-        });
-        return response.data;
-    },
-
-    /**
-     * 获取峰谷比极值榜数据
-     */
-    getEfficiencyRanking: async (year: number, month: number, viewMode: ViewMode): Promise<EfficiencyRankingData> => {
-        const response = await apiClient.get<EfficiencyRankingData>('/api/v1/customer/overview/efficiency-ranking', {
-            params: { year, month, view_mode: viewMode }
-        });
-        return response.data;
-    },
-
-    /**
-     * 获取客户资产明细列表
-     */
-    getCustomerList: async (
+    getDashboardData: async (
         year: number,
         month: number,
         viewMode: ViewMode,
@@ -140,8 +112,8 @@ export const customerOverviewApi = {
             page?: number;
             page_size?: number;
         }
-    ): Promise<CustomerListResponse> => {
-        const response = await apiClient.get<CustomerListResponse>('/api/v1/customer/overview/customers', {
+    ): Promise<DashboardData> => {
+        const response = await apiClient.get<DashboardData>('/api/v1/customer-load-overview/dashboard', {
             params: {
                 year,
                 month,
@@ -153,4 +125,4 @@ export const customerOverviewApi = {
     }
 };
 
-export default customerOverviewApi;
+export default customerLoadOverviewApi;
