@@ -98,13 +98,13 @@ export const LoadAnalysisPage: React.FC = () => {
                 </Grid>
 
                 {/* 第二行：日内曲线 + 统计面板 */}
-                <Grid size={{ xs: 12, md: 8 }}>
+                <Grid size={{ xs: 12, md: 8 }} sx={{ display: 'flex', flexDirection: 'column' }}>
                     <IntradayCurveChart
                         selectedDate={selectedDate}
                         onDateChange={handleDateChange}
                     />
                 </Grid>
-                <Grid size={{ xs: 12, md: 4 }}>
+                <Grid size={{ xs: 12, md: 4 }} sx={{ display: 'flex', flexDirection: 'column' }}>
                     <LoadStatisticsPanel selectedDate={selectedDate} />
                 </Grid>
             </Grid>

@@ -154,7 +154,7 @@ export const IntradayCurveChart: React.FC<IntradayCurveChartProps> = ({
 
     return (
         <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
-            <Paper variant="outlined" sx={{ p: 2 }}>
+            <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                     <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', mr: 1, borderRadius: 1 }} />
                     <Typography variant="h6" fontSize="1rem" fontWeight="bold">

@@ -4,12 +4,10 @@ import {
     Typography,
     Paper,
     CircularProgress,
-    Alert,
-    Tabs,
-    Tab,
-    Divider,
-    LinearProgress,
-    Chip,
+    Stack,
+    Card,
+    CardContent,
+    Grid,
 } from '@mui/material';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
@@ -29,197 +27,186 @@ interface LoadStatisticsPanelProps {
     selectedDate: string;
 }
 
-// 时段颜色配置
+// Colors from CustomerLoadAnalysisPage
 const PERIOD_COLORS: Record<string, string> = {
-    '尖峰': '#D32F2F',
-    '高峰': '#F57C00',
-    '平段': '#9E9E9E',
-    '低谷': '#1976D2',
-    '深谷': '#00796B',
+    '尖峰': '#ff5252',
+    '高峰': '#ff9800',
+    '平段': '#4caf50',
+    '低谷': '#2196f3',
+    '深谷': '#3f51b5',
 };
 
-// 峰谷比评价颜色
-const getPeakValleyColor = (ratio: number | null) => {
-    if (ratio === null) return 'text.secondary';
-    if (ratio < 1.5) return 'success.main';
-    if (ratio <= 2.0) return 'warning.main';
-    return 'error.main';
+const PERIOD_LABELS: Record<string, string> = {
+    '尖峰': '尖',
+    '高峰': '峰',
+    '平段': '平',
+    '低谷': '谷',
+    '深谷': '深',
+};
+
+// Distinct light colors for each scope's Peak-Valley Ratio
+// User Request: Red, Blue, Green (Light)
+const SCOPE_PV_STYLES: Record<string, { bgcolor: string, color: string }> = {
+    daily: {
+        bgcolor: 'rgba(33, 150, 243, 0.08)', // Light Blue
+        color: '#1565c0'
+    },
+    monthly: {
+        bgcolor: 'rgba(76, 175, 80, 0.08)', // Light Green
+        color: '#2e7d32'
+    },
+    yearly: {
+        bgcolor: 'rgba(244, 67, 54, 0.08)', // Light Red
+        color: '#c62828'
+    },
 };
 
 const getPeakValleyLabel = (ratio: number | null) => {
     if (ratio === null) return '-';
-    if (ratio < 1.5) return '良好';
-    if (ratio <= 2.0) return '一般';
-    return '偏高';
+    if (ratio < 1.5) return '优';
+    if (ratio <= 2.0) return '良';
+    return '差';
 };
 
 export const LoadStatisticsPanel: React.FC<LoadStatisticsPanelProps> = ({
     selectedDate,
 }) => {
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    const [data, setData] = useState<StatisticsData | null>(null);
-    const [scope, setScope] = useState<'daily' | 'monthly' | 'yearly'>('daily');
+    const [stats, setStats] = useState<{
+        daily: StatisticsData | null;
+        monthly: StatisticsData | null;
+        yearly: StatisticsData | null;
+    }>({ daily: null, monthly: null, yearly: null });
 
     useEffect(() => {
-        const fetchData = async () => {
+        const fetchAll = async () => {
+            if (!selectedDate) return;
             setLoading(true);
-            setError(null);
             try {
-                const response = await apiClient.get('/api/v1/total-load/statistics', {
-                    params: {
-                        date: selectedDate,
-                        scope: scope,
-                    },
+                const [dailyRes, monthlyRes, yearlyRes] = await Promise.all([
+                    apiClient.get('/api/v1/total-load/statistics', { params: { date: selectedDate, scope: 'daily' } }),
+                    apiClient.get('/api/v1/total-load/statistics', { params: { date: selectedDate, scope: 'monthly' } }),
+                    apiClient.get('/api/v1/total-load/statistics', { params: { date: selectedDate, scope: 'yearly' } })
+                ]);
+
+                setStats({
+                    daily: dailyRes.data,
+                    monthly: monthlyRes.data,
+                    yearly: yearlyRes.data
                 });
-                setData(response.data);
-            } catch (err: any) {
-                console.error('Failed to fetch statistics:', err);
-                setError(err.response?.data?.detail || err.message || '加载失败');
+            } catch (err) {
+                console.error("Failed to fetch load statistics", err);
             } finally {
                 setLoading(false);
             }
         };
+        fetchAll();
+    }, [selectedDate]);
 
-        if (selectedDate) {
-            fetchData();
-        }
-    }, [selectedDate, scope]);
+    const renderCard = (title: string, data: StatisticsData | null, scope: string) => {
+        if (!data) return null;
 
-    const handleScopeChange = (_: React.SyntheticEvent, newValue: 'daily' | 'monthly' | 'yearly') => {
-        setScope(newValue);
-    };
+        const pvStyle = SCOPE_PV_STYLES[scope] || SCOPE_PV_STYLES['daily'];
 
+        return (
+            <Card variant="outlined" sx={{ bgcolor: 'grey.50', flex: 1, minHeight: 0, boxShadow: '0 2px 4px rgba(0,0,0,0.02)', border: '1px solid', borderColor: 'grey.200' }}>
+                <CardContent sx={{ p: '8px 12px !important', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                        <Box>
+                            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, fontSize: '0.7rem' }}>{title}</Typography>
+                            <Typography variant="h6" sx={{ fontWeight: 800, color: 'text.primary', fontSize: '1.2rem', lineHeight: 1 }}>
+                                {data.total_consumption.toFixed(2)} <Typography component="span" variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>MWh</Typography>
+                            </Typography>
+                        </Box>
+                        {data.yoy_change !== null && (
+                            <Box sx={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                color: data.yoy_change >= 0 ? 'error.main' : 'success.main',
+                                backgroundColor: data.yoy_change >= 0 ? 'rgba(211, 47, 47, 0.1)' : 'rgba(46, 125, 50, 0.1)',
+                                px: 0.6,
+                                py: 0.1,
+                                borderRadius: 0.5
+                            }}>
+                                {data.yoy_change >= 0 ? <TrendingUpIcon sx={{ fontSize: '0.8rem' }} /> : <TrendingDownIcon sx={{ fontSize: '0.8rem' }} />}
+                                <Typography variant="caption" sx={{ fontWeight: 'bold', fontSize: '0.75rem', ml: 0.3 }}>
+                                    {Math.abs(data.yoy_change)}%
+                                </Typography>
+                            </Box>
+                        )}
+                    </Stack>
 
-
-    const getScopeLabel = () => {
-        switch (scope) {
-            case 'daily': return '当日';
-            case 'monthly': return '当月';
-            case 'yearly': return '年度';
-            default: return '';
-        }
+                    <Box sx={{ mt: 1, pt: 0.8, borderTop: '1px solid', borderColor: 'divider' }}>
+                        <Grid container spacing={0}>
+                            {['尖峰', '高峰', '平段', '低谷', '深谷'].map((period) => {
+                                const val = data.period_breakdown[period] || 0;
+                                return (
+                                    <Grid key={period} size={2.4}>
+                                        <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary', display: 'block', textAlign: 'center', lineHeight: 1.2 }}>
+                                            <span style={{ color: PERIOD_COLORS[period], fontWeight: 'bold' }}>{PERIOD_LABELS[period]}</span>
+                                            <Box sx={{ fontSize: '0.75rem', fontWeight: 700, color: 'text.primary' }}>{val.toFixed(2)}</Box>
+                                        </Typography>
+                                    </Grid>
+                                );
+                            })}
+                            <Grid size={12} sx={{ mt: 0.8 }}>
+                                <Box sx={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    px: 1,
+                                    py: 0.3,
+                                    borderRadius: 0.5,
+                                    bgcolor: pvStyle.bgcolor,
+                                    color: pvStyle.color
+                                }}>
+                                    <Typography variant="caption" sx={{ fontWeight: 700, color: 'inherit', fontSize: '0.65rem' }}>峰谷比:</Typography>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                        <Typography variant="caption" sx={{ fontWeight: 800, color: 'inherit', fontSize: '0.8rem' }}>
+                                            {data.peak_valley_ratio?.toFixed(2) ?? '-'}
+                                        </Typography>
+                                        <Typography variant="caption" sx={{
+                                            fontWeight: 'bold',
+                                            color: 'inherit',
+                                            fontSize: '0.6rem',
+                                            bgcolor: 'rgba(255,255,255,0.4)',
+                                            px: 0.5,
+                                            borderRadius: 0.5
+                                        }}>
+                                            {getPeakValleyLabel(data.peak_valley_ratio)}
+                                        </Typography>
+                                    </Box>
+                                </Box>
+                            </Grid>
+                        </Grid>
+                    </Box>
+                </CardContent>
+            </Card>
+        );
     };
 
     return (
-        <Paper variant="outlined" sx={{ p: 1, height: '100%' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', mr: 1, borderRadius: 1 }} />
-                <Typography variant="h6" fontSize="0.95rem" fontWeight="bold">
-                    统计数据
-                </Typography>
+        <Paper variant="outlined" sx={{ p: 1.5, height: '100%' }}>
+            <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ height: 32, mb: 1, flexShrink: 0 }}>
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                        <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', borderRadius: 1 }} />
+                        <Typography variant="h6" fontSize="0.95rem" fontWeight="bold">统计指标</Typography>
+                    </Stack>
+                </Stack>
+
+                {loading ? (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flex: 1 }}>
+                        <CircularProgress size={30} />
+                    </Box>
+                ) : (
+                    <Stack spacing={1.5} sx={{ flex: 1, minHeight: 0 }}>
+                        {renderCard("当日用电量", stats.daily, 'daily')}
+                        {renderCard("当月用电量", stats.monthly, 'monthly')}
+                        {renderCard("当年累计电量", stats.yearly, 'yearly')}
+                    </Stack>
+                )}
             </Box>
-
-            {/* 范围切换 Tab */}
-            <Tabs
-                value={scope}
-                onChange={handleScopeChange}
-                variant="fullWidth"
-                sx={{ mb: 1, minHeight: 32, borderBottom: 1, borderColor: 'divider', '& .MuiTab-root': { minHeight: 32, py: 0.5, fontSize: '0.8rem' } }}
-            >
-                <Tab value="daily" label="当日" />
-                <Tab value="monthly" label="当月" />
-                <Tab value="yearly" label="年度" />
-            </Tabs>
-
-            {loading ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                    <CircularProgress size={30} />
-                </Box>
-            ) : error ? (
-                <Alert severity="error" sx={{ py: 0.5 }}>{error}</Alert>
-            ) : data ? (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-
-                    {/* 总电量卡片 */}
-                    <Box sx={{ p: 1.5, borderRadius: 2, border: '1px solid', borderColor: 'primary.light', bgcolor: 'rgba(25, 118, 210, 0.04)' }}>
-                        <Typography variant="caption" color="text.secondary" gutterBottom>
-                            {getScopeLabel()}总电量
-                        </Typography>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <Typography variant="h5" fontWeight="bold" color="primary.main">
-                                {data.total_consumption.toFixed(1)} <Typography component="span" variant="caption" color="text.secondary">MWh</Typography>
-                            </Typography>
-                            {data.yoy_change !== null && (
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                    {data.yoy_change >= 0 ? (
-                                        <TrendingUpIcon sx={{ fontSize: 18, color: 'error.main' }} />
-                                    ) : (
-                                        <TrendingDownIcon sx={{ fontSize: 18, color: 'success.main' }} />
-                                    )}
-                                    <Typography
-                                        variant="subtitle2"
-                                        fontWeight="bold"
-                                        sx={{ color: data.yoy_change >= 0 ? 'error.main' : 'success.main' }}
-                                    >
-                                        {data.yoy_change >= 0 ? '+' : ''}{data.yoy_change}%
-                                    </Typography>
-                                </Box>
-                            )}
-                        </Box>
-                    </Box>
-
-                    {/* 时段电量分解 - 横向布局 */}
-                    <Box>
-                        <Typography variant="caption" color="text.secondary" gutterBottom>
-                            时段电量分解
-                        </Typography>
-                        <Box sx={{ display: 'flex', gap: 0.5, p: 1, bgcolor: 'grey.50', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
-                            {['尖峰', '高峰', '平段', '低谷', '深谷'].map((period) => {
-                                const value = data.period_breakdown[period] || 0;
-                                const percentage = data.period_percentage[period] || 0;
-                                return (
-                                    <Box key={period} sx={{ flex: 1, textAlign: 'center' }}>
-                                        <Typography variant="caption" sx={{ color: PERIOD_COLORS[period], fontWeight: 'bold', fontSize: '0.7rem' }}>
-                                            {period}
-                                        </Typography>
-                                        <Typography variant="body2" fontWeight="bold" sx={{ my: 0.2, fontSize: '0.8rem' }}>
-                                            {value.toFixed(1)}
-                                        </Typography>
-                                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
-                                            {percentage}%
-                                        </Typography>
-                                    </Box>
-                                );
-                            })}
-                        </Box>
-                    </Box>
-
-                    {/* 峰谷比 */}
-                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 1, bgcolor: 'grey.50', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
-                        <Box>
-                            <Typography variant="caption" color="text.secondary" display="block">
-                                综合峰谷比
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
-                                (尖+峰) / (谷+深)
-                            </Typography>
-                        </Box>
-                        <Box sx={{ textAlign: 'right' }}>
-                            <Typography
-                                variant="h6"
-                                fontWeight="bold"
-                                sx={{ color: getPeakValleyColor(data.peak_valley_ratio) }}
-                            >
-                                {data.peak_valley_ratio?.toFixed(2) ?? '-'}
-                            </Typography>
-                            <Chip
-                                label={getPeakValleyLabel(data.peak_valley_ratio)}
-                                size="small"
-                                sx={{
-                                    backgroundColor: getPeakValleyColor(data.peak_valley_ratio),
-                                    color: 'white',
-                                    height: 18,
-                                    fontSize: '0.65rem',
-                                    mt: 0
-                                }}
-                            />
-                        </Box>
-                    </Box>
-                </Box>
-            ) : (
-                <Typography color="text.secondary" align="center" sx={{ mt: 4 }}>无数据</Typography>
-            )}
         </Paper>
     );
 };
