@@ -405,3 +405,26 @@ else:  # priority == "meter"，电表优先
 - `name` (唯一索引)
 - `category`
 - `is_active`
+
+---
+
+## 10. `typical_curves` - 典型曲线数据集
+
+该集合存储交易平台发布的市场化典型曲线和工商业典型曲线，用于负荷预测、交易模拟及偏差考核分析。
+
+### 10.1. 字段说明
+
+| 字段名 | 类型 | 说明 | 示例 |
+| :--- | :--- | :--- | :--- |
+| `_id` | `ObjectId` | 唯一ID | `ObjectId("...")` |
+| `year` | `Integer` | 适用年份 | `2025` |
+| `month` | `Integer` | 适用月份 (0表示不特定月份的假日曲线) | `9` |
+| `curve_type` | `String` | 曲线类型: `market` (市场化), `business_general` (工商业), `business_all` (全体工商业) | `"market"` |
+| `name` | `String` | 曲线完整名称 (来自Excel原始数据) | `"2025年9月市场化典型曲线"` |
+| `holiday` | `String` | 节假日名称 (如包含则填入，否则为 `null`) | `"国庆节"` |
+| `points` | `Array[48]` | 48点标幺值/数值数组 (30分钟间隔) | `[2.09, 2.12, ...]` |
+
+### 10.2. 索引信息
+
+- `_id_` (默认)
+- `year`, `month`, `curve_type`, `name` (唯一复合索引)

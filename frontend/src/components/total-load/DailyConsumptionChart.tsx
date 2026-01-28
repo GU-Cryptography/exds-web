@@ -231,11 +231,22 @@ export const DailyConsumptionChart: React.FC<DailyConsumptionChartProps> = ({
     const lastLoadedMonth = React.useRef<string | null>(null);
 
     // 自动选择最后有数据的一天
+    // 自动选择最后有数据的一天
     useEffect(() => {
         // Ensure we have data, and the data matches the currently requested month
         if (processedData.length > 0 && data?.month === month) {
             // Only auto-select if we haven't done so for this month yet
             if (lastLoadedMonth.current !== month) {
+                // BUG FIX: If the currently selectedDate is already in this month, 
+                // it means the user (or parent logic) explicitly selected a date (e.g. from Intraday Chart).
+                // We should respect that and NOT override it with the last day.
+                // Note: When switching months via Header, parent sets date to YYYY-MM-01, 
+                // so this will startWith(month) and we will show 01. This is acceptable/safer than overriding.
+                if (selectedDate && selectedDate.startsWith(month)) {
+                    lastLoadedMonth.current = month;
+                    return;
+                }
+
                 // Find the last day with *valid* data (consumption > 0)
                 const validDays = processedData.filter(d => d.consumption !== null && d.consumption > 0);
 
@@ -250,7 +261,7 @@ export const DailyConsumptionChart: React.FC<DailyConsumptionChartProps> = ({
                 lastLoadedMonth.current = month;
             }
         }
-    }, [processedData, month, data, onDaySelect]);
+    }, [processedData, month, data, onDaySelect, selectedDate]);
 
     // 月份导航
     const handleMonthShift = (direction: number) => {

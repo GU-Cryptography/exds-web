@@ -324,17 +324,116 @@ class TotalLoadService:
                     cdata = self._get_single_curve(cdate)
                     if cdata:
                         compare_list.append(cdata)
+
+            # ---- 典型曲线逻辑 Start ----
+            market_typical_data = None
+            business_typical_data = None
+            
+            # 只有当日有电量时才计算归一化曲线
+            current_total = target_data["total"] if target_data else 0.0
+            if current_total > 0:
+                from webapp.services.typical_curve_service import TypicalCurveService
+                typical_service = TypicalCurveService()
+                
+                # 获取节假日信息
+                holiday_info = get_holiday_service().get_day_info(target)
+                h_name = holiday_info.get("holiday_name")
+                
+                # 市场化典型曲线
+                market_points = typical_service.get_curve_points(target.year, target.month, "market", h_name)
+                market_typical_data = self._process_typical_points(market_points, current_total, target_date, target_data)
+                
+                # 工商业典型曲线
+                business_points = typical_service.get_curve_points(target.year, target.month, "business_general", h_name)
+                business_typical_data = self._process_typical_points(business_points, current_total, target_date, target_data)
+            # ---- 典型曲线逻辑 End ----
             
             return {
                 "target": target_data,
                 "compare": compare_data,
                 "compare_list": compare_list,
-                "compare_type": compare_type
+                "compare_type": compare_type,
+                "market_typical": market_typical_data,
+                "business_typical": business_typical_data
             }
             
         except Exception as e:
             logger.error(f"get_intraday_curve failed: {e}", exc_info=True)
-            return {"target": None, "compare": None, "compare_list": None, "compare_type": compare_type}
+            return {
+                "target": None, 
+                "compare": None, 
+                "compare_list": None, 
+                "compare_type": compare_type,
+                "market_typical": None,
+                "business_typical": None
+            }
+
+    def _process_typical_points(self, raw_points: List[float], total_load: float, date_str: str, ref_data: Dict) -> Optional[Dict]:
+        """处理典型曲线点位，归一化并对齐时间轴"""
+        if not raw_points:
+            return None
+            
+        # 1. 确定分辨率 (48点 vs 96点)
+        # ref_data["points"] 包含 time 字段，如 "00:15", "00:30" 等
+        # raw_points 默认为 48点 (30min间隔)
+        
+        is_96_points = False
+        if ref_data and len(ref_data.get("points", [])) == 96:
+            is_96_points = True
+            
+        processed_points = []
+        
+        # 2. 生成点位
+        # raw_points sum = 100
+        # point_load = (p / 100) * total_load
+        
+        if is_96_points:
+            # 插值/拆分到96点
+            # 原始 0 对应 00:30 (00:00-00:30)
+            # 拆分为 00:15 和 00:30，个分一半权重
+            start_minutes = 15
+            interval = 15
+            n_points = 96
+            
+            for i in range(48):
+                val_pct = raw_points[i] if i < len(raw_points) else 0.0
+                val_load = (val_pct / 100.0) * total_load
+                
+                # 平均分给两个 15min 点
+                split_val = val_load / 2.0
+                
+                # Point 1 (e.g. 00:15)
+                # i=0 -> 00:15, 00:30
+                time_1 = self._get_time_str(start_minutes + (i*2) * interval)
+                processed_points.append({"time": time_1, "consumption": round(split_val, 2), "period_type": "平段"})
+                
+                # Point 2 (e.g. 00:30)
+                time_2 = self._get_time_str(start_minutes + (i*2 + 1) * interval)
+                processed_points.append({"time": time_2, "consumption": round(split_val, 2), "period_type": "平段"})
+                
+        else:
+            # 保持48点
+            start_minutes = 30
+            interval = 30
+            
+            for i, val_pct in enumerate(raw_points):
+                val_load = (val_pct / 100.0) * total_load
+                time_str = self._get_time_str(start_minutes + i * interval)
+                processed_points.append({"time": time_str, "consumption": round(val_load, 2), "period_type": "平段"})
+                
+        return {
+            "date": f"{date_str} (典型)",
+            "points": processed_points,
+            "total": round(total_load, 2),
+            "period_breakdown": {}
+        }
+
+    def _get_time_str(self, minutes: int) -> str:
+        if minutes >= 1440:
+            return "24:00"
+        h = minutes // 60
+        m = minutes % 60
+        return f"{h:02d}:{m:02d}"
 
     def _get_single_curve(self, date_str: str) -> Optional[Dict]:
         """获取单日聚合曲线"""

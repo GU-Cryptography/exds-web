@@ -9,6 +9,7 @@ import {
     Radio,
     FormControlLabel,
     IconButton,
+    Checkbox,
 } from '@mui/material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -75,7 +76,11 @@ export const IntradayCurveChart: React.FC<IntradayCurveChartProps> = ({
     const [error, setError] = useState<string | null>(null);
     const [targetData, setTargetData] = useState<CurveData | null>(null);
     const [compareData, setCompareData] = useState<CurveData | null>(null);
+    const [marketTypicalData, setMarketTypicalData] = useState<CurveData | null>(null);
+    const [businessTypicalData, setBusinessTypicalData] = useState<CurveData | null>(null);
     const [compareType, setCompareType] = useState<string>('yesterday');
+
+    // 典型曲线显示控制 - 已移除，改为单选
 
     const chartRef = useRef<HTMLDivElement>(null);
     const dateObj = selectedDate ? parseISO(selectedDate) : new Date();
@@ -101,11 +106,16 @@ export const IntradayCurveChart: React.FC<IntradayCurveChartProps> = ({
             const response = await apiClient.get('/api/v1/total-load/curve', {
                 params: {
                     date: selectedDate,
+                    // If typical selected, send 'none' or keep existing logic?
+                    // Backend ignores unknown types for 'compare' field but still returns typical data.
+                    // So we can just pass the value.
                     compare_type: compareType,
                 },
             });
             setTargetData(response.data.target);
             setCompareData(response.data.compare);
+            setMarketTypicalData(response.data.market_typical);
+            setBusinessTypicalData(response.data.business_typical);
         } catch (err: any) {
             console.error('Failed to fetch curve data:', err);
             setError(err.response?.data?.detail || err.message || '加载失败');
@@ -131,7 +141,16 @@ export const IntradayCurveChart: React.FC<IntradayCurveChartProps> = ({
 
     // 合并数据用于图表
     const chartData = targetData?.points?.map((point, index) => {
-        const compareVal = compareData?.points?.[index]?.consumption;
+        let compareVal = null;
+
+        if (compareType === 'market_typical') {
+            compareVal = marketTypicalData?.points?.[index]?.consumption;
+        } else if (compareType === 'business_typical') {
+            compareVal = businessTypicalData?.points?.[index]?.consumption;
+        } else {
+            compareVal = compareData?.points?.[index]?.consumption;
+        }
+
         return {
             time: point.time,
             target: typeof point.consumption === 'number' ? point.consumption : null,
@@ -144,6 +163,8 @@ export const IntradayCurveChart: React.FC<IntradayCurveChartProps> = ({
 
     // 获取对比日期标签
     const getCompareLabel = () => {
+        if (compareType === 'market_typical') return '市场化典型曲线';
+        if (compareType === 'business_typical') return '工商业典型曲线';
         if (!compareData) return '对比日';
         if (compareData.is_average) return compareData.date;
         return compareData.date;
@@ -216,6 +237,8 @@ export const IntradayCurveChart: React.FC<IntradayCurveChartProps> = ({
                         <FormControlLabel value="last_week" control={<Radio size="small" />} label="上周" />
                         <FormControlLabel value="last_year" control={<Radio size="small" />} label="去年" />
                         <FormControlLabel value="workday_avg" control={<Radio size="small" />} label="工作日均值" />
+                        <FormControlLabel value="market_typical" control={<Radio size="small" />} label="市场化典型" />
+                        <FormControlLabel value="business_typical" control={<Radio size="small" />} label="工商业典型" />
                     </RadioGroup>
                 </Box>
 
@@ -303,7 +326,7 @@ export const IntradayCurveChart: React.FC<IntradayCurveChartProps> = ({
                                     />
 
                                     {/* 对比日曲线 */}
-                                    {compareData && (
+                                    {(compareData || compareType === 'market_typical' || compareType === 'business_typical') && (
                                         <Line
                                             type="monotone"
                                             dataKey="compare"
