@@ -393,9 +393,20 @@ async def get_customer_detail(
             if c.get("deviation"):
                 err = c["deviation"].get("daily_error")
                 if err is not None:
-                    abs_err = abs(err)
-                    if abs_err > max_error:
-                        max_error = abs_err
+                    # 2026-01-29 更新：仅统计 2026-01-01 及之后的误差
+                    is_valid_date = True
+                    date_val = c.get("date")
+                    if date_val:
+                        try:
+                            if date_val < "2026-01-01":
+                                is_valid_date = False
+                        except:
+                            pass
+                    
+                    if is_valid_date:
+                        abs_err = abs(err)
+                        if abs_err > max_error:
+                            max_error = abs_err
         
         # 获取日期范围
         date_range = f"{all_dates[0]} ~ {all_dates[-1]}" if all_dates else None
@@ -587,6 +598,7 @@ async def trigger_reaggregate(
     start_date: Optional[str] = Query(None, description="开始日期（可选，默认自动检测）"),
     end_date: Optional[str] = Query(None, description="结束日期（可选，默认自动检测）"),
     mode: str = Query("incremental", description="聚合模式: incremental(增量)/full(全量)"),
+    delete_existing: bool = Query(False, description="是否删除原数据（仅全量模式有效）"),
     current_user: User = Depends(get_current_active_user)
 ):
     """
@@ -684,58 +696,98 @@ async def trigger_reaggregate(
                     
                     aggregated_status[cid][date] = {"mp": has_mp, "meter": has_meter}
         
-        # 确定每个客户需要处理的日期（增强版增量逻辑）
+        # 确定每个客户需要处理的日期
         customer_pending_dates = {}  # customer_id -> set of pending dates
-        for cid, info in customer_info.items():
-            current_raw_mp_dates = set()
-            for mp_id in info["mp_ids"]:
-                current_raw_mp_dates.update(raw_mp_dates.get(mp_id, set()))
+
+        # 如果是全量重算模式 (full mode)
+        if mode == "full":
+            # 2026-01-29 Feature: 支持删除原数据
+            if delete_existing:
+                del_query = {"customer_id": {"$in": list(customer_info.keys())}}
+                # 如果指定了日期范围，只删除范围内的
+                if start_date or end_date:
+                    date_filter = {}
+                    if start_date: date_filter["$gte"] = start_date
+                    if end_date: date_filter["$lte"] = end_date
+                    del_query["date"] = date_filter
                 
-            current_raw_meter_dates = set()
-            for meter_id in info["meter_ids"]:
-                current_raw_meter_dates.update(raw_meter_dates.get(meter_id, set()))
-            
-            # 合并所有涉及的日期
-            all_raw_dates = current_raw_mp_dates | current_raw_meter_dates
-            cust_agg_status = aggregated_status.get(cid, {})
-            
-            pending_dates = set()
-            
-            for date in all_raw_dates:
-                if date not in cust_agg_status:
-                    # 记录完全不存在 -> 需要聚合
-                    pending_dates.add(date)
-                else:
-                    # 记录存在，检查完整性
-                    status = cust_agg_status[date]
+                del_result = UNIFIED_LOAD_CURVE.delete_many(del_query)
+                logger.info(f"全量重算: 已删除 {del_result.deleted_count} 条旧数据 (customers={len(customer_info)})")
+
+            # 在全量模式下，如果没有指定 delete_existing，通常我们也希望重新计算所有涉及的日期
+            # 逻辑：获取所有原始数据的日期并加入 pending
+            for cid, info in customer_info.items():
+                current_raw_mp_dates = set()
+                for mp_id in info["mp_ids"]:
+                    current_raw_mp_dates.update(raw_mp_dates.get(mp_id, set()))
+                
+                current_raw_meter_dates = set()
+                for meter_id in info["meter_ids"]:
+                    current_raw_meter_dates.update(raw_meter_dates.get(meter_id, set()))
+                
+                all_dates = current_raw_mp_dates | current_raw_meter_dates
+                
+                # 过滤日期范围
+                if start_date:
+                    all_dates = {d for d in all_dates if d >= start_date}
+                if end_date:
+                    all_dates = {d for d in all_dates if d <= end_date}
+                
+                if all_dates:
+                    customer_pending_dates[cid] = sorted(all_dates)
+
+        else:
+            # 增量模式 (incremental) - 原有逻辑
+            for cid, info in customer_info.items():
+                # ... (原有增量逻辑代码保持不变，但为了减少代码替换量，我们可以重用之前的逻辑并稍作修改，但这里直接重写循环可能更清晰)
+                # 由于这是 replace 内容，我需要保留原有的增量逻辑。
+                # 复用上面已经查询到的 raw dates
+                current_raw_mp_dates = set()
+                for mp_id in info["mp_ids"]:
+                    current_raw_mp_dates.update(raw_mp_dates.get(mp_id, set()))
                     
-                    # 如果有原始MP数据但聚合结果无MP -> 需要聚合
-                    if date in current_raw_mp_dates and not status["mp"]:
+                current_raw_meter_dates = set()
+                for meter_id in info["meter_ids"]:
+                    current_raw_meter_dates.update(raw_meter_dates.get(meter_id, set()))
+                
+                all_raw_dates = current_raw_mp_dates | current_raw_meter_dates
+                cust_agg_status = aggregated_status.get(cid, {})
+                
+                pending_dates = set()
+                
+                for date in all_raw_dates:
+                    if date not in cust_agg_status:
                         pending_dates.add(date)
-                        continue
-                        
-                    # 如果有原始Meter数据但聚合结果无Meter -> 需要聚合
-                    if date in current_raw_meter_dates and not status["meter"]:
-                        pending_dates.add(date)
-                        continue
-            
-            # 如果指定了日期范围，则进一步过滤
-            if start_date:
-                pending_dates = {d for d in pending_dates if d >= start_date}
-            if end_date:
-                pending_dates = {d for d in pending_dates if d <= end_date}
-            
-            if pending_dates:
-                customer_pending_dates[cid] = sorted(pending_dates)
+                    else:
+                        status = cust_agg_status[date]
+                        if date in current_raw_mp_dates and not status["mp"]:
+                            pending_dates.add(date)
+                            continue
+                        if date in current_raw_meter_dates and not status["meter"]:
+                            pending_dates.add(date)
+                            continue
+                
+                if start_date:
+                    pending_dates = {d for d in pending_dates if d >= start_date}
+                if end_date:
+                    pending_dates = {d for d in pending_dates if d <= end_date}
+                
+                if pending_dates:
+                    customer_pending_dates[cid] = sorted(pending_dates)
         
         # 统计要处理的总数
         total_pending = sum(len(dates) for dates in customer_pending_dates.values())
         
         if total_pending == 0:
             elapsed = time.time() - start_time
+            # 如果是全量删除模式且删除了数据但没新数据生成（罕见），也应该算完成
+            msg = "所有数据已是最新，无需聚合"
+            if mode == "full" and delete_existing:
+                msg = "旧数据已删除，但无需生成新数据（无原始数据）"
+
             return {
                 "status": "completed",
-                "message": "所有数据已是最新，无需聚合",
+                "message": msg,
                 "customer_count": len(customer_ids),
                 "processed": 0,
                 "updated": 0,

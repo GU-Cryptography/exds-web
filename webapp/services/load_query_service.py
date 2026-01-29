@@ -68,21 +68,33 @@ class LoadQueryService:
                 }}
             }}
         elif strategy == FusionStrategy.MP_COMPLETE:
-            # MP完整才用MP，否则尝试电表，否则MP
+            # 1. 如果MP完整 (无缺失)，优先用 MP
             mp_is_complete = {"$and": [
                 mp_valid,
                 {"$eq": [{"$size": {"$ifNull": ["$mp_load.missing_mps", []]}}, 0]}
             ]}
+            
+            # 2. 如果Meter完整 (无缺失)，优先用 Meter
+            meter_is_complete = {"$and": [
+                meter_valid,
+                {"$eq": [{"$size": {"$ifNull": ["$meter_load.missing_meters", []]}}, 0]}
+            ]}
+            
+            # 3. 都不完整，取日电量大的那个
+            # 注意: 如果某个不存在，total 为 null/0
+            mp_total = {"$ifNull": ["$mp_load.total", 0]}
+            meter_total = {"$ifNull": ["$meter_load.total", 0]}
+
             cond = {"$cond": {
                 "if": mp_is_complete,
                 "then": mp_val,
                 "else": {"$cond": {
-                    "if": meter_valid,
+                    "if": meter_is_complete,
                     "then": meter_val,
-                    "else": {"$cond": { # 回退到MP（即使不完整）
-                        "if": mp_valid,
+                    "else": {"$cond": {
+                        "if": {"$gte": [mp_total, meter_total]},
                         "then": mp_val,
-                        "else": None
+                        "else": meter_val
                     }}
                 }}
             }}
@@ -124,7 +136,7 @@ class LoadQueryService:
     def get_daily_curve(
         customer_id: str, 
         date: str, 
-        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY
+        strategy: FusionStrategy = FusionStrategy.MP_COMPLETE
     ) -> Optional[DailyCurve]:
         """获取单个客户单日的负荷曲线"""
         try:
@@ -155,7 +167,7 @@ class LoadQueryService:
         customer_id: str, 
         start_date: str, 
         end_date: str, 
-        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY,
+        strategy: FusionStrategy = FusionStrategy.MP_COMPLETE,
         return_df: bool = False
     ) -> Union[List[DailyCurve], Any]:
         """获取单个客户连续多日的负荷曲线"""
@@ -191,7 +203,7 @@ class LoadQueryService:
         customer_id: str, 
         start_date: str, 
         end_date: str, 
-        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY,
+        strategy: FusionStrategy = FusionStrategy.MP_COMPLETE,
         return_df: bool = False
     ) -> Union[List[DailyTotal], Any]:
         """获取单个客户连续多日的日电量"""
@@ -225,7 +237,7 @@ class LoadQueryService:
         customer_id: str, 
         start_month: str, 
         end_month: str, 
-        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY
+        strategy: FusionStrategy = FusionStrategy.MP_COMPLETE
     ) -> List[MonthlyTotal]:
         """获取单个客户连续多月的月电量"""
         # 构造日期范围
@@ -289,7 +301,7 @@ class LoadQueryService:
         customer_ids: List[str], 
         start_date: str, 
         end_date: str, 
-        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY,
+        strategy: FusionStrategy = FusionStrategy.MP_COMPLETE,
         return_df: bool = False
     ) -> Union[List[DailyCurve], Any]:
         """获取多个客户的聚合负荷曲线（叠加）"""
@@ -385,7 +397,7 @@ class LoadQueryService:
         customer_ids: List[str], 
         start_date: str, 
         end_date: str, 
-        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY,
+        strategy: FusionStrategy = FusionStrategy.MP_COMPLETE,
         return_df: bool = False
     ) -> Union[List[DailyTotal], Any]:
         """获取多个客户的聚合日电量（叠加）"""
@@ -438,7 +450,7 @@ class LoadQueryService:
         customer_ids: List[str], 
         start_month: str, 
         end_month: str, 
-        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY
+        strategy: FusionStrategy = FusionStrategy.MP_COMPLETE
     ) -> List[MonthlyTotal]:
         """获取多个客户的聚合月电量（叠加）"""
         if not customer_ids:
@@ -501,7 +513,7 @@ class LoadQueryService:
         customer_ids: List[str], 
         start_date: str, 
         end_date: str, 
-        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY
+        strategy: FusionStrategy = FusionStrategy.MP_COMPLETE
     ) -> Dict[str, List[DailyCurve]]:
         """
         批量获取多个客户的负荷曲线数据
@@ -550,7 +562,7 @@ class LoadQueryService:
         customer_ids: List[str], 
         start_date: str, 
         end_date: str, 
-        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY
+        strategy: FusionStrategy = FusionStrategy.MP_COMPLETE
     ) -> Dict[str, List[DailyTotal]]:
         """
         批量获取多个客户的日电量数据
@@ -597,7 +609,7 @@ class LoadQueryService:
         customer_ids: List[str], 
         start_month: str, 
         end_month: str, 
-        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY
+        strategy: FusionStrategy = FusionStrategy.MP_COMPLETE
     ) -> Dict[str, List[MonthlyTotal]]:
         """
         批量获取多个客户的月电量数据
@@ -673,7 +685,7 @@ class LoadQueryService:
     def get_signed_customers_aggregated_load(
         month: str,  # YYYY-MM
         data_type: str = 'daily', # curve, daily, monthly
-        strategy: FusionStrategy = FusionStrategy.MP_PRIORITY,
+        strategy: FusionStrategy = FusionStrategy.MP_COMPLETE,
         return_df: bool = False
     ) -> Union[List[Any], Any]:
         """
@@ -853,31 +865,51 @@ class LoadQueryService:
             return {"values": [], "total": 0, "source": "none"}
             
         elif strategy == FusionStrategy.MP_COMPLETE:
-            if mp_load:
-                mp_count = mp_load.get("mp_count", 0)
-                missing_count = len(mp_load.get("missing_mps", []))
-                if mp_count > 0 and missing_count == 0:
-                    return {
-                        "values": mp_load.get("values", []), 
-                        "total": mp_load.get("total", 0), 
-                        "tou_usage": mp_load.get("tou_usage"),
-                        "source": "mp"
-                    }
-            
-            if meter_load:
-                return {
-                    "values": meter_load.get("values", []), 
-                    "total": meter_load.get("total", 0), 
-                    "tou_usage": meter_load.get("tou_usage"),
-                    "source": "meter"
-                }
-            if mp_load:
+            # 1. MP数据完整 (无缺失)，优先用 MP
+            mp_count = mp_load.get("mp_count", 0) if mp_load else 0
+            mp_missing_count = len(mp_load.get("missing_mps", [])) if mp_load else 0
+            mp_is_complete = (mp_count > 0 and mp_missing_count == 0)
+
+            if mp_is_complete:
                 return {
                     "values": mp_load.get("values", []), 
                     "total": mp_load.get("total", 0), 
                     "tou_usage": mp_load.get("tou_usage"),
                     "source": "mp"
                 }
+            
+            # 2. Meter数据完整 (无缺失)，优先用 Meter
+            meter_count = meter_load.get("meter_count", 0) if meter_load else 0
+            meter_missing_count = len(meter_load.get("missing_meters", [])) if meter_load else 0
+            meter_is_complete = (meter_count > 0 and meter_missing_count == 0)
+
+            if meter_is_complete:
+                return {
+                    "values": meter_load.get("values", []), 
+                    "total": meter_load.get("total", 0), 
+                    "tou_usage": meter_load.get("tou_usage"),
+                    "source": "meter"
+                }
+
+            # 3. 都不完整，取日电量大的那个
+            mp_total = mp_load.get("total", 0) if mp_load else 0
+            meter_total = meter_load.get("total", 0) if meter_load else 0
+            
+            if mp_total >= meter_total and mp_load:
+                 return {
+                    "values": mp_load.get("values", []), 
+                    "total": mp_load.get("total", 0), 
+                    "tou_usage": mp_load.get("tou_usage"),
+                    "source": "mp"
+                }
+            elif meter_load:
+                return {
+                    "values": meter_load.get("values", []), 
+                    "total": meter_load.get("total", 0), 
+                    "tou_usage": meter_load.get("tou_usage"),
+                    "source": "meter"
+                }
+
             return {"values": [], "total": 0, "source": "none"}
         
         else:  # MP_PRIORITY (默认)

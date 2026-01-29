@@ -14,7 +14,8 @@ import {
     RadioGroup,
     FormControlLabel,
     Radio,
-    LinearProgress
+    LinearProgress,
+    Checkbox
 } from '@mui/material';
 import {
     PlayArrow as PlayArrowIcon,
@@ -40,6 +41,8 @@ export const LoadDataAggregationDialog: React.FC<LoadDataAggregationDialogProps>
     // Stage
     const [stage, setStage] = useState<'config' | 'processing' | 'finished'>('config');
     const [mode, setMode] = useState<'incremental' | 'recalc'>('incremental');
+    const [dateRangeType, setDateRangeType] = useState<'all' | 'current_month' | 'current_year'>('all');
+    const [deleteExisting, setDeleteExisting] = useState(false);
     const [result, setResult] = useState<{
         processed_customers: number;
         total_days: number;
@@ -62,6 +65,8 @@ export const LoadDataAggregationDialog: React.FC<LoadDataAggregationDialogProps>
         if (open) {
             setStage('config');
             setMode('incremental');
+            setDateRangeType('all');
+            setDeleteExisting(false);
             setResult(null);
             setError(null);
             setProgress(0);
@@ -130,10 +135,28 @@ export const LoadDataAggregationDialog: React.FC<LoadDataAggregationDialogProps>
                 const cust = targetCustomers[i];
                 setCurrentCustomer(cust.customer_name || cust.customer_id);
 
+                // Calculate Dates
+                let startDate: string | undefined = undefined;
+                let endDate: string | undefined = undefined;
+
+                if (mode === 'recalc' && dateRangeType !== 'all') {
+                    const now = new Date();
+                    if (dateRangeType === 'current_month') {
+                        startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+                        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+                    } else if (dateRangeType === 'current_year') {
+                        startDate = new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0];
+                        endDate = new Date(now.getFullYear(), 11, 31).toISOString().split('T')[0];
+                    }
+                }
+
                 // Call aggregation API
                 const params: any = {
                     customer_id: cust.customer_id,
-                    mode: mode === 'recalc' ? 'full' : 'incremental'
+                    mode: mode === 'recalc' ? 'full' : 'incremental',
+                    delete_existing: mode === 'recalc' ? deleteExisting : false,
+                    start_date: startDate,
+                    end_date: endDate
                 };
 
                 try {
@@ -228,11 +251,45 @@ export const LoadDataAggregationDialog: React.FC<LoadDataAggregationDialogProps>
             </FormControl>
 
             {mode === 'recalc' && (
-                <Alert severity="warning" sx={{ mt: 2 }}>
-                    <Typography variant="body2">
-                        注意：全量重新计算会消耗较多系统资源，建议在非高峰时段执行。
-                    </Typography>
-                </Alert>
+                <Box>
+                    <Alert severity="warning" sx={{ mt: 2, mb: 2 }}>
+                        <Typography variant="body2">
+                            注意：全量重新计算会消耗较多系统资源，建议在非高峰时段执行。
+                        </Typography>
+                    </Alert>
+
+                    {/* 日期范围选择 */}
+                    <FormControl component="fieldset" sx={{ mb: 2, display: 'block' }}>
+                        <FormLabel component="legend">聚合日期范围</FormLabel>
+                        <RadioGroup
+                            row
+                            value={dateRangeType}
+                            onChange={(e) => setDateRangeType(e.target.value as any)}
+                        >
+                            <FormControlLabel value="all" control={<Radio size="small" />} label="全部时间" />
+                            <FormControlLabel value="current_month" control={<Radio size="small" />} label="本月" />
+                            <FormControlLabel value="current_year" control={<Radio size="small" />} label="今年" />
+                        </RadioGroup>
+                    </FormControl>
+
+                    {/* 删除原数据选项 */}
+                    <Box sx={{ mt: 1 }}>
+                        <FormControlLabel
+                            control={
+                                <Checkbox
+                                    checked={deleteExisting}
+                                    onChange={(e) => setDeleteExisting(e.target.checked)}
+                                    color="error"
+                                />
+                            }
+                            label={
+                                <Typography color="error" variant="body2">
+                                    计算前删除原数据 (彻底重算)
+                                </Typography>
+                            }
+                        />
+                    </Box>
+                </Box>
             )}
 
             {error && (

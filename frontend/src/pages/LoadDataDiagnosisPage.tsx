@@ -517,7 +517,7 @@ export const LoadDataDiagnosisPage: React.FC = () => {
                                 direction={orderBy === 'max_error' ? order : 'asc'}
                                 onClick={() => handleSort('max_error')}
                             >
-                                最大误差
+                                当年最大误差
                             </TableSortLabel>
                         </TableCell>
                         <TableCell align="center">未聚合</TableCell>

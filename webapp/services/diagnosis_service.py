@@ -188,9 +188,20 @@ class DiagnosisService:
                 if deviation:
                     daily_error = deviation.get("daily_error")
                     if daily_error is not None:
-                        error_abs = abs(daily_error) * 100  # 转为百分比
-                        if max_error is None or error_abs > max_error:
-                            max_error = error_abs
+                        # 2026-01-29 更新：仅统计 2026-01-01 及之后的误差
+                        is_valid_date = True
+                        curve_date = curve.get("date")
+                        if curve_date:
+                            try:
+                                if curve_date < "2026-01-01":
+                                    is_valid_date = False
+                            except:
+                                pass
+                        
+                        if is_valid_date:
+                            error_abs = abs(daily_error) * 100  # 转为百分比
+                            if max_error is None or error_abs > max_error:
+                                max_error = error_abs
             
             # 检查是否有未聚合数据
             # 逻辑改进：
