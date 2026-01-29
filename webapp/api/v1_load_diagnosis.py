@@ -508,7 +508,11 @@ async def get_customer_calendar(
                 "date": date,
                 "has_mp_data": has_mp,
                 "has_meter_data": has_meter,
-                "daily_error": round(daily_error * 100, 2) if daily_error is not None else None,
+                "daily_error": (
+                    round(daily_error * 100, 2) 
+                    if daily_error is not None and abs(daily_error) != float('inf') and daily_error == daily_error
+                    else None
+                ),
                 "mp_actual": mp_actual,
                 "mp_expected": mp_expected,
                 "meter_actual": meter_actual,

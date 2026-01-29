@@ -91,6 +91,7 @@ interface TimelineData {
     has_meter: boolean;
     mp_actual: number;
     mp_expected: number;
+    daily_error: number | null;
 }
 
 export const LoadDataDiagnosisWorkbench: React.FC<Props> = ({ customerId }) => {
@@ -205,7 +206,8 @@ export const LoadDataDiagnosisWorkbench: React.FC<Props> = ({ customerId }) => {
                 has_mp: d.has_mp_data,
                 has_meter: d.has_meter_data,
                 mp_actual: d.mp_actual,
-                mp_expected: d.mp_expected
+                mp_expected: d.mp_expected,
+                daily_error: d.daily_error
             })));
         } catch (err) {
             console.error('加载时间线失败:', err);
@@ -329,40 +331,70 @@ export const LoadDataDiagnosisWorkbench: React.FC<Props> = ({ customerId }) => {
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
                     <Typography variant="caption" sx={{ width: 50, flexShrink: 0 }}>计量点</Typography>
                     <Box sx={{ display: 'flex', flex: 1, height: 16, borderRadius: 1, overflow: 'hidden' }}>
-                        {timelineData.map((d, i) => (
-                            <Tooltip key={d.date} title={`${d.date}: ${d.has_mp ? `计量点 ${d.mp_actual}/${d.mp_expected}` : '无数据'}`}>
-                                <Box
-                                    sx={{
-                                        flex: 1,
-                                        backgroundColor: d.has_mp
-                                            ? (d.mp_actual === d.mp_expected ? '#4caf50' : '#ff9800')
-                                            : '#e0e0e0',
-                                        cursor: 'pointer',
-                                        '&:hover': { opacity: 0.8 }
-                                    }}
-                                    onClick={() => setCurveDate(parseISO(d.date))}
-                                />
-                            </Tooltip>
-                        ))}
+                        {timelineData.map((d, i) => {
+                            const isError = d.daily_error !== null && Math.abs(d.daily_error) > 5;
+                            const color = isError
+                                ? '#f44336'
+                                : (d.has_mp ? (d.mp_actual === d.mp_expected ? '#4caf50' : '#ff9800') : '#e0e0e0');
+
+                            let title = `${d.date}: ${d.has_mp ? `计量点 ${d.mp_actual}/${d.mp_expected}` : '无数据'}`;
+                            if (isError) {
+                                title += ` (误差: ${d.daily_error?.toFixed(1)}%)`;
+                            }
+
+                            return (
+                                <Tooltip key={d.date} title={title}>
+                                    <Box
+                                        sx={{
+                                            flex: 1,
+                                            backgroundColor: color,
+                                            cursor: 'pointer',
+                                            '&:hover': { opacity: 0.8 }
+                                        }}
+                                        onClick={() => {
+                                            const date = parseISO(d.date);
+                                            setCurveDate(date);
+                                            setCalendarMonth(date);
+                                        }}
+                                    />
+                                </Tooltip>
+                            );
+                        })}
                     </Box>
                 </Box>
                 {/* Meter 时间线 */}
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <Typography variant="caption" sx={{ width: 50, flexShrink: 0 }}>电表</Typography>
                     <Box sx={{ display: 'flex', flex: 1, height: 16, borderRadius: 1, overflow: 'hidden' }}>
-                        {timelineData.map((d, i) => (
-                            <Tooltip key={d.date} title={`${d.date}: ${d.has_meter ? '有数据' : '无数据'}`}>
-                                <Box
-                                    sx={{
-                                        flex: 1,
-                                        backgroundColor: d.has_meter ? '#4caf50' : '#e0e0e0',
-                                        cursor: 'pointer',
-                                        '&:hover': { opacity: 0.8 }
-                                    }}
-                                    onClick={() => setCurveDate(parseISO(d.date))}
-                                />
-                            </Tooltip>
-                        ))}
+                        {timelineData.map((d, i) => {
+                            const isError = d.daily_error !== null && Math.abs(d.daily_error) > 5;
+                            const color = isError
+                                ? '#f44336'
+                                : (d.has_meter ? '#4caf50' : '#e0e0e0');
+
+                            let title = `${d.date}: ${d.has_meter ? '有数据' : '无数据'}`;
+                            if (isError) {
+                                title += ` (误差: ${d.daily_error?.toFixed(1)}%)`;
+                            }
+
+                            return (
+                                <Tooltip key={d.date} title={title}>
+                                    <Box
+                                        sx={{
+                                            flex: 1,
+                                            backgroundColor: color,
+                                            cursor: 'pointer',
+                                            '&:hover': { opacity: 0.8 }
+                                        }}
+                                        onClick={() => {
+                                            const date = parseISO(d.date);
+                                            setCurveDate(date);
+                                            setCalendarMonth(date);
+                                        }}
+                                    />
+                                </Tooltip>
+                            );
+                        })}
                     </Box>
                 </Box>
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
