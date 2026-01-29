@@ -15,7 +15,7 @@ from webapp.services.total_load_service import TotalLoadService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/api/v1/total-load",
+    prefix="/total-load",
     tags=["total-load"],
 )
 
@@ -135,4 +135,22 @@ def get_statistics(
         return data
     except Exception as e:
         logger.error(f"get_statistics failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/monthly-average", summary="获取月度均值曲线")
+def get_monthly_average_curves(
+    month: str = Query(..., description="月份 YYYY-MM"),
+    compare_type: str = Query("none", description="对比类型: none/last_month/last_year/typical"),
+    compare_month: Optional[str] = Query(None, description="自定义对比月份")
+):
+    """
+    获取月度均值曲线（含整体、工作日、周末、节假日）及对比
+    """
+    try:
+        service = TotalLoadService()
+        data = service.get_monthly_average_curves(month, compare_type, compare_month)
+        return data
+    except Exception as e:
+        logger.error(f"get_monthly_average_curves failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

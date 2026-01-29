@@ -20,11 +20,9 @@ from webapp.api import v1_contract_price_trend
 from webapp.api import v1_price_forecast
 from webapp.api import v1_weather
 from webapp.api import v1_load_diagnosis  # 负荷数据校核
-from webapp.services.package_service import PackageService
-from webapp.services.pricing_engine import PricingEngine
-from webapp.services.pricing_model_service import pricing_model_service
-from webapp.services.tou_service import get_tou_rule_by_date, get_tou_versions, get_tou_summary
-from webapp.services.sgcc_price_service import sgcc_price_service
+from webapp.api import v1_total_load # 整体负荷分析
+
+# ... existing imports ...
 
 # 创建一个API路由器
 router = APIRouter(prefix="/api/v1", tags=["v1"])
@@ -38,6 +36,7 @@ router.include_router(v1_contract_price_trend.router)  # 中长期趋势分析�
 router.include_router(v1_price_forecast.router)  # 价格预测路由
 router.include_router(v1_weather.router)  # 天气数据路由
 router.include_router(v1_load_diagnosis.router)  # 负荷数据校核路由
+router.include_router(v1_total_load.router) # 整体负荷分析路由
 
 
 

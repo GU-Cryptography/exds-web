@@ -754,3 +754,202 @@ class TotalLoadService:
             "peak_valley_ratio": pv_ratio,
             "yoy_change": None # 外层计算
         }
+
+    def _get_month_average_series(self, month: str, day_type: str = None) -> Optional[Dict]:
+        """
+        计算指定月份特定类型日期的平均负荷曲线
+        
+        Args:
+            month: YYYY-MM
+            day_type: "workday", "weekend", "holiday", or None (for all days)
+        """
+        try:
+            year, mon = map(int, month.split("-"))
+            _, days_in_month = monthrange(year, mon)
+            
+            holiday_service = get_holiday_service()
+            target_days = []
+            
+            today = date.today()
+            
+            for day in range(1, days_in_month + 1):
+                d = date(year, mon, day)
+                if d > today: # 不包含未来日期
+                    break
+                    
+                if day_type == "workday":
+                    if holiday_service.is_workday(d):
+                        target_days.append(d.isoformat())
+                elif day_type == "weekend":
+                    # 周末且非工作日(调休)
+                    if not holiday_service.is_workday(d) and d.weekday() >= 5: 
+                         # Simple logic: is_workday covers adjustment. 
+                         # If it is NOT workday, it is holiday or weekend.
+                         # If d.weekday() >= 5 and not workday -> Weekend.
+                         # But wait, holiday service definition?
+                         # Let's rely on holiday_service.get_day_info
+                         info = holiday_service.get_day_info(d)
+                         if info['day_type'] == 'weekend':
+                             target_days.append(d.isoformat())
+                elif day_type == "holiday":
+                     info = holiday_service.get_day_info(d)
+                     if info['day_type'] == 'holiday':
+                         target_days.append(d.isoformat())
+                else:
+                    # All days
+                    target_days.append(d.isoformat())
+            
+            if not target_days:
+                return None
+            
+            # 批量聚合
+            # 这里的逻辑如果天数不连续，不能直接用 start, end 查范围?
+            # aggregate_curve_series support date range. 
+            # If dates are scattered, we might need multiple queries OR query range and filter.
+            # Query range start to end is fine using FusionStrategy.
+            
+            start_date = target_days[0]
+            end_date = target_days[-1]
+            
+            all_curves = LoadQueryService.aggregate_curve_series(
+                self._signed_customer_ids, start_date, end_date, FusionStrategy.MP_PRIORITY
+            )
+            
+            # Filter only target days (in case we queried a range containing other types)
+            selected_curves = [c for c in all_curves if c.date in target_days]
+            
+            if not selected_curves:
+                return None
+            
+            n = len(selected_curves)
+            
+            # Calculate Average
+            # Assume 48 points or 96 points. Check first one.
+            first_curve = selected_curves[0]
+            val_len = len(first_curve.values) if first_curve.values else 48
+            
+            avg_values = []
+            for i in range(val_len):
+                total = sum(c.values[i] if c.values and i < len(c.values) else 0 for c in selected_curves)
+                avg_values.append(round(total / n, 2))
+                
+            avg_total = sum(avg_values)
+            
+            # Format Points
+            points = []
+            # 获取当月某一天(如第一天)的TOU规则作为参考? 
+            # 均值曲线的TOU背景通常用"典型日"或"今天"或"当月第一天"的规则
+            # 这里使用当月1号
+            ref_date = datetime(year, mon, 1)
+            tou_map = get_tou_rule_by_date(ref_date)
+            
+            interval = 1440 // val_len
+            start_min = interval
+            
+            for i, val in enumerate(avg_values):
+                curr_min = start_min + i * interval
+                time_str = self._get_time_str(curr_min)
+                
+                # Period Key
+                # 简单处理：直接查 tou_map
+                # time_str 格式 "HH:MM"
+                if time_str == "24:00":
+                     p_key = "23:45" # hack for 96 points end
+                else:
+                     p_key = time_str
+                
+                period_type = tou_map.get(p_key, "平段")
+                
+                points.append({
+                    "time": time_str,
+                    "consumption": val,
+                    "period_type": period_type
+                })
+            
+            return {
+                "date": f"{month} {day_type or '所有'}均值",
+                "points": points,
+                "total": round(avg_total, 2)
+            }
+
+        except Exception as e:
+            logger.error(f"_get_month_average_series failed: {e}", exc_info=True)
+            return None
+
+    def get_monthly_average_curves(
+        self,
+        month: str,
+        compare_type: str = "none",
+        compare_month: str = None
+    ) -> Dict:
+        """
+        获取月度均值曲线及对比
+        """
+        try:
+            # 1. Current Month Curves
+            current_data = {
+                "overall": self._get_month_average_series(month, None),
+                "workday": self._get_month_average_series(month, "workday"),
+                "weekend": self._get_month_average_series(month, "weekend"),
+                "holiday": self._get_month_average_series(month, "holiday")
+            }
+            
+            compare_data = None
+            
+            target_date = date(int(month[:4]), int(month[5:7]), 15) # middle of month
+            
+            if compare_type == "last_month":
+                lm = target_date - timedelta(days=target_date.day + 1) # last month end
+                lm_str = lm.strftime("%Y-%m")
+                compare_data = {
+                     "overall": self._get_month_average_series(lm_str, None),
+                     "workday": self._get_month_average_series(lm_str, "workday"),
+                     "weekend": self._get_month_average_series(lm_str, "weekend"),
+                     "holiday": self._get_month_average_series(lm_str, "holiday")
+                }
+            elif compare_type == "last_year":
+                ly_str = f"{int(month[:4]) - 1}-{month[5:7]}"
+                compare_data = {
+                     "overall": self._get_month_average_series(ly_str, None),
+                     "workday": self._get_month_average_series(ly_str, "workday"),
+                     "weekend": self._get_month_average_series(ly_str, "weekend"),
+                     "holiday": self._get_month_average_series(ly_str, "holiday")
+                }
+            elif compare_type == "typical":
+                # Typical Curves
+                from webapp.services.typical_curve_service import TypicalCurveService
+                typical_service = TypicalCurveService()
+                
+                # Need Total Load for scaling? 
+                # Typical Curve Service returns percentage. We need to scale it.
+                # Use current month's workday average total OR overall average total as base.
+                base_total = 0
+                if current_data["overall"]:
+                    base_total = current_data["overall"]["total"]
+                elif current_data["workday"]:
+                    base_total = current_data["workday"]["total"]
+                
+                if base_total > 0:
+                     # Market Typical
+                     m_points = typical_service.get_curve_points(target_date.year, target_date.month, "market", "")
+                     m_data = self._process_typical_points(m_points, base_total, month, {})
+                     
+                     # Business Typical
+                     b_points = typical_service.get_curve_points(target_date.year, target_date.month, "business_general", "")
+                     b_data = self._process_typical_points(b_points, base_total, month, {})
+                     
+                     compare_data = {
+                         "market": m_data,
+                         "business": b_data
+                     }
+
+            return {
+                "month": month,
+                "current": current_data,
+                "compare": compare_data,
+                "compare_type": compare_type
+            }
+
+        except Exception as e:
+            logger.error(f"get_monthly_average_curves failed: {e}", exc_info=True)
+            return {}

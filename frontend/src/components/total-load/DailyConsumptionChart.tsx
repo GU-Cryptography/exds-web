@@ -22,6 +22,7 @@ import {
     Tooltip as RechartsTooltip,
     ReferenceLine,
     Cell,
+    Legend
 } from 'recharts';
 import apiClient from '../../api/client';
 
@@ -323,6 +324,30 @@ export const DailyConsumptionChart: React.FC<DailyConsumptionChartProps> = ({
         );
     };
 
+    // Custom Legend Content
+    const renderLegend = (props: any) => {
+        return (
+            <Stack direction="row" spacing={1.5} sx={{ mb: 1, flexWrap: 'wrap', justifyContent: 'flex-end', fontSize: '0.75rem' }}>
+                <Typography variant="caption" sx={{ mr: 1, fontWeight: 'bold', color: '#666', display: 'flex', alignItems: 'center' }}>
+                    日期颜色:
+                    <span style={{ color: DAY_TICK_COLORS.workday, marginLeft: 4 }}>工作日</span>/
+                    <span style={{ color: DAY_TICK_COLORS.weekend, margin: '0 2px' }}>周末</span>/
+                    <span style={{ color: DAY_TICK_COLORS.holiday, margin: '0 2px' }}>节假日</span>
+                </Typography>
+                {/* TOU Legend */}
+                {Object.entries(COLORS).map(([key, color]) => {
+                    const labels: any = { tip: '尖峰', peak: '高峰', flat: '平段', valley: '低谷', deep: '深谷' };
+                    return (
+                        <Box key={key} sx={{ display: 'flex', alignItems: 'center' }}>
+                            <Box sx={{ width: 10, height: 10, bgcolor: color, borderRadius: '50%', mr: 0.5 }} />
+                            <Typography variant="caption" color="text.secondary">{labels[key]}</Typography>
+                        </Box>
+                    )
+                })}
+            </Stack>
+        );
+    };
+
     if (loading && !data) {
         return (
             <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 300 }}>
@@ -365,26 +390,6 @@ export const DailyConsumptionChart: React.FC<DailyConsumptionChartProps> = ({
                     </IconButton>
                 </Box>
             </Box>
-
-            {/* 图例 (Only TOU colors now) */}
-            <Stack direction="row" spacing={1.5} sx={{ mb: 1, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
-                <Typography variant="caption" sx={{ mr: 1, fontWeight: 'bold', color: '#666', display: 'flex', alignItems: 'center' }}>
-                    日期颜色:
-                    <span style={{ color: DAY_TICK_COLORS.workday, marginLeft: 4 }}>工作日</span>/
-                    <span style={{ color: DAY_TICK_COLORS.weekend, margin: '0 2px' }}>周末</span>/
-                    <span style={{ color: DAY_TICK_COLORS.holiday, margin: '0 2px' }}>节假日</span>
-                </Typography>
-                {/* TOU Legend */}
-                {Object.entries(COLORS).map(([key, color]) => {
-                    const labels: any = { tip: '尖峰', peak: '高峰', flat: '平段', valley: '低谷', deep: '深谷' };
-                    return (
-                        <Box key={key} sx={{ display: 'flex', alignItems: 'center' }}>
-                            <Box sx={{ width: 10, height: 10, bgcolor: color, borderRadius: '50%', mr: 0.5 }} />
-                            <Typography variant="caption" color="text.secondary">{labels[key]}</Typography>
-                        </Box>
-                    )
-                })}
-            </Stack>
 
             {/* 图表区域 */}
             <Box sx={{ position: 'relative', height: { xs: 210, sm: 250 }, width: '100%', '& .recharts-surface:focus': { outline: 'none' } }}>
@@ -435,6 +440,7 @@ export const DailyConsumptionChart: React.FC<DailyConsumptionChartProps> = ({
                             }}
                         />
                         <RechartsTooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.05)' }} />
+                        <Legend content={renderLegend} verticalAlign="top" height={36} />
 
                         {/* Stacks for TOU */}
                         <Bar
