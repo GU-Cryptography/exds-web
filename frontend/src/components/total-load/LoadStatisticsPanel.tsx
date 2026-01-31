@@ -45,7 +45,6 @@ const PERIOD_LABELS: Record<string, string> = {
 };
 
 // Distinct light colors for each scope's Peak-Valley Ratio
-// User Request: Red, Blue, Green (Light)
 const SCOPE_PV_STYLES: Record<string, { bgcolor: string, color: string }> = {
     daily: {
         bgcolor: 'rgba(33, 150, 243, 0.08)', // Light Blue
@@ -59,13 +58,6 @@ const SCOPE_PV_STYLES: Record<string, { bgcolor: string, color: string }> = {
         bgcolor: 'rgba(244, 67, 54, 0.08)', // Light Red
         color: '#c62828'
     },
-};
-
-const getPeakValleyLabel = (ratio: number | null) => {
-    if (ratio === null) return '-';
-    if (ratio < 1.5) return '优';
-    if (ratio <= 2.0) return '良';
-    return '差';
 };
 
 export const LoadStatisticsPanel: React.FC<LoadStatisticsPanelProps> = ({
@@ -123,7 +115,7 @@ export const LoadStatisticsPanel: React.FC<LoadStatisticsPanelProps> = ({
                                 display: 'flex',
                                 alignItems: 'center',
                                 color: data.yoy_change >= 0 ? 'error.main' : 'success.main',
-                                backgroundColor: data.yoy_change >= 0 ? 'rgba(211, 47, 47, 0.1)' : 'rgba(46, 125, 50, 0.1)',
+                                bgcolor: data.yoy_change >= 0 ? 'error.lighter' : 'success.lighter',
                                 px: 0.6,
                                 py: 0.1,
                                 borderRadius: 0.5
@@ -154,28 +146,13 @@ export const LoadStatisticsPanel: React.FC<LoadStatisticsPanelProps> = ({
                                     display: 'flex',
                                     justifyContent: 'space-between',
                                     alignItems: 'center',
-                                    px: 1,
-                                    py: 0.3,
-                                    borderRadius: 0.5,
                                     bgcolor: pvStyle.bgcolor,
-                                    color: pvStyle.color
+                                    px: 0.8,
+                                    py: 0.3,
+                                    borderRadius: 0.5
                                 }}>
-                                    <Typography variant="caption" sx={{ fontWeight: 700, color: 'inherit', fontSize: '0.65rem' }}>峰谷比:</Typography>
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                        <Typography variant="caption" sx={{ fontWeight: 800, color: 'inherit', fontSize: '0.8rem' }}>
-                                            {data.peak_valley_ratio?.toFixed(2) ?? '-'}
-                                        </Typography>
-                                        <Typography variant="caption" sx={{
-                                            fontWeight: 'bold',
-                                            color: 'inherit',
-                                            fontSize: '0.6rem',
-                                            bgcolor: 'rgba(255,255,255,0.4)',
-                                            px: 0.5,
-                                            borderRadius: 0.5
-                                        }}>
-                                            {getPeakValleyLabel(data.peak_valley_ratio)}
-                                        </Typography>
-                                    </Box>
+                                    <Typography variant="caption" sx={{ fontWeight: 700, color: pvStyle.color, fontSize: '0.65rem' }}>峰谷比:</Typography>
+                                    <Typography variant="caption" sx={{ fontWeight: 800, color: pvStyle.color, fontSize: '0.8rem' }}>{data.peak_valley_ratio?.toFixed(2) ?? '-'}</Typography>
                                 </Box>
                             </Grid>
                         </Grid>

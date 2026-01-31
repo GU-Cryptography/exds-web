@@ -363,14 +363,14 @@ export const DailyConsumptionChart: React.FC<DailyConsumptionChartProps> = ({
     return (
         <Paper variant="outlined" sx={{ p: 1.5, height: '100%' }}>
             {/* 标题和月份导航 */}
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', mr: 1, borderRadius: 1 }} />
-                    <Typography variant="h6" fontSize="1rem" fontWeight="bold">
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 32, mb: 1.5 }}>
+                <Stack direction="row" alignItems="center" spacing={1}>
+                    <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', borderRadius: 1 }} />
+                    <Typography variant="h6" fontSize="0.95rem" fontWeight="bold">
                         日电量分布
                     </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, bgcolor: 'grey.50', px: 0.5, py: 0.25, borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                </Stack>
+                <Box sx={{ display: 'flex', alignItems: 'center', bgcolor: 'grey.50', px: 0.5, py: 0.25, borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
                     <IconButton
                         size="small"
                         onClick={() => handleMonthShift(-1)}

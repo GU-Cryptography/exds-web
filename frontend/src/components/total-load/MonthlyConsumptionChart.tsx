@@ -318,19 +318,13 @@ export const MonthlyConsumptionChart: React.FC<MonthlyConsumptionChartProps> = (
                 borderRadius: 2
             }}
         >
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                <Box
-                    sx={{
-                        width: 4,
-                        height: 18,
-                        background: 'linear-gradient(180deg, #1976D2 0%, #64B5F6 100%)',
-                        mr: 1.5,
-                        borderRadius: 1
-                    }}
-                />
-                <Typography variant="subtitle1" fontWeight="700" color="#2c3e50">
-                    月度电量对比 ({lastYear} vs {currentYear})
-                </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', height: 32, mb: 1.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', borderRadius: 1 }} />
+                    <Typography variant="h6" fontSize="0.95rem" fontWeight="bold">
+                        月度电量对比 ({lastYear} vs {currentYear})
+                    </Typography>
+                </Box>
             </Box>
 
             <Box sx={{ height: { xs: 210, sm: 250 }, width: '100%', '& .recharts-surface:focus': { outline: 'none' } }}>

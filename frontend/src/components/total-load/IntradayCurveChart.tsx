@@ -10,6 +10,7 @@ import {
     FormControlLabel,
     IconButton,
     Checkbox,
+    Stack,
 } from '@mui/material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -175,175 +176,236 @@ export const IntradayCurveChart: React.FC<IntradayCurveChartProps> = ({
 
     return (
         <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
-            <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
-                {/* 标题已移除 */}
+            <Paper variant="outlined" sx={{ p: 1.5, height: '100%' }}>
+                <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                    {/* Header Row: Title, DatePicker, Fullscreen Button */}
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: 32, mb: 1.5, flexShrink: 0 }}>
+                        <Stack direction="row" alignItems="center">
+                            <Stack direction="row" alignItems="center" spacing={1}>
+                                <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', borderRadius: 1 }} />
+                                <Typography variant="h6" fontSize="0.95rem" fontWeight="bold">日内电量曲线</Typography>
+                            </Stack>
 
-                {/* 控制栏 */}
-                <Box sx={{
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    gap: 2,
-                    mb: 2,
-                    alignItems: 'center',
-                    bgcolor: 'grey.50',
-                    p: 1,
-                    borderRadius: 1,
-                    border: '1px solid',
-                    borderColor: 'divider'
-                }}>
-                    {/* 日期选择 */}
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <IconButton size="small" onClick={() => handleDateShift(-1)} disabled={loading}>
-                            <ArrowLeftIcon />
-                        </IconButton>
-                        <DatePicker
-                            value={dateObj}
-                            onChange={(date) => date && onDateChange(format(date, 'yyyy-MM-dd'))}
-                            disabled={loading}
-                            slotProps={{
-                                textField: {
-                                    size: 'small',
-                                    variant: 'standard',
-                                    InputProps: { disableUnderline: true },
-                                    sx: {
-                                        width: 140,
-                                        '& .MuiInputBase-input': {
-                                            textAlign: 'center',
-                                            fontWeight: 500,
-                                            fontSize: '0.9rem'
-                                        }
-                                    }
-                                }
-                            }}
-                        />
-                        <IconButton size="small" onClick={() => handleDateShift(1)} disabled={loading}>
-                            <ArrowRightIcon />
-                        </IconButton>
-                    </Box>
-
-                    {/* 对比选项 */}
-                    <RadioGroup
-                        row
-                        value={compareType}
-                        onChange={handleCompareTypeChange}
-                        sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
-                    >
-                        <FormControlLabel value="yesterday" control={<Radio size="small" />} label="昨日" />
-                        <FormControlLabel value="last_week" control={<Radio size="small" />} label="上周" />
-                        <FormControlLabel value="last_year" control={<Radio size="small" />} label="去年" />
-                        <FormControlLabel value="workday_avg" control={<Radio size="small" />} label="工作日均值" />
-                        <FormControlLabel value="market_typical" control={<Radio size="small" />} label="市场化典型" />
-                        <FormControlLabel value="business_typical" control={<Radio size="small" />} label="工商业典型" />
-                    </RadioGroup>
-                </Box>
-
-                {/* 图表区域 */}
-                {loading && !targetData ? (
-                    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 350 }}>
-                        <CircularProgress />
-                    </Box>
-                ) : error ? (
-                    <Alert severity="error">{error}</Alert>
-                ) : (
-                    <Box sx={{ position: 'relative' }}>
-                        {loading && (
-                            <Box
-                                sx={{
-                                    position: 'absolute',
-                                    top: 0, left: 0, right: 0, bottom: 0,
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    backgroundColor: 'rgba(255,255,255,0.7)',
-                                    zIndex: 1000,
-                                }}
-                            >
-                                <CircularProgress />
-                            </Box>
-                        )}
-                        <Box
-                            ref={chartRef}
-                            sx={{
-                                height: { xs: 285, sm: 325 },
-                                position: 'relative',
-                                backgroundColor: isFullscreen ? 'background.paper' : 'transparent',
-                                p: isFullscreen ? 2 : 0,
-                                ...(isFullscreen && {
-                                    position: 'fixed',
-                                    top: 0, left: 0,
-                                    width: '100vw', height: '100vh',
-                                    zIndex: 1400,
-                                }),
-                                // Remove focus outline for all chart elements
-                                '& *:focus': {
-                                    outline: 'none !important'
-                                }
-                            }}
-                        >
-                            <FullscreenEnterButton />
-                            <FullscreenExitButton />
-                            <FullscreenTitle />
-                            <NavigationButtons />
-
-                            <ResponsiveContainer width="100%" height="100%">
-                                <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                                    {TouPeriodAreas}
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e0e0e0" />
-                                    <XAxis
-                                        dataKey="time"
-                                        tick={{ fontSize: 11, fill: '#888' }}
-                                        tickLine={{ stroke: '#ccc' }}
-                                        axisLine={{ stroke: '#ccc' }}
-                                        interval={11}
-                                        tickFormatter={(value, index) => {
-                                            const totalPoints = chartData.length;
-                                            if (index === 0) return '00:30';
-                                            if (index === totalPoints - 1) return '24:00';
-                                            return value;
+                            {/* Integrated Date Picker (Desktop) */}
+                            {!isFullscreen && (
+                                <Box sx={{
+                                    display: { xs: 'none', sm: 'flex' },
+                                    alignItems: 'center',
+                                    bgcolor: 'grey.50',
+                                    borderRadius: 2,
+                                    px: 0.5,
+                                    py: 0.25,
+                                    border: '1px solid',
+                                    borderColor: 'divider',
+                                    ml: 2
+                                }}>
+                                    <IconButton size="small" onClick={() => handleDateShift(-1)} disabled={loading}>
+                                        <ArrowLeftIcon fontSize="small" />
+                                    </IconButton>
+                                    <DatePicker
+                                        value={dateObj}
+                                        onChange={(date) => date && onDateChange(format(date, 'yyyy-MM-dd'))}
+                                        disabled={loading}
+                                        slotProps={{
+                                            textField: {
+                                                variant: 'standard',
+                                                size: 'small',
+                                                InputProps: { disableUnderline: true },
+                                                sx: {
+                                                    width: 140,
+                                                    '& .MuiInputBase-input': {
+                                                        textAlign: 'center',
+                                                        fontSize: '0.875rem',
+                                                        fontWeight: 500,
+                                                        py: 0.3,
+                                                        cursor: 'pointer'
+                                                    }
+                                                }
+                                            }
                                         }}
                                     />
-                                    <YAxis
-                                        tick={{ fontSize: 11, fill: '#888' }}
-                                        tickLine={{ stroke: '#ccc' }}
-                                        axisLine={{ stroke: '#ccc' }}
-                                        label={{ value: 'MWh', angle: -90, position: 'insideLeft', fontSize: 11, fill: '#888' }}
-                                    />
-                                    <RechartsTooltip content={<CustomTooltip unit="MWh" />} />
-                                    <Legend />
+                                    <IconButton size="small" onClick={() => handleDateShift(1)} disabled={loading}>
+                                        <ArrowRightIcon fontSize="small" />
+                                    </IconButton>
+                                </Box>
+                            )}
+                        </Stack>
 
-                                    {/* 目标日曲线 */}
-                                    <Line
-                                        type="monotone"
-                                        dataKey="target"
-                                        name={selectedDate}
-                                        stroke="#1976D2"
-                                        strokeWidth={2}
-                                        dot={false}
-                                        activeDot={{ r: 4 }}
-                                    />
-
-                                    {/* 对比日曲线 */}
-                                    {(compareData || compareType === 'market_typical' || compareType === 'business_typical') && (
-                                        <Line
-                                            type="monotone"
-                                            dataKey="compare"
-                                            name={getCompareLabel()}
-                                            stroke="#9E9E9E"
-                                            strokeWidth={1.5}
-                                            strokeDasharray="5 5"
-                                            dot={false}
-                                        />
-                                    )}
-                                </LineChart>
-                            </ResponsiveContainer>
+                        <Box>
+                            <FullscreenEnterButton />
+                            <FullscreenExitButton />
                         </Box>
                     </Box>
-                )}
 
-                {/* 无对比数据提示 */}
-                {!compareData && !loading && (
-                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                        对比日暂无数据
-                    </Typography>
-                )}
+                    {/* Integrated Date Picker (Mobile) */}
+                    {!isFullscreen && (
+                        <Box sx={{
+                            display: { xs: 'flex', sm: 'none' },
+                            alignItems: 'center',
+                            bgcolor: 'grey.50',
+                            borderRadius: 2,
+                            px: 0.5,
+                            py: 0.25,
+                            border: '1px solid',
+                            borderColor: 'divider',
+                            mb: 2,
+                            alignSelf: 'flex-start'
+                        }}>
+                            <IconButton size="small" onClick={() => handleDateShift(-1)} disabled={loading}>
+                                <ArrowLeftIcon fontSize="small" />
+                            </IconButton>
+                            <DatePicker
+                                value={dateObj}
+                                onChange={(date) => date && onDateChange(format(date, 'yyyy-MM-dd'))}
+                                disabled={loading}
+                                slotProps={{
+                                    textField: {
+                                        variant: 'standard',
+                                        size: 'small',
+                                        InputProps: { disableUnderline: true },
+                                        sx: {
+                                            width: 130,
+                                            '& .MuiInputBase-input': {
+                                                textAlign: 'center',
+                                                fontSize: '0.75rem',
+                                                fontWeight: 500,
+                                                py: 0.3,
+                                                cursor: 'pointer'
+                                            }
+                                        }
+                                    }
+                                }}
+                            />
+                            <IconButton size="small" onClick={() => handleDateShift(1)} disabled={loading}>
+                                <ArrowRightIcon fontSize="small" />
+                            </IconButton>
+                        </Box>
+                    )}
+
+                    {/* Controls Row: Comparison Options */}
+                    {!isFullscreen && (
+                        <Box sx={{ mb: 1.5, display: 'flex', alignItems: 'center' }}>
+                            <RadioGroup
+                                row
+                                value={compareType}
+                                onChange={handleCompareTypeChange}
+                                sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.85rem' } }}
+                            >
+                                <FormControlLabel value="yesterday" control={<Radio size="small" sx={{ p: 0.5 }} />} label="昨日" />
+                                <FormControlLabel value="last_week" control={<Radio size="small" sx={{ p: 0.5 }} />} label="上周" />
+                                <FormControlLabel value="last_year" control={<Radio size="small" sx={{ p: 0.5 }} />} label="去年" />
+                                <FormControlLabel value="workday_avg" control={<Radio size="small" sx={{ p: 0.5 }} />} label="工作日均值" />
+                                <FormControlLabel value="market_typical" control={<Radio size="small" sx={{ p: 0.5 }} />} label="市场化典型" />
+                                <FormControlLabel value="business_typical" control={<Radio size="small" sx={{ p: 0.5 }} />} label="工商业典型" />
+                            </RadioGroup>
+                        </Box>
+                    )}
+
+                    {/* Chart Area */}
+                    {loading && !targetData ? (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flex: 1 }}>
+                            <CircularProgress />
+                        </Box>
+                    ) : error ? (
+                        <Alert severity="error">{error}</Alert>
+                    ) : (
+                        <Box sx={{ position: 'relative', flex: 1, minHeight: 0 }}>
+                            {loading && (
+                                <Box
+                                    sx={{
+                                        position: 'absolute',
+                                        top: 0, left: 0, right: 0, bottom: 0,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        backgroundColor: 'rgba(255,255,255,0.7)',
+                                        zIndex: 1000,
+                                    }}
+                                >
+                                    <CircularProgress />
+                                </Box>
+                            )}
+                            <Box
+                                ref={chartRef}
+                                sx={{
+                                    height: '100%',
+                                    minHeight: 300,
+                                    position: 'relative',
+                                    backgroundColor: isFullscreen ? 'background.paper' : 'transparent',
+                                    p: isFullscreen ? 2 : 0,
+                                    ...(isFullscreen && {
+                                        position: 'fixed',
+                                        top: 0, left: 0,
+                                        width: '100vw', height: '100vh',
+                                        zIndex: 1400,
+                                    }),
+                                    '& *:focus': {
+                                        outline: 'none !important'
+                                    }
+                                }}
+                            >
+                                <FullscreenEnterButton />
+                                <FullscreenExitButton />
+                                <FullscreenTitle />
+                                <NavigationButtons />
+
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                                        {TouPeriodAreas}
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e0e0e0" />
+                                        <XAxis
+                                            dataKey="time"
+                                            tick={{ fontSize: 11, fill: '#888' }}
+                                            tickLine={{ stroke: '#ccc' }}
+                                            axisLine={{ stroke: '#ccc' }}
+                                            interval={11}
+                                            tickFormatter={(value, index) => {
+                                                const totalPoints = chartData.length;
+                                                if (index === 0) return '00:30';
+                                                if (index === totalPoints - 1) return '24:00';
+                                                return value;
+                                            }}
+                                        />
+                                        <YAxis
+                                            tick={{ fontSize: 11, fill: '#888' }}
+                                            tickLine={{ stroke: '#ccc' }}
+                                            axisLine={{ stroke: '#ccc' }}
+                                            label={{ value: 'MWh', angle: -90, position: 'insideLeft', fontSize: 11, fill: '#888' }}
+                                        />
+                                        <RechartsTooltip content={<CustomTooltip unit="MWh" />} />
+                                        <Legend wrapperStyle={{ top: -5 }} />
+
+                                        <Line
+                                            type="monotone"
+                                            dataKey="target"
+                                            name={selectedDate}
+                                            stroke="#1976D2"
+                                            strokeWidth={2}
+                                            dot={false}
+                                            activeDot={{ r: 4 }}
+                                        />
+
+                                        {(compareData || compareType === 'market_typical' || compareType === 'business_typical') && (
+                                            <Line
+                                                type="monotone"
+                                                dataKey="compare"
+                                                name={getCompareLabel()}
+                                                stroke="#9E9E9E"
+                                                strokeWidth={1.5}
+                                                strokeDasharray="5 5"
+                                                dot={false}
+                                            />
+                                        )}
+                                    </LineChart>
+                                </ResponsiveContainer>
+                            </Box>
+                        </Box>
+                    )}
+
+                    {!compareData && !loading && (
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                            对比日暂无数据
+                        </Typography>
+                    )}
+                </Box>
             </Paper>
         </LocalizationProvider>
     );

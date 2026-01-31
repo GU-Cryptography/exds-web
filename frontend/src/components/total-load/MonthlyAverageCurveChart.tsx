@@ -213,62 +213,65 @@ export const MonthlyAverageCurveChart: React.FC<MonthlyAverageCurveChartProps> =
 
     return (
         <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
-            {/* Control Bar */}
+            {/* Header Row: Title & Month Picker */}
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 32, mb: 1.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', borderRadius: 1 }} />
+                    <Typography variant="h6" fontSize="0.95rem" fontWeight="bold">月度均值曲线</Typography>
+                </Box>
+
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, bgcolor: 'grey.50', px: 0.5, py: 0.25, borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                    <IconButton size="small" onClick={() => handleMonthShift(-1)} disabled={loading}>
+                        <ArrowLeftIcon fontSize="small" />
+                    </IconButton>
+                    <Typography variant="body2" sx={{ minWidth: 60, textAlign: 'center', fontWeight: 'bold', fontSize: '0.85rem' }}>
+                        {month}
+                    </Typography>
+                    <IconButton size="small" onClick={() => handleMonthShift(1)} disabled={loading}>
+                        <ArrowRightIcon fontSize="small" />
+                    </IconButton>
+                </Box>
+            </Box>
+
+            {/* Control Bar: View Mode & Compare Options */}
             <Box sx={{
                 display: 'flex',
                 flexWrap: 'wrap',
                 gap: 2,
                 mb: 2,
                 alignItems: 'center',
-                bgcolor: 'grey.50',
-                p: 1,
-                borderRadius: 1,
-                border: '1px solid',
-                borderColor: 'divider',
                 justifyContent: 'space-between'
             }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-                    {/* Month Picker */}
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <IconButton size="small" onClick={() => handleMonthShift(-1)} disabled={loading}>
-                            <ArrowLeftIcon />
-                        </IconButton>
-                        <Typography variant="body2" sx={{ mx: 1, fontWeight: 'bold', minWidth: 60, textAlign: 'center' }}>
-                            {month}
-                        </Typography>
-                        <IconButton size="small" onClick={() => handleMonthShift(1)} disabled={loading}>
-                            <ArrowRightIcon />
-                        </IconButton>
-                    </Box>
-
-                    {/* View Mode Toggle (Exclusive) */}
-                    <ToggleButtonGroup
-                        value={viewMode}
-                        exclusive
-                        onChange={handleViewModeChange}
-                        size="small"
-                        aria-label="view mode"
-                    >
-                        <ToggleButton value="overall" aria-label="overall">
-                            <TimelineIcon fontSize="small" sx={{ mr: 0.5 }} /> 整月平均
-                        </ToggleButton>
-                        <ToggleButton value="split" aria-label="split">
-                            <CategoryIcon fontSize="small" sx={{ mr: 0.5 }} /> 分类显示
-                        </ToggleButton>
-                    </ToggleButtonGroup>
-                </Box>
+                {/* View Mode Toggle */}
+                <ToggleButtonGroup
+                    value={viewMode}
+                    exclusive
+                    onChange={handleViewModeChange}
+                    size="small"
+                    aria-label="view mode"
+                    sx={{ height: 32 }}
+                >
+                    <ToggleButton value="overall" aria-label="overall" sx={{ px: 1.5 }}>
+                        <TimelineIcon fontSize="small" sx={{ mr: 0.5 }} />
+                        <Typography variant="caption" fontWeight="bold">整月平均</Typography>
+                    </ToggleButton>
+                    <ToggleButton value="split" aria-label="split" sx={{ px: 1.5 }}>
+                        <CategoryIcon fontSize="small" sx={{ mr: 0.5 }} />
+                        <Typography variant="caption" fontWeight="bold">分类显示</Typography>
+                    </ToggleButton>
+                </ToggleButtonGroup>
 
                 {/* Compare Options */}
                 <RadioGroup
                     row
                     value={compareType}
                     onChange={handleCompareTypeChange}
-                    sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
+                    sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.85rem' } }}
                 >
-                    <FormControlLabel value="none" control={<Radio size="small" />} label="无对比" />
-                    <FormControlLabel value="last_month" control={<Radio size="small" />} label="上月" />
-                    <FormControlLabel value="last_year" control={<Radio size="small" />} label="去年" />
-                    <FormControlLabel value="typical" control={<Radio size="small" />} label="典型" />
+                    <FormControlLabel value="none" control={<Radio size="small" sx={{ p: 0.5 }} />} label="无对比" />
+                    <FormControlLabel value="last_month" control={<Radio size="small" sx={{ p: 0.5 }} />} label="上月" />
+                    <FormControlLabel value="last_year" control={<Radio size="small" sx={{ p: 0.5 }} />} label="去年" />
+                    <FormControlLabel value="typical" control={<Radio size="small" sx={{ p: 0.5 }} />} label="典型" />
                 </RadioGroup>
             </Box>
 
