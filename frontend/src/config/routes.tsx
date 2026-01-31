@@ -17,6 +17,8 @@ import { WeatherDataPage } from '../pages/WeatherDataPage';
 import { LoadDataDiagnosisPage } from '../pages/LoadDataDiagnosisPage';
 import { CustomerLoadAnalysisPage } from '../pages/CustomerLoadAnalysisPage';
 import { CustomerLoadOverviewPage } from '../pages/CustomerLoadOverviewPage';
+import LoadCharacteristicsOverviewPage from '../pages/LoadCharacteristicsOverviewPage';
+import LoadCharacteristicsDetailPage from '../pages/LoadCharacteristicsDetailPage';
 
 // 路由配置接口
 export interface RouteConfig {
@@ -34,7 +36,8 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/customer/retail-contracts', title: '零售合同管理', component: RetailContractPage },
     { path: '/customer/retail-packages', title: '零售套餐管理', component: RetailPackagePage },
     { path: '/customer/load-analysis', title: '客户负荷分析', component: CustomerLoadOverviewPage },
-    { path: '/customer/cluster-analysis', title: '负荷特征分析', component: PlaceholderPage },
+    { path: '/customer/load-characteristics', title: '负荷特征分析', component: LoadCharacteristicsOverviewPage },
+    { path: '/customer/load-characteristics/:customerId', title: '客户特征详情', component: LoadCharacteristicsDetailPage },
     { path: '/customer/external-diagnosis', title: '外部客户诊断', component: PlaceholderPage },
 
     // 负荷预测

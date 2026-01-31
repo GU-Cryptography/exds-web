@@ -21,6 +21,8 @@ from webapp.api import v1_price_forecast
 from webapp.api import v1_weather
 from webapp.api import v1_load_diagnosis  # 负荷数据校核
 from webapp.api import v1_total_load # 整体负荷分析
+from webapp.api import v1_load_characteristics # 负荷特征分析
+from webapp.services.tou_service import get_tou_rule_by_date, get_tou_versions, get_tou_summary
 
 # ... existing imports ...
 
@@ -37,6 +39,7 @@ router.include_router(v1_price_forecast.router)  # 价格预测路由
 router.include_router(v1_weather.router)  # 天气数据路由
 router.include_router(v1_load_diagnosis.router)  # 负荷数据校核路由
 router.include_router(v1_total_load.router) # 整体负荷分析路由
+router.include_router(v1_load_characteristics.router) # 负荷特征分析路由
 
 
 

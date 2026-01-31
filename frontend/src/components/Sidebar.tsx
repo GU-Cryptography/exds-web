@@ -79,7 +79,7 @@ const menuItems: MenuItem[] = [
         subItems: [
             { text: '总体负荷分析', path: '/load-forecast/overall-analysis', icon: <StackedLineChartOutlined /> },
             { text: '客户负荷分析', path: '/customer/load-analysis', icon: <ShowChartOutlined /> },
-            { text: '负荷特征分析', path: '/customer/cluster-analysis', icon: <BubbleChartOutlined /> },
+            { text: '负荷特征分析', path: '/customer/load-characteristics', icon: <BubbleChartOutlined /> },
             { text: '外部客户诊断', path: '/customer/external-diagnosis', icon: <VerifiedUserOutlined /> },
         ],
     },

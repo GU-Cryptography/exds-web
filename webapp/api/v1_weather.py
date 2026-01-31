@@ -8,6 +8,317 @@ from typing import List, Optional
 from fastapi import APIRouter, Query, HTTPException, Body
 from pydantic import BaseModel
 from webapp.tools.mongo import DATABASE
+from webapp.services.weather_service import WeatherService
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/weather", tags=["weather"])
+
+# 集合定义 (Still needed for some direct queries if not fully moved, but let's try to use Service where possible)
+WEATHER_LOCATIONS = DATABASE['weather_locations']
+WEATHER_ACTUALS = DATABASE['weather_actuals']
+WEATHER_FORECASTS = DATABASE['weather_forecasts']
+
+# Initialize Service
+weather_service = WeatherService(DATABASE)
+
+# Pydantic 模型
+class WeatherLocationCreate(BaseModel):
+    location_id: str
+    name: str
+    latitude: float
+    longitude: float
+    enabled: bool = True
+
+class WeatherLocationUpdate(BaseModel):
+    name: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    enabled: Optional[bool] = None
+
+# ========== 站点管理 API ==========
+
+@router.get("/locations", summary="获取站点列表")
+def get_weather_locations():
+    """获取所有天气站点"""
+    try:
+        return weather_service.get_all_locations()
+    except Exception as e:
+        logger.error(f"获取站点列表失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/locations", summary="创建站点")
+def create_weather_location(location: WeatherLocationCreate):
+    """创建新的天气站点"""
+    try:
+        # Check existence
+        if WEATHER_LOCATIONS.find_one({"location_id": location.location_id}):
+             raise HTTPException(status_code=400, detail="站点ID已存在")
+             
+        WEATHER_LOCATIONS.insert_one(location.model_dump())
+        return {"message": "创建成功", "location_id": location.location_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"创建站点失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/locations/{location_id}", summary="更新站点")
+def update_weather_location(location_id: str, update: WeatherLocationUpdate):
+    """更新天气站点信息"""
+    try:
+        update_data = {k: v for k, v in update.model_dump().items() if v is not None}
+        if not update_data:
+            raise HTTPException(status_code=400, detail="没有要更新的字段")
+        
+        result = WEATHER_LOCATIONS.update_one(
+            {"location_id": location_id},
+            {"$set": update_data}
+        )
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="站点不存在")
+        
+        return {"message": "更新成功"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"更新站点失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/locations/{location_id}", summary="删除站点")
+def delete_weather_location(location_id: str):
+    """删除天气站点"""
+    try:
+        result = WEATHER_LOCATIONS.delete_one({"location_id": location_id})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="站点不存在")
+        return {"message": "删除成功"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除站点失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ========== 历史天气 API ==========
+
+@router.get("/actuals", summary="获取历史天气数据")
+def get_weather_actuals(
+    location_id: str = Query(..., description="站点ID"),
+    date: str = Query(..., description="日期 YYYY-MM-DD")
+):
+    """获取指定站点和日期的历史天气数据（24小时）"""
+    try:
+        target_date = datetime.strptime(date, "%Y-%m-%d")
+        start_time = target_date.replace(hour=0, minute=0, second=0)
+        end_time = target_date.replace(hour=23, minute=59, second=59)
+        
+        query = {
+            "location_id": location_id,
+            "timestamp": {"$gte": start_time, "$lte": end_time}
+        }
+        
+        docs = list(WEATHER_ACTUALS.find(query, {'_id': 0}).sort("timestamp", 1))
+        
+        for doc in docs:
+            if 'timestamp' in doc and isinstance(doc['timestamp'], datetime):
+                doc['timestamp'] = doc['timestamp'].isoformat()
+        
+        return docs
+    except ValueError:
+        raise HTTPException(status_code=400, detail="日期格式无效")
+    except Exception as e:
+        logger.error(f"获取历史天气失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/actuals/summary", summary="获取历史天气概览")
+def get_weather_actuals_summary(
+    location_id: str = Query(..., description="站点ID"),
+    date: str = Query(..., description="日期 YYYY-MM-DD")
+):
+    """
+    获取指定日期的天气概览
+    """
+    try:
+        target_date = datetime.strptime(date, "%Y-%m-%d")
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        start_time = target_date.replace(hour=0, minute=0, second=0)
+        end_time = target_date.replace(hour=23, minute=59, second=59)
+        
+        # 判断是否为今天或未来日期
+        if target_date >= today:
+            # 查询预测数据
+            latest_forecast = WEATHER_FORECASTS.find_one(
+                {
+                    "location_id": location_id,
+                    "target_timestamp": {"$gte": start_time, "$lte": end_time}
+                },
+                {"forecast_date": 1},
+                sort=[("forecast_date", -1)]
+            )
+            
+            if latest_forecast:
+                forecast_date = latest_forecast["forecast_date"]
+                query = {
+                    "location_id": location_id,
+                    "forecast_date": forecast_date,
+                    "target_timestamp": {"$gte": start_time, "$lte": end_time}
+                }
+                docs = list(WEATHER_FORECASTS.find(query, {'_id': 0}))
+                
+                # Use Service for Calculation
+                summary = weather_service.calculate_daily_summary(docs, date)
+                
+                summary["data_source"] = "forecast"
+                summary["forecast_date"] = forecast_date.strftime("%Y-%m-%d") if isinstance(forecast_date, datetime) else str(forecast_date)
+                return summary
+            else:
+                return {
+                    "date": date,
+                    "weather_type": "无数据",
+                    "weather_icon": "❓",
+                    "min_temp": None,
+                    "max_temp": None,
+                    "data_source": "none"
+                }
+        else:
+            # 历史日期
+            query = {
+                "location_id": location_id,
+                "timestamp": {"$gte": start_time, "$lte": end_time}
+            }
+            docs = list(WEATHER_ACTUALS.find(query, {'_id': 0}))
+            
+            # Use Service
+            summary = weather_service.calculate_daily_summary(docs, date)
+            summary["data_source"] = "actuals"
+            return summary
+
+    except ValueError:
+        raise HTTPException(status_code=400, detail="日期格式无效")
+    except Exception as e:
+        logger.error(f"获取天气概览失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/forecasts", summary="获取预测天气数据")
+def get_weather_forecasts(
+    location_id: str = Query(..., description="站点ID"),
+    forecast_date: str = Query(..., description="预测发布日期 YYYY-MM-DD"),
+    target_date: str = Query(..., description="目标日期 YYYY-MM-DD")
+):
+    """获取指定预测发布日和目标日期的天气预测数据（24小时）"""
+    try:
+        fc_date = datetime.strptime(forecast_date, "%Y-%m-%d")
+        tgt_date = datetime.strptime(target_date, "%Y-%m-%d")
+        
+        start_time = tgt_date.replace(hour=0, minute=0, second=0)
+        end_time = tgt_date.replace(hour=23, minute=59, second=59)
+        
+        query = {
+            "location_id": location_id,
+            "forecast_date": fc_date.replace(hour=0, minute=0, second=0),
+            "target_timestamp": {"$gte": start_time, "$lte": end_time}
+        }
+        
+        docs = list(WEATHER_FORECASTS.find(query, {'_id': 0}).sort("target_timestamp", 1))
+        
+        for doc in docs:
+            if 'target_timestamp' in doc and isinstance(doc['target_timestamp'], datetime):
+                doc['timestamp'] = doc['target_timestamp'].isoformat()
+            if 'forecast_date' in doc and isinstance(doc['forecast_date'], datetime):
+                doc['forecast_date'] = doc['forecast_date'].strftime("%Y-%m-%d")
+        
+        return docs
+    except ValueError:
+        raise HTTPException(status_code=400, detail="日期格式无效")
+    except Exception as e:
+        logger.error(f"获取预测天气失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/forecasts/summary", summary="获取预测天气概览")
+def get_weather_forecasts_summary(
+    location_id: str = Query(..., description="站点ID"),
+    forecast_date: str = Query(..., description="预测发布日期 YYYY-MM-DD")
+):
+    """获取指定预测发布日的未来天气概览（返回所有可用数据）"""
+    try:
+        fc_date = datetime.strptime(forecast_date, "%Y-%m-%d")
+        start_date = fc_date + timedelta(days=1)
+        
+        query = {
+            "location_id": location_id,
+            "forecast_date": fc_date.replace(hour=0, minute=0, second=0),
+            "target_timestamp": {"$gte": start_date}
+        }
+        
+        docs = list(WEATHER_FORECASTS.find(query, {'_id': 0}))
+        
+        daily_data = {}
+        for doc in docs:
+            ts = doc.get('target_timestamp')
+            if isinstance(ts, datetime):
+                day_key = ts.strftime("%Y-%m-%d")
+                if day_key not in daily_data:
+                    daily_data[day_key] = []
+                daily_data[day_key].append(doc)
+        
+        summaries = []
+        for day in sorted(daily_data.keys()):
+            summaries.append(weather_service.calculate_daily_summary(daily_data[day], day)) # Use Service
+        
+        return summaries
+    except ValueError:
+        raise HTTPException(status_code=400, detail="日期格式无效")
+    except Exception as e:
+        logger.error(f"获取预测概览失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/forecast-dates", summary="获取可用的预测发布日期")
+def get_available_forecast_dates(
+    location_id: str = Query(..., description="站点ID"),
+    target_date: Optional[str] = Query(None, description="目标日期 YYYY-MM-DD（可选）")
+):
+    """获取指定站点可用的预测发布日期列表"""
+    try:
+        query = {"location_id": location_id}
+        
+        if target_date:
+            tgt_date = datetime.strptime(target_date, "%Y-%m-%d")
+            start_time = tgt_date.replace(hour=0, minute=0, second=0)
+            end_time = tgt_date.replace(hour=23, minute=59, second=59)
+            query["target_timestamp"] = {"$gte": start_time, "$lte": end_time}
+        
+        pipeline = [
+            {"$match": query},
+            {"$group": {"_id": "$forecast_date"}},
+            {"$sort": {"_id": -1}},
+            {"$limit": 10}
+        ]
+        
+        results = list(WEATHER_FORECASTS.aggregate(pipeline))
+        
+        dates = []
+        for r in results:
+            fc_date = r['_id']
+            if isinstance(fc_date, datetime):
+                dates.append(fc_date.strftime("%Y-%m-%d"))
+        
+        return dates
+    except ValueError:
+        raise HTTPException(status_code=400, detail="日期格式无效")
+    except Exception as e:
+        logger.error(f"获取预测日期失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+import logging
+from datetime import datetime, timedelta
+from typing import List, Optional
+from fastapi import APIRouter, Query, HTTPException, Body
+from pydantic import BaseModel
+from webapp.tools.mongo import DATABASE
 
 logger = logging.getLogger(__name__)
 

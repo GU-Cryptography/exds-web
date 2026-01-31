@@ -3,7 +3,7 @@
 根据 dataset_structures_v2.md 重构
 """
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, Literal, List, Any
+from typing import Optional, Literal, List, Any, Dict
 from datetime import datetime
 from bson import ObjectId
 
@@ -45,6 +45,9 @@ class Tag(BaseModel):
     """客户标签 (嵌入在客户文档中)"""
     name: str = Field(..., description="标签名/值")
     source: Literal["AUTO", "MANUAL"] = Field("MANUAL", description="来源: AUTO(算法)/MANUAL(人工)")
+    confidence: float = Field(1.0, ge=0.0, le=1.0, description="置信度 (0.0-1.0)")
+    rule_id: Optional[str] = Field(None, description="命中规则ID")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="元数据 (如相似度、聚类ID)")
     expire: Optional[datetime] = Field(None, description="失效时间 (用于临时标签)")
     reason: Optional[str] = Field(None, description="原因/备注")
 

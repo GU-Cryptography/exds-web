@@ -428,3 +428,184 @@ else:  # priority == "meter"，电表优先
 
 - `_id_` (默认)
 - `year`, `month`, `curve_type`, `name` (唯一复合索引)
+
+## 11. `customer_characteristics` - 客户特征画像
+
+该集合存储每位客户的最新用电特征分析结果，包括长期指标、短期指标和标签。
+
+- **数据来源**: `webapp.services.characteristics.service.CharacteristicService`
+- **更新频率**: 每日特征分析时覆盖更新
+
+### 11.1. 字段说明
+
+| 字段名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `customer_id` | String | **[主键]** 客户ID |
+| `customer_name` | String | 客户名称 |
+| `updated_at` | ISODate | 最后更新时间 |
+| `regularity_score` | Number | 规律性评分 (0-100) |
+| `quality_rating` | String | 质量评级: `A` (优) / `B` (良) / `C` (差) |
+| `baseline_curve` | Array[Number] | 基准负荷曲线 (48点，每点30分钟) |
+| `tags` | Array[Object] | 特征标签列表 |
+| `long_term` | Object | 长期指标 (年度视角) |
+| `short_term` | Object | 短期指标 (近30天) |
+
+#### 11.1.1 `tags` 结构
+
+| 字段名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `name` | String | 标签名称 (如 "产能扩张", "连续生产") |
+| `category` | String | 分类: "经营/气象" / "生产班次" / "异动风险" |
+| `confidence` | Number | 置信度 (0-1) |
+
+#### 11.1.2 `long_term` 结构
+
+| 字段名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `data_start` | String | 数据起始日期 |
+| `data_end` | String | 数据截止日期 |
+| `avg_daily_load` | Number | 日均电量 (MWh) |
+| `total_annual_load` | Number | 年度总电量 (MWh) |
+| `trend_slope` | Number | 趋势斜率 (增长为正) |
+| `recent_3m_growth` | Number | 近3个月增长率 |
+| `cv` | Number | 离散系数 (变异系数) |
+| `zero_days` | Number | 零电量天数 |
+| `weekend_ratio` | Number | 周末/工作日负荷比 |
+| `summer_avg` | Number | 夏季日均电量 |
+| `winter_avg` | Number | 冬季日均电量 |
+| `spring_autumn_avg` | Number | 春秋季日均电量 |
+| `temp_correlation` | Number | 气温相关系数 |
+
+#### 11.1.3 `short_term` 结构
+
+| 字段名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `data_start` | String | 数据起始日期 |
+| `data_end` | String | 数据截止日期 |
+| `avg_curve` | Array[Number] | 平均负荷曲线 (48点) |
+| `std_curve` | Array[Number] | 标准差曲线 (48点) |
+| `avg_load_rate` | Number | 平均负荷率 |
+| `min_max_ratio` | Number | 最小/最大值比 |
+| `peak_hour` | Number | 峰值时刻 (点位索引) |
+| `valley_hour` | Number | 谷值时刻 (点位索引) |
+| `curve_similarity` | Number | 曲线相似度 (近30天一致性) |
+| `cv` | Number | 曲线离散系数 |
+| `tip_ratio` | Number | 尖时段电量占比 |
+| `peak_ratio` | Number | 峰时段电量占比 |
+| `flat_ratio` | Number | 平时段电量占比 |
+| `valley_ratio` | Number | 谷时段电量占比 |
+| `deep_ratio` | Number | 深谷时段电量占比 |
+
+### 11.2. 索引
+
+- `(customer_id: 1)`: 唯一索引
+
+---
+
+## 12. `analysis_history_log` - 特征分析历史日志
+
+该集合记录每次特征分析的执行历史，用于追踪标签变化和调试。
+
+- **数据来源**: `webapp.services.characteristics.service.CharacteristicService`
+- **更新频率**: 每次分析时追加写入
+
+### 12.1. 字段说明
+
+| 字段名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `customer_id` | String | 客户ID |
+| `date` | String | 分析目标日期 (YYYY-MM-DD) |
+| `execution_time` | ISODate | 执行时间 |
+| `rule_ids` | Array[String] | 触发的规则ID列表 |
+| `tags_snapshot` | Array[Object] | 生成的标签快照 |
+
+#### 12.1.1 `tags_snapshot` 结构
+
+| 字段名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `name` | String | 标签名称 |
+| `source` | String | 来源: `AUTO` / `MANUAL` |
+| `confidence` | Number | 置信度 |
+| `rule_id` | String | 触发规则ID |
+| `reason` | String | 触发原因 |
+
+### 12.2. 索引
+
+- `(customer_id: 1, date: 1)`: 复合索引
+- `(execution_time: -1)`: 按时间倒序
+
+---
+
+## 13. `customer_anomaly_alerts` - 客户异动告警历史
+
+该集合用于追踪客户用电异动的历史记录，每次检测到异动时创建一条记录。
+
+- **数据来源**: `webapp.services.characteristics.service.CharacteristicService`
+- **更新频率**: 每日特征分析时自动写入
+
+### 13.1. 字段说明
+
+| 字段名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `customer_id` | String | **[复合主键]** 客户ID |
+| `alert_date` | String | **[复合主键]** 异动发生日期 (YYYY-MM-DD) |
+| `alert_type` | String | **[复合主键]** 异动类型 |
+| `customer_name` | String | 客户名称 |
+| `severity` | String | 严重程度: `low` / `warning` / `critical` |
+| `confidence` | Number | 置信度 (0-1) |
+| `reason` | String | 触发原因详细说明 |
+| `rule_id` | String | 触发规则ID |
+| `metrics` | Object | 关键指标快照 |
+| `metrics.total_load` | Number | 当日电量 (MWh) |
+| `metrics.load_rate` | Number | 当日负荷率 |
+| `metrics.avg_load_30d` | Number | 近30天日均电量 |
+| `metrics.std_load_30d` | Number | 近30天电量标准差 |
+| `created_at` | ISODate | 记录创建时间 |
+| `acknowledged` | Boolean | 是否已处理 |
+| `acknowledged_by` | String | 处理人 |
+| `acknowledged_at` | ISODate | 处理时间 |
+| `notes` | String | 备注 |
+
+### 13.2. 异动类型
+
+| 类型 | 默认严重程度 | 触发条件 |
+| :--- | :--- | :--- |
+| `形状异动` | `warning` | 曲线相似度 < 0.85 |
+| `重心异动` | `low` | 峰值时刻偏移 > 2h |
+| `力度异动` | `warning` | 电量偏离 > 50% (需 ≥ 20 MWh) |
+| `规律异动` | `warning` | 近5天σ > 历史30天σ × 2 |
+| `剧烈异动` | `critical` | 电量偏离 > 2.5σ (需 ≥ 20 MWh) |
+| `日环比突变` | `critical` | 当日 vs 昨日变化 > 100% (需 ≥ 20 MWh) |
+| `用电异动` | `warning` | IsolationForest 判定异常 |
+
+### 13.3. 索引
+
+- `(customer_id: 1, alert_date: 1, alert_type: 1)`: 唯一复合索引
+- `(alert_date: -1)`: 按日期倒序，便于查询最近告警
+- `(severity: 1, acknowledged: 1)`: 便于筛选待处理的高优告警
+
+### 13.4. 查询示例
+
+```python
+# 查询某客户最近30天的所有异动
+from datetime import datetime, timedelta
+end_date = datetime.now().strftime("%Y-%m-%d")
+start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+
+alerts = db.customer_anomaly_alerts.find({
+    "customer_id": "690f039915fdeb957cdd228f",
+    "alert_date": {"$gte": start_date, "$lte": end_date}
+}).sort("alert_date", -1)
+
+# 查询所有未处理的高优告警
+critical_alerts = db.customer_anomaly_alerts.find({
+    "severity": "critical",
+    "acknowledged": False
+}).sort("alert_date", -1)
+```
+
+---
+
+
+
+

@@ -7,6 +7,8 @@ import {
 } from 'react-router-dom';
 import { CustomerLoadAnalysisPage } from './pages/CustomerLoadAnalysisPage';
 import { CustomerLoadOverviewPage } from './pages/CustomerLoadOverviewPage';
+import LoadCharacteristicsOverviewPage from './pages/LoadCharacteristicsOverviewPage';
+import LoadCharacteristicsDetailPage from './pages/LoadCharacteristicsDetailPage';
 import {
     CssBaseline,
     useMediaQuery,
@@ -73,6 +75,8 @@ const ResponsiveLayout: React.FC = () => {
                     <Route path="customer/retail-packages/copy/:packageId" element={<RetailPackagePage />} />
                     <Route path="customer/load-analysis" element={<CustomerLoadOverviewPage />} />
                     <Route path="customer/cluster-analysis" element={<PlaceholderPage />} />
+                    <Route path="customer/load-characteristics" element={<LoadCharacteristicsOverviewPage />} />
+                    <Route path="customer/load-characteristics/:customerId" element={<LoadCharacteristicsDetailPage />} />
                     <Route path="customer/external-diagnosis" element={<PlaceholderPage />} />
 
                     {/* 负荷预测 */}
