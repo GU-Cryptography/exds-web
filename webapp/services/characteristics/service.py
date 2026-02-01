@@ -36,7 +36,10 @@ from .algorithms.statistics import calculate_cv
 from .algorithms.stl_decomposition import calculate_trend_slope
 from .algorithms.clustering import calculate_cosine_similarity
 
+from .algorithms.clustering import calculate_cosine_similarity
+
 from webapp.services.weather_service import WeatherService
+from webapp.services.tou_service import get_tou_rule_by_date
 
 logger = logging.getLogger(__name__)
 
@@ -372,6 +375,9 @@ class CharacteristicService:
                 deep_sum += c.tou_usage.deep
         grand_total = tip_sum + peak_sum + flat_sum + valley_sum + deep_sum
         
+        # Price Sensitivity Score
+        price_sensitivity = self._calc_price_sensitivity(avg_curve, end_date)
+        
         return ShortTermMetrics(
             data_start=start_date_str,
             data_end=end_date_str,
@@ -387,8 +393,77 @@ class CharacteristicService:
             peak_ratio=round(peak_sum/grand_total, 4) if grand_total else 0,
             flat_ratio=round(flat_sum/grand_total, 4) if grand_total else 0,
             valley_ratio=round(valley_sum/grand_total, 4) if grand_total else 0,
-            deep_ratio=round(deep_sum/grand_total, 4) if grand_total else 0
+            valley_ratio=round(valley_sum/grand_total, 4) if grand_total else 0,
+            deep_ratio=round(deep_sum/grand_total, 4) if grand_total else 0,
+            price_sensitivity_score=price_sensitivity
         )
+
+    def _calc_price_sensitivity(self, load_curve: np.ndarray, date_obj: datetime) -> Optional[float]:
+        """
+        计算价格敏感度评分 (0-100)
+        基于负荷曲线与电价曲线的相关性
+        """
+        try:
+            # 1. 获取当月分时电价规则
+            tou_map = get_tou_rule_by_date(date_obj)
+            if not tou_map or len(tou_map) != 96:
+                return None
+                
+            # 2. 构建电价评分向量 (96点)
+            # 尖峰(5) > 高峰(4) > 平段(3) > 低谷(2) > 深谷(1)
+            score_map = {
+                "尖峰": 5, "高峰": 4, "平段": 3, "低谷": 2, "深谷": 1
+            }
+            
+            price_vector = []
+            # tou_map keys are "00:00", "00:15", ... "23:45"
+            # load_curve could be 48 or 96 points. The input avg_curve is from _calc_legacy_short_term which normalizes to 48 points!
+            # Wait, _calc_legacy_short_term normalizes input to 48 points for avg_curve? 
+            # Yes: "Normalize to 48 points... avg_curve = np.mean..."
+            # So load_curve has 48 points.
+            
+            # We need to adapt price vector to 48 points (taking every second point or average)
+            sorted_times = sorted(tou_map.keys()) # 00:00 to 23:45
+            
+            # 48 points -> 00:30, 01:00 ... (Original logic usually means 00:00-00:30 is point 0)
+            # Let's align with the curve. 
+            # If load_curve has 48 points, idx 0 represents 00:00-00:30.
+            # TOU map has 00:00 and 00:15.
+            # We take average score of 00:00 and 00:15 for point 0.
+            
+            for i in range(48):
+                t1 = sorted_times[i*2]     # e.g. 00:00
+                t2 = sorted_times[i*2 + 1] # e.g. 00:15
+                
+                s1 = score_map.get(tou_map[t1], 3)
+                s2 = score_map.get(tou_map[t2], 3)
+                price_vector.append((s1 + s2) / 2.0)
+                
+            # 3. 计算相关系数 (Pearson)
+            if len(load_curve) != 48:
+                return None
+                
+            # Normalize arrays
+            load_arr = np.array(load_curve)
+            price_arr = np.array(price_vector)
+            
+            # Standard Deviation check to avoid division by zero
+            if np.std(load_arr) == 0 or np.std(price_arr) == 0:
+                return 50.0 # Neutral
+                
+            correlation = np.corrcoef(load_arr, price_arr)[0, 1]
+            
+            # 4. 转换为评分 (0-100)
+            # Corr = -1 (负相关, 价格高负荷低) -> Score 100
+            # Corr = 1 (正相关, 价格高负荷高) -> Score 0
+            # Corr = 0 -> Score 50
+            
+            score = (1 - correlation) * 50
+            return max(0.0, min(100.0, round(score, 1)))
+            
+        except Exception as e:
+            logger.error(f"Failed to calc price sensitivity: {e}")
+            return None
 
     def _save_results(self, customer_id: str, date: datetime, tags: List[Tag], 
                      long_term: Optional[LongTermMetrics], short_term: Optional[ShortTermMetrics]):

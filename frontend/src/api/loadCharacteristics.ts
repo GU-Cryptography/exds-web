@@ -7,6 +7,7 @@ export interface TagItem {
     category: string;
     confidence?: number;
     source?: string;
+    reason?: string;
 }
 
 export interface LongTermMetrics {
@@ -22,6 +23,7 @@ export interface LongTermMetrics {
     summer_avg?: number;
     winter_avg?: number;
     spring_autumn_avg?: number;
+    temp_correlation?: number;
 }
 
 export interface ShortTermMetrics {
@@ -42,11 +44,13 @@ export interface ShortTermMetrics {
     flat_ratio?: number;
     valley_ratio?: number;
     deep_ratio?: number;
+    price_sensitivity_score?: number;
 }
 
 export interface CustomerCharacteristics {
     customer_id: string;
     customer_name: string;
+    short_name?: string;
     updated_at: string;
     long_term?: LongTermMetrics;
     short_term?: ShortTermMetrics;
@@ -181,6 +185,7 @@ export interface AnomalyAlertItem {
     acknowledged_by?: string;
     acknowledged_at?: string;
     notes?: string;
+    rule_id?: string;
 }
 
 export interface AnomalyAlertListResponse {
@@ -209,9 +214,9 @@ export const loadCharacteristicsApi = {
         return apiClient.get<ScatterDataResponse>('/api/v1/load-characteristics/overview/scatter-data');
     },
 
-    listCustomers: (page: number = 1, pageSize: number = 10, search?: string, tag?: string) => {
+    listCustomers: (page: number = 1, pageSize: number = 10, search?: string, tag?: string, sortBy: string = "avg_daily_load", order: string = "desc") => {
         return apiClient.get<CustomerListResponse>('/api/v1/load-characteristics/customers', {
-            params: { page, page_size: pageSize, search, tag }
+            params: { page, page_size: pageSize, search, tag, sort_by: sortBy, order }
         });
     },
 
@@ -231,8 +236,8 @@ export const loadCharacteristicsApi = {
         });
     },
 
-    acknowledgeAlert: (alertId: string, notes?: string) => {
-        return apiClient.post(`/api/v1/load-characteristics/alerts/${alertId}/acknowledge`, { notes });
+    acknowledgeAlert: (alertId: string, data: { acknowledged: boolean; notes?: string }) => {
+        return apiClient.post(`/api/v1/load-characteristics/alerts/${alertId}/acknowledge`, data);
     },
 
     getDailyTrend: (customerId: string, startDate: string, endDate: string) => {

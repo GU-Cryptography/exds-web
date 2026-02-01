@@ -310,16 +310,18 @@ async def get_scatter_data():
     
     items = []
     for r in results:
-        # 获取标签
+        # 获取标签和简称
         cust = db['customer_archives'].find_one(
             {"_id": ObjectId(r["customer_id"])}, 
-            {"tags": 1}
+            {"tags": 1, "short_name": 1}
         )
         tag_names = [t.get("name", "") for t in cust.get("tags", [])] if cust else []
+        short_name = cust.get("short_name", r.get("customer_name", "Unknown")) if cust else r.get("customer_name", "Unknown")
         
         items.append(ScatterDataItem(
             customer_id=r["customer_id"],
             customer_name=r.get("customer_name", "Unknown"),
+            short_name=short_name,
             avg_daily_load=r.get("avg_daily_load", 0),  # 数据库存的是 MWh
             cv=r.get("cv", 0),
             regularity_score=r.get("regularity_score"),
@@ -336,7 +338,9 @@ async def list_customers(
     search: Optional[str] = None,
     tag: Optional[str] = None,
     quality: Optional[str] = None,
-    has_anomaly: Optional[bool] = None
+    has_anomaly: Optional[bool] = None,
+    sort_by: str = "avg_daily_load",
+    order: str = "desc"
 ):
     """获取客户特征列表 (关联查询Tags)"""
     db = DATABASE
@@ -345,6 +349,8 @@ async def list_customers(
         query["customer_name"] = {"$regex": search, "$options": "i"}
     if quality:
         query["quality_rating"] = quality
+    if has_anomaly is not None:
+        query["has_anomaly"] = has_anomaly
         
     # 如果按标签筛选，先从 customer_archives 找到对应的 customer_ids
     if tag:
@@ -356,25 +362,31 @@ async def list_customers(
         tagged_ids = [str(c["_id"]) for c in tagged_custs]
         
         # 合并查询条件
-        current_ids = query.get("customer_id", {})
-        if "customer_id" in query:
-             # 如果已有 ID 筛选（极少见），取交集... 这里简化处理，直接加条件
-             pass
         query["customer_id"] = {"$in": tagged_ids}
+
+    # 排序映射
+    sort_mapping = {
+        "customer_name": "customer_name",
+        "score": "regularity_score",
+        "avg_daily_load": "long_term.avg_daily_load"
+    }
+    
+    sort_field = sort_mapping.get(sort_by, "long_term.avg_daily_load")
+    sort_dir = -1 if order == "desc" else 1
 
     skip = (page - 1) * page_size
     
     total = db['customer_characteristics'].count_documents(query)
-    cursor = db['customer_characteristics'].find(query).skip(skip).limit(page_size)
+    cursor = db['customer_characteristics'].find(query).sort(sort_field, sort_dir).skip(skip).limit(page_size)
     
     # 获取每一条记录，并补全 tags
     items = []
     for doc in cursor:
         cid = doc["customer_id"]
-        # 查找最新的 tags
+        # 查找最新的 tags 和简称
         cust_arch = db['customer_archives'].find_one(
              {"_id": ObjectId(cid)}, 
-             {"tags": 1}
+             {"tags": 1, "short_name": 1}
         )
         real_tags = cust_arch.get("tags", []) if cust_arch else []
         
@@ -392,6 +404,7 @@ async def list_customers(
                 "source": t.get("source", "AUTO")
             })
             
+        doc["short_name"] = cust_arch.get("short_name", doc.get("customer_name", "Unknown")) if cust_arch else doc.get("customer_name", "Unknown")
         doc["tags"] = model_tags
         items.append(CustomerCharacteristics(**doc))
 
@@ -408,7 +421,50 @@ async def get_customer_detail(customer_id: str):
     """获取单个客户特征详情"""
     doc = DATABASE['customer_characteristics'].find_one({"customer_id": customer_id})
     if not doc:
+        # If no characteristics exist yet, try to create a default one from archives
+        # Or just return 404. For now, we assume analysis has run.
         raise HTTPException(status_code=404, detail="Characteristics not found")
+    
+    # 获取实时标签 (from customer_archives)
+    cust_arch = DATABASE['customer_archives'].find_one(
+            {"_id": ObjectId(customer_id)}, 
+            {"tags": 1, "user_name": 1, "short_name": 1}
+    )
+    
+    real_tags = cust_arch.get("tags", []) if cust_arch else []
+    
+    # Build a lookup map for categories
+    # Tag Name -> Category Name (e.g., "连续生产" -> "生产班次")
+    tag_cat_map = {}
+    for cat_key, cat_val in TAG_CATEGORIES.items():
+        for t_name in cat_val["tags"]:
+            tag_cat_map[t_name] = cat_val["name"]
+
+    # Transform tags to model format
+    model_tags = []
+    for t in real_tags:
+        t_name = t.get("name")
+        # Identify category: 
+        # 1. From DB if exists (unlikely in simple list)
+        # 2. From Lookup Map
+        # 3. Fallback to "其它"
+        cat_name = tag_cat_map.get(t_name, "其它")
+        
+        model_tags.append({
+            "name": t_name,
+            "category": cat_name,
+            "confidence": t.get("confidence"),
+            "source": t.get("source", "AUTO"),
+            "reason": t.get("reason")  # Include reason/description
+        })
+        
+    doc["tags"] = model_tags
+    doc["short_name"] = cust_arch.get("short_name", doc.get("customer_name", "Unknown")) if cust_arch else doc.get("customer_name", "Unknown")
+    
+    # Ensure customer_name is up to date
+    if cust_arch and "user_name" in cust_arch:
+        doc["customer_name"] = cust_arch["user_name"]
+        
     return CustomerCharacteristics(**doc)
 
 
@@ -478,14 +534,22 @@ async def acknowledge_alert(
     except:
         raise HTTPException(status_code=400, detail="Invalid alert ID")
     
+    update_data = {
+        "acknowledged": request.acknowledged,
+        "notes": request.notes
+    }
+    
+    if request.acknowledged:
+        update_data["acknowledged_by"] = current_user.username
+        update_data["acknowledged_at"] = datetime.now()
+    else:
+        # If un-checking, clear the processed info
+        update_data["acknowledged_by"] = None
+        update_data["acknowledged_at"] = None
+
     result = db['customer_anomaly_alerts'].update_one(
         {"_id": oid},
-        {"$set": {
-            "acknowledged": True,
-            "acknowledged_by": current_user.username,
-            "acknowledged_at": datetime.now(),
-            "notes": request.notes
-        }}
+        {"$set": update_data}
     )
     
     if result.matched_count == 0:

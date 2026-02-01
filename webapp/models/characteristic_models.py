@@ -76,6 +76,8 @@ class ShortTermMetrics(BaseModel):
     flat_ratio: Optional[float] = Field(None, description="平段电量占比")
     valley_ratio: Optional[float] = Field(None, description="低谷电量占比")
     deep_ratio: Optional[float] = Field(None, description="深谷电量占比")
+    
+    price_sensitivity_score: Optional[float] = Field(None, description="价格敏感度评分 (0-100)")
 
 class TagItem(BaseModel):
     """特征标签项 (Characteristics 中使用)"""
@@ -90,6 +92,7 @@ class CustomerCharacteristics(BaseMongoModel):
     """客户特征画像集合"""
     customer_id: str
     customer_name: str
+    short_name: Optional[str] = None
     updated_at: datetime
     
     long_term: Optional[LongTermMetrics] = None
@@ -201,6 +204,7 @@ class ScatterDataItem(BaseModel):
     """散点图数据点"""
     customer_id: str
     customer_name: str
+    short_name: Optional[str] = None
     avg_daily_load: float  # 日均电量 (X轴)
     cv: float  # 离散系数 (Y轴)
     regularity_score: Optional[float] = None
@@ -241,6 +245,7 @@ class AnomalyAlertItem(BaseModel):
     acknowledged_by: Optional[str] = None
     acknowledged_at: Optional[datetime] = None
     notes: Optional[str] = None
+    rule_id: Optional[str] = None
 
 
 class AnomalyAlertListResponse(BaseModel):
@@ -252,4 +257,5 @@ class AnomalyAlertListResponse(BaseModel):
 class AcknowledgeRequest(BaseModel):
     """确认异动请求"""
     notes: Optional[str] = None
+    acknowledged: bool = True
 

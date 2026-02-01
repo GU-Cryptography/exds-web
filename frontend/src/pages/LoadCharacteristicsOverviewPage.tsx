@@ -3,7 +3,8 @@ import {
     Box, Grid, Paper, Typography, Table, TableBody, TableCell, TableContainer,
     TableHead, TableRow, Chip, LinearProgress, Alert, Button, TablePagination,
     IconButton, TextField, InputAdornment, FormControl, InputLabel, Select, MenuItem,
-    CircularProgress, Tooltip, useMediaQuery, Tabs, Tab, Card, CardContent, ListSubheader
+    CircularProgress, Tooltip, useMediaQuery, Tabs, Tab, Card, CardContent, ListSubheader,
+    Breadcrumbs, Link
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import {
@@ -20,6 +21,11 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import NavigateNextIcon from '@mui/icons-material/NavigateNext';
+import CloseIcon from '@mui/icons-material/Close';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import { Dialog, AppBar, Toolbar, Slide } from '@mui/material';
+import { TransitionProps } from '@mui/material/transitions';
 import {
     loadCharacteristicsApi,
     CharacteristicsOverview, CustomerCharacteristics,
@@ -34,6 +40,16 @@ import { useDebounce } from '../hooks/useDebounce';
 
 
 // 颜色配置
+// Transition for Dialog
+const Transition = React.forwardRef(function Transition(
+    props: TransitionProps & {
+        children: React.ReactElement;
+    },
+    ref: React.Ref<unknown>,
+) {
+    return <Slide direction="left" ref={ref} {...props} />;
+});
+
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658', '#8dd1e1'];
 const SEVERITY_COLORS = { critical: '#d32f2f', warning: '#ff9800', low: '#4caf50' };
 
@@ -136,6 +152,9 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
     const [scatterData, setScatterData] = useState<ScatterDataItem[]>([]);
     const [selectedCategory, setSelectedCategory] = useState<string>('shift');
 
+    // Mobile Detail Dialog State
+    const [mobileDetailCustomer, setMobileDetailCustomer] = useState<{ id: string; name: string } | null>(null);
+
     // 客户列表状态
     const [customers, setCustomers] = useState<CustomerCharacteristics[]>([]);
     const [page, setPage] = useState(1);
@@ -144,6 +163,8 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
     const [searchText, setSearchText] = useState('');
     const debouncedSearch = useDebounce(searchText, 500);
     const [filterTag, setFilterTag] = useState<string>('');
+    const [sortBy, setSortBy] = useState<string>('avg_daily_load');
+    const [orderDir, setOrderDir] = useState<'asc' | 'desc'>('desc');
 
     // 加载总览数据
     const fetchAllData = async () => {
@@ -169,9 +190,11 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
     };
 
     // 加载客户列表
-    const fetchCustomers = async (p: number, search?: string, tag?: string) => {
+    const fetchCustomers = async (p: number, search?: string, tag?: string, sort?: string, dir?: 'asc' | 'desc') => {
         try {
-            const res = await loadCharacteristicsApi.listCustomers(p, 10, search, tag);
+            const currentSort = sort || sortBy;
+            const currentDir = dir || orderDir;
+            const res = await loadCharacteristicsApi.listCustomers(p, 10, search, tag, currentSort, currentDir);
             setCustomers(res.data.items);
             setTotalCount(res.data.total);
             setTotalPages(Math.ceil(res.data.total / res.data.page_size));
@@ -198,7 +221,15 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
     const handleChangePage = (_: unknown, newPage: number) => {
         // TablePagination uses 0-based index
         setPage(newPage + 1);
-        fetchCustomers(newPage + 1, searchText, filterTag);
+        fetchCustomers(newPage + 1, searchText, filterTag, sortBy, orderDir);
+    };
+
+    const handleSort = (field: string) => {
+        const isAsc = sortBy === field && orderDir === 'asc';
+        const newDir = isAsc ? 'desc' : 'asc';
+        setSortBy(field);
+        setOrderDir(newDir);
+        fetchCustomers(1, debouncedSearch, filterTag, field, newDir);
     };
 
     const handleSearch = () => {
@@ -215,7 +246,8 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
                 component: <LoadCharacteristicsDetailPage customerId={customerId} />
             });
         } else {
-            navigate(`/customer/load-characteristics/${customerId}`);
+            // Mobile: Set state to open Dialog
+            setMobileDetailCustomer({ id: customerId, name: customerName });
         }
     };
 
@@ -233,13 +265,17 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
 
     return (
         <Box sx={{ width: '100%' }}>
-            {/* 标题栏 - 仅移动端显示，桌面端隐藏 */}
+            {/* 标题栏 - 仅移动端显示，面包屑样式 */}
             {isMobile && (
-                <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                    <Typography variant="h5" fontWeight="bold">负荷特征分析</Typography>
-                    <IconButton onClick={fetchAllData} disabled={loading}>
-                        <RefreshIcon />
-                    </IconButton>
+                <Box mb={2}>
+                    <Box display="flex" alignItems="center" gap={1} mb={1}>
+                        <Breadcrumbs separator={<NavigateNextIcon fontSize="small" />} aria-label="breadcrumb">
+                            <Link underline="hover" color="inherit" href="/">
+                                首页
+                            </Link>
+                            <Typography color="text.primary" fontWeight="bold">负荷特征分析</Typography>
+                        </Breadcrumbs>
+                    </Box>
                 </Box>
             )}
 
@@ -468,12 +504,27 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
                                                         <Box key={item.name} display="flex" alignItems="center" gap={1}>
                                                             <Tooltip
                                                                 arrow
+                                                                slotProps={{
+                                                                    tooltip: {
+                                                                        sx: {
+                                                                            bgcolor: 'background.paper',
+                                                                            color: 'text.primary',
+                                                                            boxShadow: 2,
+                                                                            border: '1px solid #eee'
+                                                                        }
+                                                                    },
+                                                                    arrow: {
+                                                                        sx: {
+                                                                            color: 'background.paper'
+                                                                        }
+                                                                    }
+                                                                }}
                                                                 title={
                                                                     TAG_DESCRIPTIONS[item.name] ? (
                                                                         <Box sx={{ p: 1 }}>
                                                                             <Typography variant="subtitle2" fontWeight="bold" gutterBottom>{item.name}</Typography>
                                                                             <Typography variant="body2" paragraph sx={{ mb: 1 }}>{TAG_DESCRIPTIONS[item.name].desc}</Typography>
-                                                                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', bgcolor: 'action.hover', p: 0.5, borderRadius: 1 }}>
+                                                                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', bgcolor: 'grey.100', p: 0.5, borderRadius: 1 }}>
                                                                                 📈 判定: {TAG_DESCRIPTIONS[item.name].criteria}
                                                                             </Typography>
                                                                         </Box>
@@ -586,13 +637,12 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
             {/* 第三行：客户列表 */}
             <Paper variant="outlined" sx={{ width: '100%', mb: 2, p: { xs: 1, sm: 2 } }}>
                 <Box display="flex" justifyContent="space-between" alignItems="center" mb={2} flexWrap="wrap" gap={1}>
-                    <Box display="flex" gap={1} flexWrap="wrap">
+                    <Box display="flex" gap={1} flexWrap="wrap" alignItems="center">
                         <TextField
                             size="small"
                             placeholder="搜索客户名称"
                             value={searchText}
                             onChange={(e) => setSearchText(e.target.value)}
-                            // Removed onKeyDown to rely on debounce
                             InputProps={{
                                 startAdornment: (
                                     <InputAdornment position="start">
@@ -600,16 +650,16 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
                                     </InputAdornment>
                                 )
                             }}
-                            sx={{ width: { xs: '100%', sm: 200 } }}
+                            sx={{ width: { xs: '100%', sm: 180 } }}
                         />
-                        <FormControl size="small" sx={{ minWidth: 140 }}>
+                        <FormControl size="small" sx={{ minWidth: { xs: 'calc(100% - 48px)', sm: 140 } }}>
                             <InputLabel>特征筛选</InputLabel>
                             <Select
                                 value={filterTag}
                                 label="特征筛选"
                                 onChange={(e) => {
                                     setFilterTag(e.target.value);
-                                    fetchCustomers(1, searchText, e.target.value);
+                                    fetchCustomers(1, searchText, e.target.value, sortBy, orderDir);
                                 }}
                             >
                                 <MenuItem value="">全部</MenuItem>
@@ -629,177 +679,287 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
                                 ])}
                             </Select>
                         </FormControl>
+                        <Tooltip title="刷新数据">
+                            <IconButton
+                                onClick={fetchAllData}
+                                disabled={loading}
+                                size="small"
+                                sx={{
+                                    border: '1px solid',
+                                    borderColor: 'divider',
+                                    bgcolor: 'background.paper'
+                                }}
+                            >
+                                <RefreshIcon fontSize="small" />
+                            </IconButton>
+                        </Tooltip>
                     </Box>
-                    {!isMobile && (
-                        <Button
-                            startIcon={<RefreshIcon />}
-                            onClick={fetchAllData}
-                            size="small"
-                            disabled={loading}
-                            sx={{ color: 'text.secondary' }}
-                        >
-                            刷新数据
-                        </Button>
-                    )}
                 </Box>
 
-                <TableContainer sx={{ overflowX: 'auto' }}>
-                    <Table
-                        stickyHeader
-                        size="medium"
-                        sx={{
-                            '& .MuiTableCell-root': {
-                                fontSize: { xs: '0.75rem', sm: '0.875rem' },
-                                px: { xs: 0.5, sm: 1.5 }
-                            }
-                        }}
-                    >
-                        <TableHead>
-                            <TableRow>
-                                <TableCell sx={{ fontWeight: 'bold' }}>客户名称</TableCell>
-                                {!isMobile && <TableCell sx={{ fontWeight: 'bold', width: 140 }}>典型曲线(30天)</TableCell>}
-                                <TableCell sx={{ fontWeight: 'bold' }}>特征标签</TableCell>
-                                {!isMobile && <TableCell align="center" sx={{ fontWeight: 'bold', width: 100 }}>规律性评分</TableCell>}
-                                <TableCell align="right" sx={{ fontWeight: 'bold' }}>日均负荷 (MWh)</TableCell>
-                                <TableCell align="center" sx={{ fontWeight: 'bold', width: 80 }}>操作</TableCell>
-                            </TableRow>
-                        </TableHead>
-                        <TableBody>
+                {isMobile ? (
+                    <Box sx={{ mt: 1 }}>
+                        <Grid container spacing={1.5}>
                             {customers.map((row) => (
-                                <TableRow
-                                    key={row.customer_id}
-                                    hover
-                                    sx={{ cursor: 'pointer' }}
-                                    onClick={() => handleCustomerClick(row.customer_id, row.customer_name)}
-                                >
-                                    <TableCell>
-                                        <Typography variant="body2" fontWeight="medium" color="primary.main">{row.customer_name}</Typography>
-                                    </TableCell>
-
-                                    {!isMobile && (
-                                        <TableCell>
-                                            {row.short_term?.avg_curve && row.short_term.avg_curve.length > 0 ? (
-                                                <Box sx={{ width: 120, height: 40 }}>
-                                                    <ResponsiveContainer width="100%" height="100%">
-                                                        <LineChart data={row.short_term.avg_curve.map((val, i) => ({ i, val }))}>
-                                                            <Line
-                                                                type="monotone"
-                                                                dataKey="val"
-                                                                stroke={theme.palette.primary.main}
-                                                                strokeWidth={1.5}
-                                                                dot={false}
-                                                            />
-                                                        </LineChart>
-                                                    </ResponsiveContainer>
-                                                </Box>
-                                            ) : (
-                                                <Typography variant="caption" color="text.secondary">-</Typography>
-                                            )}
-                                        </TableCell>
-                                    )}
-
-                                    <TableCell>
-                                        <Box display="flex" gap={0.5} flexWrap="wrap">
-                                            {row.tags?.slice(0, 4).map((t, idx) => (
-                                                <Chip
-                                                    key={idx}
-                                                    label={`${TAG_ICONS[t.name] || ''} ${t.name}`}
-                                                    size="small"
-                                                    variant="outlined"
-                                                    color="default"
-                                                    sx={{
-                                                        height: 22,
-                                                        fontSize: '0.75rem',
-                                                        bgcolor: t.source === 'MANUAL' ? '#e3f2fd' : 'background.paper',
-                                                        color: t.source === 'MANUAL' ? '#1565c0' : 'text.primary',
-                                                        borderColor: t.source === 'MANUAL' ? '#90caf9' : 'divider',
-                                                        fontWeight: t.source === 'MANUAL' ? 'medium' : 'normal'
-                                                    }}
-                                                />
-                                            ))}
-                                            {row.tags?.length > 4 && (
-                                                <Chip
-                                                    label={`+${row.tags.length - 4}`}
-                                                    size="small"
-                                                    sx={{ height: 22, fontSize: '0.75rem' }}
-                                                />
-                                            )}
-                                        </Box>
-                                    </TableCell>
-
-                                    {!isMobile && (
-                                        <TableCell align="center">
-                                            {row.regularity_score !== undefined ? (
-                                                <Box position="relative" display="inline-flex">
-                                                    <CircularProgress
-                                                        variant="determinate"
-                                                        value={row.regularity_score}
-                                                        size={32}
-                                                        thickness={4}
-                                                        sx={{
-                                                            color: row.regularity_score >= 80 ? 'success.main' :
-                                                                row.regularity_score >= 60 ? 'warning.main' : 'error.main',
-                                                            bgcolor: 'action.hover',
-                                                            borderRadius: '50%'
-                                                        }}
-                                                    />
-                                                    <Box
-                                                        sx={{
-                                                            top: 0,
-                                                            left: 0,
-                                                            bottom: 0,
-                                                            right: 0,
-                                                            position: 'absolute',
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            justifyContent: 'center',
-                                                        }}
-                                                    >
-                                                        <Typography variant="caption" component="div" color="text.secondary" sx={{ fontSize: '0.7rem', fontWeight: 'bold' }}>
-                                                            {row.regularity_score}
-                                                        </Typography>
-                                                    </Box>
-                                                </Box>
-                                            ) : '-'}
-                                        </TableCell>
-                                    )}
-
-                                    <TableCell align="right">
-                                        {row.long_term?.avg_daily_load ? (
-                                            <>
-                                                <Typography variant="body2" fontWeight="medium">
-                                                    {row.long_term.avg_daily_load.toFixed(1)}
+                                <Grid key={row.customer_id} size={{ xs: 12 }}>
+                                    <Card
+                                        variant="outlined"
+                                        sx={{
+                                            cursor: 'pointer',
+                                            '&:hover': { bgcolor: 'action.hover' }
+                                        }}
+                                        onClick={() => handleCustomerClick(row.customer_id, row.short_name || row.customer_name)}
+                                    >
+                                        <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                                            <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1}>
+                                                <Typography variant="subtitle1" fontWeight="bold" color="primary.main">
+                                                    {row.short_name || row.customer_name}
                                                 </Typography>
-                                                <Typography variant="caption" color="text.secondary">MWh</Typography>
-                                            </>
-                                        ) : '-'}
-                                    </TableCell>
+                                                <Chip
+                                                    label={`${row.regularity_score || 0}分`}
+                                                    size="small"
+                                                    color={(row.regularity_score || 0) >= 80 ? 'success' : (row.regularity_score || 0) >= 60 ? 'warning' : 'error'}
+                                                    variant="outlined"
+                                                    sx={{ height: 20, fontSize: '0.7rem' }}
+                                                />
+                                            </Box>
 
-                                    <TableCell align="center">
-                                        <Tooltip title="查看详情">
-                                            <IconButton
-                                                size="small"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleCustomerClick(row.customer_id, row.customer_name);
-                                                }}
+                                            <Tooltip
+                                                arrow
+                                                title={row.tags?.map(t => t.name).join('、') || '暂无特征'}
                                             >
-                                                <VisibilityIcon fontSize="small" />
-                                            </IconButton>
-                                        </Tooltip>
-                                    </TableCell>
-                                </TableRow>
+                                                <Box display="flex" flexWrap="wrap" gap={0.5} mb={1.5}>
+                                                    {row.tags?.length > 0 ? (
+                                                        row.tags.slice(0, 4).map((tag, idx) => (
+                                                            <Chip
+                                                                key={idx}
+                                                                label={tag.name}
+                                                                size="small"
+                                                                variant="outlined"
+                                                                sx={{
+                                                                    fontSize: '0.7rem',
+                                                                    height: 20,
+                                                                    bgcolor: 'rgba(0, 0, 0, 0.04)',
+                                                                    border: 'none'
+                                                                }}
+                                                            />
+                                                        ))
+                                                    ) : (
+                                                        <Typography variant="caption" color="text.disabled">暂无特征</Typography>
+                                                    )}
+                                                    {row.tags?.length > 4 && (
+                                                        <Chip
+                                                            label={`+${row.tags.length - 4}`}
+                                                            size="small"
+                                                            variant="outlined"
+                                                            sx={{ fontSize: '0.7rem', height: 20, bgcolor: 'rgba(0, 0, 0, 0.04)', border: 'none' }}
+                                                        />
+                                                    )}
+                                                </Box>
+                                            </Tooltip>
+
+                                            <Box display="flex" justifyContent="space-between" alignItems="center">
+                                                <Typography variant="caption" color="text.secondary">
+                                                    日均负荷: <Box component="span" color="text.primary" fontWeight="bold">{(row.long_term?.avg_daily_load || 0).toFixed(1)}</Box> MWh
+                                                </Typography>
+                                                <ArrowForwardIcon fontSize="small" color="action" />
+                                            </Box>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
                             ))}
                             {customers.length === 0 && !loading && (
-                                <TableRow>
-                                    <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
-                                        <Typography color="text.secondary">无匹配客户数据</Typography>
-                                    </TableCell>
-                                </TableRow>
+                                <Box sx={{ p: 4, textAlign: 'center', width: '100%' }}>
+                                    <Typography color="text.secondary">无匹配客户数据</Typography>
+                                </Box>
                             )}
-                        </TableBody>
-                    </Table>
-                </TableContainer>
+                        </Grid>
+                    </Box>
+                ) : (
+                    <TableContainer sx={{ overflowX: 'auto' }}>
+                        <Table
+                            stickyHeader
+                            size="medium"
+                            sx={{
+                                '& .MuiTableCell-root': {
+                                    fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                                    px: { xs: 0.5, sm: 1.5 }
+                                }
+                            }}
+                        >
+                            <TableHead>
+                                <TableRow>
+                                    <TableCell
+                                        sx={{ fontWeight: 'bold', cursor: 'pointer' }}
+                                        onClick={() => handleSort('customer_name')}
+                                    >
+                                        客户名称 {sortBy === 'customer_name' ? (orderDir === 'asc' ? '↑' : '↓') : ''}
+                                    </TableCell>
+                                    {!isMobile && <TableCell sx={{ fontWeight: 'bold', width: 140 }}>典型曲线(30天)</TableCell>}
+                                    <TableCell sx={{ fontWeight: 'bold' }}>特征标签</TableCell>
+                                    {!isMobile && (
+                                        <TableCell
+                                            align="center"
+                                            sx={{ fontWeight: 'bold', width: 100, cursor: 'pointer' }}
+                                            onClick={() => handleSort('score')}
+                                        >
+                                            规律性评分 {sortBy === 'score' ? (orderDir === 'asc' ? '↑' : '↓') : ''}
+                                        </TableCell>
+                                    )}
+                                    <TableCell
+                                        align="right"
+                                        sx={{ fontWeight: 'bold', cursor: 'pointer' }}
+                                        onClick={() => handleSort('avg_daily_load')}
+                                    >
+                                        日均负荷 (MWh) {sortBy === 'avg_daily_load' ? (orderDir === 'asc' ? '↑' : '↓') : ''}
+                                    </TableCell>
+                                    <TableCell align="center" sx={{ fontWeight: 'bold', width: 80 }}>操作</TableCell>
+                                </TableRow>
+                            </TableHead>
+                            <TableBody>
+                                {customers.map((row) => (
+                                    <TableRow
+                                        key={row.customer_id}
+                                        hover
+                                        sx={{ cursor: 'pointer' }}
+                                        onClick={() => handleCustomerClick(row.customer_id, row.short_name || row.customer_name)}
+                                    >
+                                        <TableCell>
+                                            <Typography variant="body2" fontWeight="medium" color="primary.main">{row.customer_name}</Typography>
+                                            {row.short_name && row.short_name !== row.customer_name && (
+                                                <Typography variant="caption" color="text.secondary" display="block">{row.short_name}</Typography>
+                                            )}
+                                        </TableCell>
+
+                                        {!isMobile && (
+                                            <TableCell>
+                                                {row.short_term?.avg_curve && row.short_term.avg_curve.length > 0 ? (
+                                                    <Box sx={{ width: 120, height: 40 }}>
+                                                        <ResponsiveContainer width="100%" height="100%">
+                                                            <LineChart data={row.short_term.avg_curve.map((val, i) => ({ i, val }))}>
+                                                                <Line
+                                                                    type="monotone"
+                                                                    dataKey="val"
+                                                                    stroke={theme.palette.primary.main}
+                                                                    strokeWidth={1.5}
+                                                                    dot={false}
+                                                                />
+                                                            </LineChart>
+                                                        </ResponsiveContainer>
+                                                    </Box>
+                                                ) : (
+                                                    <Typography variant="caption" color="text.secondary">-</Typography>
+                                                )}
+                                            </TableCell>
+                                        )}
+
+                                        <TableCell>
+                                            <Tooltip
+                                                arrow
+                                                title={row.tags?.map(t => t.name).join('、') || '暂无特征'}
+                                            >
+                                                <Box display="flex" gap={0.5} flexWrap="wrap">
+                                                    {row.tags?.slice(0, 4).map((t, idx) => (
+                                                        <Chip
+                                                            key={idx}
+                                                            label={`${TAG_ICONS[t.name] || ''} ${t.name}`}
+                                                            size="small"
+                                                            variant="outlined"
+                                                            color="default"
+                                                            sx={{
+                                                                height: 22,
+                                                                fontSize: '0.75rem',
+                                                                bgcolor: t.source === 'MANUAL' ? '#e3f2fd' : 'background.paper',
+                                                                color: t.source === 'MANUAL' ? '#1565c0' : 'text.primary',
+                                                                borderColor: t.source === 'MANUAL' ? '#90caf9' : 'divider',
+                                                                fontWeight: t.source === 'MANUAL' ? 'medium' : 'normal'
+                                                            }}
+                                                        />
+                                                    ))}
+                                                    {row.tags?.length > 4 && (
+                                                        <Chip
+                                                            label={`+${row.tags.length - 4}`}
+                                                            size="small"
+                                                            sx={{ height: 22, fontSize: '0.75rem' }}
+                                                        />
+                                                    )}
+                                                </Box>
+                                            </Tooltip>
+                                        </TableCell>
+
+                                        {!isMobile && (
+                                            <TableCell align="center">
+                                                {row.regularity_score !== undefined ? (
+                                                    <Box position="relative" display="inline-flex">
+                                                        <CircularProgress
+                                                            variant="determinate"
+                                                            value={row.regularity_score}
+                                                            size={32}
+                                                            thickness={4}
+                                                            sx={{
+                                                                color: row.regularity_score >= 80 ? 'success.main' :
+                                                                    row.regularity_score >= 60 ? 'warning.main' : 'error.main',
+                                                                bgcolor: 'action.hover',
+                                                                borderRadius: '50%'
+                                                            }}
+                                                        />
+                                                        <Box
+                                                            sx={{
+                                                                top: 0,
+                                                                left: 0,
+                                                                bottom: 0,
+                                                                right: 0,
+                                                                position: 'absolute',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                            }}
+                                                        >
+                                                            <Typography variant="caption" component="div" color="text.secondary" sx={{ fontSize: '0.7rem', fontWeight: 'bold' }}>
+                                                                {row.regularity_score}
+                                                            </Typography>
+                                                        </Box>
+                                                    </Box>
+                                                ) : '-'}
+                                            </TableCell>
+                                        )}
+
+                                        <TableCell align="right">
+                                            {row.long_term?.avg_daily_load ? (
+                                                <>
+                                                    <Typography variant="body2" fontWeight="medium">
+                                                        {row.long_term.avg_daily_load.toFixed(1)}
+                                                    </Typography>
+                                                    <Typography variant="caption" color="text.secondary">MWh</Typography>
+                                                </>
+                                            ) : '-'}
+                                        </TableCell>
+
+                                        <TableCell align="center">
+                                            <Tooltip title="查看详情">
+                                                <IconButton
+                                                    size="small"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleCustomerClick(row.customer_id, row.short_name || row.customer_name);
+                                                    }}
+                                                >
+                                                    <VisibilityIcon fontSize="small" />
+                                                </IconButton>
+                                            </Tooltip>
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                                {customers.length === 0 && !loading && (
+                                    <TableRow>
+                                        <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                                            <Typography color="text.secondary">无匹配客户数据</Typography>
+                                        </TableCell>
+                                    </TableRow>
+                                )}
+                            </TableBody>
+                        </Table>
+                    </TableContainer>
+                )}
                 <TablePagination
                     component="div"
                     count={totalCount}
@@ -810,6 +970,36 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
                     labelDisplayedRows={({ from, to, count }) => `${from}-${to} 共 ${count} 条`}
                 />
             </Paper>
+
+            {/* Mobile Detail Dialog */}
+            <Dialog
+                fullScreen
+                open={!!mobileDetailCustomer}
+                onClose={() => setMobileDetailCustomer(null)}
+                TransitionComponent={Transition}
+            >
+                <AppBar position="fixed" sx={{ boxShadow: 1 }}>
+                    <Toolbar variant="dense">
+                        <IconButton
+                            edge="start"
+                            color="inherit"
+                            onClick={() => setMobileDetailCustomer(null)}
+                            aria-label="close"
+                        >
+                            <ArrowBackIcon />
+                        </IconButton>
+                        <Typography sx={{ ml: 2, flex: 1 }} variant="h6" component="div" fontSize="1rem">
+                            {mobileDetailCustomer?.name || '客户详情'}
+                        </Typography>
+                    </Toolbar>
+                </AppBar>
+                <Box sx={{ bgcolor: 'grey.50', minHeight: '100vh', pb: 4 }}>
+                    <Toolbar variant="dense" />
+                    {mobileDetailCustomer && (
+                        <LoadCharacteristicsDetailPage customerId={mobileDetailCustomer.id} />
+                    )}
+                </Box>
+            </Dialog>
         </Box>
     );
 };
