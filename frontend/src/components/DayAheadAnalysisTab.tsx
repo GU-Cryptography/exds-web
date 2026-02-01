@@ -153,11 +153,12 @@ export const DayAheadAnalysisTab: React.FC<DayAheadAnalysisTabProps> = ({ select
                     <XAxis dataKey="time_str" interval={11} tick={{ fontSize: 12 }} />
                     <YAxis yAxisId="left" label={{ value: '价格 (元/MWh)', angle: -90, position: 'insideLeft' }} tick={{ fontSize: 12 }} />
                     <YAxis yAxisId="right" orientation="right" label={{ value: '功率 (MW)', angle: -90, position: 'insideRight' }} tick={{ fontSize: 12 }} />
-                    <Tooltip content={<CustomTooltip unitMap={{ avg_clearing_price: '元/MWh', market_bidding_space: 'MW' }} />} />
+                    <Tooltip content={<CustomTooltip unitMap={{ avg_clearing_price: '元/MWh', price_econ: '元/MWh', market_bidding_space: 'MW' }} />} />
                     <Legend />
                     {TouPeriodAreas}
-                    <Line yAxisId="left" type="monotone" dataKey="avg_clearing_price" stroke="#8884d8" name="日前价格" dot={false} />
-                    <Area yAxisId="right" type="monotone" dataKey="market_bidding_space" fill="#82ca9d" stroke="#82ca9d" name="市场竞价空间" />
+                    <Line yAxisId="left" type="monotone" dataKey="avg_clearing_price" stroke="#8884d8" name="日前价格" dot={false} strokeWidth={2} />
+                    <Line yAxisId="left" type="monotone" dataKey="price_econ" stroke="#ff7300" name="日前经济出清价格" dot={false} strokeDasharray="5 5" />
+                    <Area yAxisId="right" type="monotone" dataKey="market_bidding_space" fill="#82ca9d" stroke="#82ca9d" name="市场竞价空间" fillOpacity={0.3} />
                 </ComposedChart>
             )}
 

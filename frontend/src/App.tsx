@@ -16,7 +16,7 @@ import {
 import { ThemeProvider, useTheme } from '@mui/material/styles';
 import theme from './theme';
 import { LoadAnalysisPage } from './pages/LoadAnalysisPage';
-import { MarketPriceAnalysisPage } from './pages/MarketPriceAnalysisPage';
+import { SpotIntradayAnalysisPage } from './pages/SpotIntradayAnalysisPage';
 import LoginPage from './pages/LoginPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import PlaceholderPage from './components/PlaceholderPage';
@@ -88,7 +88,7 @@ const ResponsiveLayout: React.FC = () => {
 
 
                     {/* 价格分析 */}
-                    <Route path="price-analysis/spot-market" element={<MarketPriceAnalysisPage />} />
+                    <Route path="price-analysis/spot-market" element={<SpotIntradayAnalysisPage />} />
                     <Route path="price-analysis/spot-trend" element={<SpotTrendAnalysisPage />} />
                     <Route path="price-analysis/mid-long-term" element={<ContractPriceDailyPage />} />
                     <Route path="price-analysis/mid-long-trend" element={<ContractPriceTrendPage />} />

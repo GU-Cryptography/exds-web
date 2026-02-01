@@ -27,6 +27,9 @@ interface FinancialKPIs {
     vwap_spread: number | null;
     twap_rt: number | null;
     twap_da: number | null;
+    twap_econ: number | null;
+    max_econ: number | null;
+    min_econ: number | null;
 }
 
 interface RiskKPI {
@@ -48,6 +51,7 @@ interface TimeSeriesPoint {
     time_str: string;
     price_rt: number | null;
     price_da: number | null;
+    price_econ: number | null;
     volume_rt: number;
     volume_da: number;
     spread: number | null;
@@ -90,6 +94,9 @@ const MarketPriceSummaryPanel: React.FC<{
     const maxRtPrice = rtPrices.length > 0 ? Math.max(...rtPrices) : 0;
     const minDaPrice = daPrices.length > 0 ? Math.min(...daPrices) : 0;
     const maxDaPrice = daPrices.length > 0 ? Math.max(...daPrices) : 0;
+    const econPrices = time_series.filter(d => d.price_econ !== null).map(d => d.price_econ!);
+    const minEconPrice = econPrices.length > 0 ? Math.min(...econPrices) : 0;
+    const maxEconPrice = econPrices.length > 0 ? Math.max(...econPrices) : 0;
 
     // 计算价差统计
     const spreads = time_series.filter(d => d.spread !== null).map(d => d.spread!);
@@ -125,7 +132,8 @@ const MarketPriceSummaryPanel: React.FC<{
                     </Box>
                     <Box component="span">
                         日前均价 {financial_kpis.vwap_da?.toFixed(2) || 'N/A'} 元/MWh (范围: {minDaPrice.toFixed(2)}~{maxDaPrice.toFixed(2)})，
-                        实时均价 {financial_kpis.vwap_rt?.toFixed(2) || 'N/A'} 元/MWh (范围: {minRtPrice.toFixed(2)}~{maxRtPrice.toFixed(2)})
+                        实时均价 {financial_kpis.vwap_rt?.toFixed(2) || 'N/A'} 元/MWh (范围: {minRtPrice.toFixed(2)}~{maxRtPrice.toFixed(2)})，
+                        经济出清均价 {financial_kpis.twap_econ?.toFixed(2) || 'N/A'} 元/MWh (范围: {minEconPrice.toFixed(2)}~{maxEconPrice.toFixed(2)})
                     </Box>
                 </Typography>
 
@@ -340,7 +348,7 @@ const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onDateShi
     const chartRef = useRef<HTMLDivElement>(null);
 
     // 计算Y轴范围
-    const prices = data.flatMap(d => [d.price_rt, d.price_da].filter(p => p !== null) as number[]);
+    const prices = data.flatMap(d => [d.price_rt, d.price_da, d.price_econ].filter(p => p !== null) as number[]);
     const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
     const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
 
@@ -433,6 +441,15 @@ const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onDateShi
                                 strokeWidth={2}
                                 strokeDasharray="5 5"
                                 name="日前价格"
+                                dot={false}
+                            />
+                            <Line
+                                type="monotone"
+                                dataKey="price_econ"
+                                stroke="#ff9800"
+                                strokeWidth={2}
+                                strokeDasharray="3 3"
+                                name="经济出清价"
                                 dot={false}
                             />
 

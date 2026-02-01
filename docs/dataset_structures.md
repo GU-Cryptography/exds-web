@@ -613,7 +613,25 @@ actual_data = db.weather_actuals.find({
 ---
 
 
+## 17. `day_ahead_econ_price` - 日前经济出清价格
 
+该集合存储用于差价结算的日前经济出清价格数据（通常来源于“日前出清结果_用户”页面）。
 
+- **数据来源**: `rpa.pipelines.day_ahead_auction`
+- **更新频率**: 每日
+- **业务意义**: 专门用于电力市场差价结算的经济出清价格。
 
+### 17.1. 字段说明
 
+| 字段名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `datetime` | ISODate | **[主键]** 数据点对应的精确日期和时间。 |
+| `date_str` | String | 日期字符串，格式 `YYYY-MM-DD`。 |
+| `time_str` | String | 时间点字符串，格式 `HH:MM`。 |
+| `clearing_power` | Number | 出清电量 (MWh)，精度4位小数。 |
+| `clearing_price` | Number | 经济出清价格 (元/MWh)，即 `econ_clearing_price`，精度2位小数。 |
+
+### 17.2. 索引
+
+- `(datetime: 1)`: 唯一索引，确保每个时间点的数据唯一。
+- `(date_str: 1, time_str: 1)`: 复合索引，用于按日期和时间点查询。

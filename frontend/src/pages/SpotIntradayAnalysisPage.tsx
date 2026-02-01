@@ -47,7 +47,7 @@ function TabPanel(props: TabPanelProps) {
     );
 }
 
-export const MarketPriceAnalysisPage: React.FC = () => {
+export const SpotIntradayAnalysisPage: React.FC = () => {
     const [tabIndex, setTabIndex] = useState(0);
     const [selectedDate, setSelectedDate] = useState<Date | null>(addDays(new Date(), -1));
     const theme = useTheme();

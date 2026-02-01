@@ -1,7 +1,7 @@
 /**
  * 中长期日内分析页面
  * 
- * 结构参考 MarketPriceAnalysisPage
+ * 结构参考 SpotIntradayAnalysisPage
  */
 import React, { useState, useEffect } from 'react';
 import { Box, Tabs, Tab, Typography, Paper, useMediaQuery, useTheme, IconButton } from '@mui/material';

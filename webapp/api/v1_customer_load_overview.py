@@ -2,7 +2,7 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from webapp.services.customer_load_overview_service import CustomerLoadOverviewService
-from webapp.api.v1 import get_current_active_user
+from webapp.tools.security import get_current_active_user
 
 router = APIRouter()
 

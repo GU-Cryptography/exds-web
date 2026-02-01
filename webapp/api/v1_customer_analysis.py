@@ -5,8 +5,7 @@ from pydantic import BaseModel
 import pandas as pd
 import numpy as np
 
-from webapp.tools.security import User
-from webapp.api.v1 import get_current_active_user
+from webapp.tools.security import User, get_current_active_user
 from webapp.services.customer_service import CustomerService
 from webapp.services.load_query_service import LoadQueryService, FusionStrategy
 from webapp.services.tou_service import get_tou_rule_by_date

@@ -1,6 +1,6 @@
 import React from 'react';
 import { LoadAnalysisPage } from '../pages/LoadAnalysisPage';
-import { MarketPriceAnalysisPage } from '../pages/MarketPriceAnalysisPage';
+import { SpotIntradayAnalysisPage } from '../pages/SpotIntradayAnalysisPage';
 import PlaceholderPage from '../components/PlaceholderPage';
 import GridAgencyPricePage from '../pages/GridAgencyPricePage';
 import RetailPackagePage from '../pages/RetailPackagePage';
@@ -47,7 +47,7 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/load-forecast/long-term', title: '年度负荷预测', component: PlaceholderPage },
 
     // 价格分析
-    { path: '/price-analysis/spot-market', title: '现货日内分析', component: MarketPriceAnalysisPage },
+    { path: '/price-analysis/spot-market', title: '现货日内分析', component: SpotIntradayAnalysisPage },
     { path: '/price-analysis/spot-trend', title: '现货趋势分析', component: SpotTrendAnalysisPage },
     { path: '/price-analysis/mid-long-term', title: '中长期日内分析', component: ContractPriceDailyPage },
     { path: '/price-analysis/mid-long-trend', title: '中长期趋势分析', component: ContractPriceTrendPage },
