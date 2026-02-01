@@ -393,7 +393,6 @@ class CharacteristicService:
             peak_ratio=round(peak_sum/grand_total, 4) if grand_total else 0,
             flat_ratio=round(flat_sum/grand_total, 4) if grand_total else 0,
             valley_ratio=round(valley_sum/grand_total, 4) if grand_total else 0,
-            valley_ratio=round(valley_sum/grand_total, 4) if grand_total else 0,
             deep_ratio=round(deep_sum/grand_total, 4) if grand_total else 0,
             price_sensitivity_score=price_sensitivity
         )
