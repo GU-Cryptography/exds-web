@@ -158,7 +158,9 @@ class PriceForecastService:
                     "datetime": 1,
                     "predicted_price": 1,
                     "confidence_80_lower": 1,
-                    "confidence_80_upper": 1
+                    "confidence_80_upper": 1,
+                    "confidence_90_lower": 1,
+                    "confidence_90_upper": 1
                 }
             ).sort("datetime", 1))
 
@@ -216,7 +218,9 @@ class PriceForecastService:
                     "predicted_price": doc.get("predicted_price"),
                     "actual_price": actual_price,
                     "confidence_80_lower": doc.get("confidence_80_lower"),
-                    "confidence_80_upper": doc.get("confidence_80_upper")
+                    "confidence_80_upper": doc.get("confidence_80_upper"),
+                    "confidence_90_lower": doc.get("confidence_90_lower"),
+                    "confidence_90_upper": doc.get("confidence_90_upper")
                 })
             
             # 调试：输出合并后的前几条数据
@@ -230,19 +234,29 @@ class PriceForecastService:
             logger.error(f"获取图表数据失败: {e}", exc_info=True)
             raise ValueError(f"获取图表数据失败: {str(e)}")
 
-    def get_accuracy(self, forecast_id: str) -> Optional[Dict[str, Any]]:
+    def get_accuracy(
+        self,
+        forecast_id: str,
+        target_date: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """
         获取准确度评估数据
 
         Args:
             forecast_id: 预测批次ID
+            target_date: 目标日期 YYYY-MM-DD (可选)
 
         Returns:
             准确度评估文档，如果不存在则返回 None
         """
         try:
+            query = {"forecast_id": forecast_id}
+            if target_date:
+                target_dt = datetime.strptime(target_date, "%Y-%m-%d")
+                query["target_date"] = target_dt
+
             doc = self.accuracy_daily.find_one(
-                {"forecast_id": forecast_id},
+                query,
                 {"_id": 0}
             )
 

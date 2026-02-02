@@ -21,6 +21,8 @@ export interface ChartDataPoint {
     actual_price: number | null;
     confidence_80_lower?: number | null;
     confidence_80_upper?: number | null;
+    confidence_90_lower?: number | null;
+    confidence_90_upper?: number | null;
 }
 
 /** 准确度数据 */
@@ -68,7 +70,7 @@ export const priceForecastApi = {
     /**
      * 获取准确度评估数据
      */
-    fetchAccuracy: (params: { forecast_id: string }) => {
+    fetchAccuracy: (params: { forecast_id: string; target_date?: string }) => {
         return apiClient.get<AccuracyData | null>('/api/v1/price-forecast/accuracy', { params });
     },
 

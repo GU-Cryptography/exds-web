@@ -6,7 +6,7 @@
  * 2. 显示预测准确度评估指标
  * 3. 支持多版本回溯
  */
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
     Box,
     Paper,
@@ -28,6 +28,11 @@ import {
     SelectChangeEvent,
     Button,
     Snackbar,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogContentText,
+    DialogActions,
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
@@ -70,10 +75,14 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label })
 
     const predicted = payload.find((p) => p.dataKey === 'predicted_price')?.value ?? null;
     const actual = payload.find((p) => p.dataKey === 'actual_price')?.value ?? null;
+    const conf80Lower = payload.find((p) => p.dataKey === 'confidence_80_lower')?.value ?? null;
+    const conf80Upper = payload.find((p) => p.dataKey === 'confidence_80_upper')?.value ?? null;
+    const conf90Lower = payload.find((p) => p.dataKey === 'confidence_90_lower')?.value ?? null;
+    const conf90Upper = payload.find((p) => p.dataKey === 'confidence_90_upper')?.value ?? null;
     const error = (predicted !== null && actual !== null) ? (predicted - actual) : null;
 
     return (
-        <Paper sx={{ p: 1.5, minWidth: 180 }}>
+        <Paper sx={{ p: 1.5, minWidth: 200 }}>
             <Typography variant="subtitle2" gutterBottom>{label}</Typography>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
                 <Typography variant="body2" color="primary.main">预测价格:</Typography>
@@ -87,6 +96,28 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label })
                     {actual !== null ? `${actual.toFixed(2)} 元` : '-'}
                 </Typography>
             </Box>
+
+            {(conf80Lower !== null || conf90Lower !== null) && (
+                <Box sx={{ mt: 1, pt: 0.5, borderTop: '1px solid', borderColor: 'divider' }}>
+                    {conf80Lower !== null && conf80Upper !== null && (
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
+                            <Typography variant="caption" color="text.secondary">80% 置信区间:</Typography>
+                            <Typography variant="caption" fontWeight="bold">
+                                [{conf80Lower.toFixed(1)}, {conf80Upper.toFixed(1)}]
+                            </Typography>
+                        </Box>
+                    )}
+                    {conf90Lower !== null && conf90Upper !== null && (
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
+                            <Typography variant="caption" color="text.secondary">90% 置信区间:</Typography>
+                            <Typography variant="caption" fontWeight="bold" color="success.main">
+                                [{conf90Lower.toFixed(1)}, {conf90Upper.toFixed(1)}]
+                            </Typography>
+                        </Box>
+                    )}
+                </Box>
+            )}
+
             {error !== null && (
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, mt: 0.5, pt: 0.5, borderTop: '1px solid', borderColor: 'divider' }}>
                     <Typography variant="body2" color="text.secondary">误差:</Typography>
@@ -355,6 +386,7 @@ export const DayAheadPriceForecastPage: React.FC = () => {
     const [loadingChart, setLoadingChart] = useState(false);
     const [loadingAccuracy, setLoadingAccuracy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
 
     // 预测触发相关状态
     const [triggerLoading, setTriggerLoading] = useState(false);
@@ -365,6 +397,15 @@ export const DayAheadPriceForecastPage: React.FC = () => {
 
     // 日期限制：最多选到明天
     const maxDate = addDays(new Date(), 1);
+
+    // 计算预测均价
+    const avgPredictedPrice = useMemo(() => {
+        if (chartData.length === 0) return null;
+        const validPoints = chartData.filter(d => d.predicted_price !== null);
+        if (validPoints.length === 0) return null;
+        const sum = validPoints.reduce((acc, curr) => acc + (curr.predicted_price || 0), 0);
+        return sum / validPoints.length;
+    }, [chartData]);
 
     // 图表全屏
     const chartRef = useRef<HTMLDivElement>(null);
@@ -436,13 +477,14 @@ export const DayAheadPriceForecastPage: React.FC = () => {
     };
 
     // 加载准确度数据
-    const fetchAccuracy = async (forecastId: string) => {
-        if (!forecastId) return;
+    const fetchAccuracy = async (forecastId: string, date: Date | null) => {
+        if (!forecastId || !date) return;
 
         setLoadingAccuracy(true);
         try {
             const response = await priceForecastApi.fetchAccuracy({
                 forecast_id: forecastId,
+                target_date: format(date, 'yyyy-MM-dd'),
             });
             setAccuracy(response.data);
         } catch (err: any) {
@@ -463,7 +505,7 @@ export const DayAheadPriceForecastPage: React.FC = () => {
     useEffect(() => {
         if (selectedVersion && selectedDate) {
             fetchChartData(selectedVersion, selectedDate);
-            fetchAccuracy(selectedVersion);
+            fetchAccuracy(selectedVersion, selectedDate);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedVersion, selectedDate]);
@@ -570,6 +612,21 @@ export const DayAheadPriceForecastPage: React.FC = () => {
         }
     };
 
+    // 处理预测按钮点击
+    const handlePredictClick = () => {
+        if (versions.length > 0) {
+            setConfirmDialogOpen(true);
+        } else {
+            handleTriggerForecast();
+        }
+    };
+
+    // 确认重新预测
+    const handleConfirmPredict = () => {
+        setConfirmDialogOpen(false);
+        handleTriggerForecast();
+    };
+
     // 版本选择
     const handleVersionChange = (event: SelectChangeEvent<string>) => {
         setSelectedVersion(event.target.value);
@@ -650,6 +707,27 @@ export const DayAheadPriceForecastPage: React.FC = () => {
                         </Select>
                     </FormControl>
 
+                    {/* 预测均价卡片 */}
+                    {avgPredictedPrice !== null && (
+                        <Box sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 1,
+                            ml: { xs: 0, sm: 2 },
+                            px: 1.5,
+                            py: 0.5,
+                            border: '1px solid',
+                            borderColor: 'primary.light',
+                            borderRadius: 1,
+                            bgcolor: 'rgba(25, 118, 210, 0.04)',
+                        }}>
+                            <Typography variant="caption" color="text.secondary">预测均价:</Typography>
+                            <Typography variant="body2" fontWeight="bold" color="primary.main">
+                                {avgPredictedPrice.toFixed(2)} 元
+                            </Typography>
+                        </Box>
+                    )}
+
                     {/* 预测按钮 */}
                     <Button
                         variant="contained"
@@ -657,24 +735,48 @@ export const DayAheadPriceForecastPage: React.FC = () => {
                         startIcon={
                             triggerLoading ? <CircularProgress size={16} color="inherit" /> :
                                 commandStatus === 'pending' ? <HourglassEmptyIcon /> :
-                                    commandStatus === 'running' ? <SyncIcon sx={{ animation: 'spin 1s linear infinite', '@keyframes spin': { '0%': { transform: 'rotate(0deg)' }, '100%': { transform: 'rotate(360deg)' } } }} /> :
-                                        <PlayArrowIcon />
+                                    commandStatus === 'running' ? <SyncIcon sx={{
+                                        animation: 'spin 2s linear infinite',
+                                        '@keyframes spin': {
+                                            '0%': { transform: 'rotate(0deg)' },
+                                            '100%': { transform: 'rotate(360deg)' }
+                                        }
+                                    }} /> :
+                                        versions.length > 0 ? <SyncIcon /> : <PlayArrowIcon />
                         }
-                        onClick={handleTriggerForecast}
+                        onClick={handlePredictClick}
                         disabled={
                             loading ||
                             triggerLoading ||
-                            versions.length > 0 ||
                             commandStatus === 'pending' ||
                             commandStatus === 'running'
                         }
-                        sx={{ ml: { xs: 0, sm: 2 } }}
+                        sx={{ ml: { xs: 0, sm: 'auto' } }}
                     >
                         {commandStatus === 'pending' ? '等待中...' :
                             commandStatus === 'running' ? '执行中...' :
-                                '预测'}
+                                versions.length > 0 ? '重新预测' : '预测'}
                     </Button>
                 </Paper>
+
+                {/* 重新预测确认对话框 */}
+                <Dialog
+                    open={confirmDialogOpen}
+                    onClose={() => setConfirmDialogOpen(false)}
+                >
+                    <DialogTitle>确认重新预测？</DialogTitle>
+                    <DialogContent>
+                        <DialogContentText>
+                            该日期已存在预测版本。重新预测将生成新的版本。是否继续？
+                        </DialogContentText>
+                    </DialogContent>
+                    <DialogActions>
+                        <Button onClick={() => setConfirmDialogOpen(false)}>取消</Button>
+                        <Button onClick={handleConfirmPredict} variant="contained" autoFocus>
+                            执行重新预测
+                        </Button>
+                    </DialogActions>
+                </Dialog>
 
                 {/* Snackbar 提示 */}
                 <Snackbar
@@ -798,24 +900,29 @@ export const DayAheadPriceForecastPage: React.FC = () => {
                                             <Legend />
 
                                             {/* 置信区间 */}
-                                            {chartData.some(d => d.confidence_80_lower != null) && (
+                                            {/* 置信区间 90% (浅绿色范围) */}
+                                            {chartData.some(d => d.confidence_90_lower != null) && (
                                                 <Area
                                                     type="monotone"
-                                                    dataKey="confidence_80_upper"
+                                                    dataKey={(d: any) => [d.confidence_90_lower, d.confidence_90_upper]}
                                                     stroke="none"
-                                                    fill="#1976d2"
-                                                    fillOpacity={0.1}
-                                                    name="80%置信区间"
+                                                    fill="#4caf50"
+                                                    fillOpacity={0.15}
+                                                    name="90%置信区间"
+                                                    connectNulls
                                                 />
                                             )}
+
+                                            {/* 置信区间 80% (淡蓝色范围) */}
                                             {chartData.some(d => d.confidence_80_lower != null) && (
                                                 <Area
                                                     type="monotone"
-                                                    dataKey="confidence_80_lower"
+                                                    dataKey={(d: any) => [d.confidence_80_lower, d.confidence_80_upper]}
                                                     stroke="none"
-                                                    fill="#ffffff"
-                                                    fillOpacity={1}
-                                                    legendType="none"
+                                                    fill="#1976d2"
+                                                    fillOpacity={0.15}
+                                                    name="80%置信区间"
+                                                    connectNulls
                                                 />
                                             )}
 

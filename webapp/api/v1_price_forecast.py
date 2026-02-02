@@ -120,12 +120,13 @@ async def get_chart_data(
     """
 )
 async def get_accuracy(
-    forecast_id: str = Query(..., description="预测批次ID")
+    forecast_id: str = Query(..., description="预测批次ID"),
+    target_date: Optional[str] = Query(None, description="目标日期, 格式 YYYY-MM-DD")
 ) -> Optional[Dict[str, Any]]:
     """获取准确度评估"""
     try:
         service = get_service()
-        result = service.get_accuracy(forecast_id)
+        result = service.get_accuracy(forecast_id, target_date)
         return result
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
