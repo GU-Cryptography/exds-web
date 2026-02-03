@@ -10,6 +10,7 @@ from slowapi.util import get_remote_address
 from webapp.tools.mongo import DATABASE as db
 from webapp.tools.logging_config import configure_logging
 from webapp.api import v1
+from webapp.scheduler import setup_scheduler
 
 # Import security functions and models from the new security tool
 from webapp.tools.security import (
@@ -48,6 +49,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- Scheduler ---
+setup_scheduler(app)
 
 # --- API Routes ---
 
