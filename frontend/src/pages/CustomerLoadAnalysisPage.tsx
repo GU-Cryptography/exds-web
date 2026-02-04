@@ -306,7 +306,7 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
                             color: 'text.primary'
                         }}
                     >
-                        客户管理 / 客户负荷分析 / {selectedCustomer?.short_name || '请选择客户'}
+                        负荷分析 / 客户负荷分析 / {selectedCustomer?.short_name || '请选择客户'}
                     </Typography>
                 )}
 

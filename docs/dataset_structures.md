@@ -635,3 +635,105 @@ actual_data = db.weather_actuals.find({
 
 - `(datetime: 1)`: 唯一索引，确保每个时间点的数据唯一。
 - `(date_str: 1, time_str: 1)`: 复合索引，用于按日期和时间点查询。
+
+---
+
+
+## 18. `task_execution_logs` - 系统/任务执行日志
+
+该集合用于统一记录系统各类后台任务（定时任务、事件驱动任务等）的执行过程和结果。
+
+- **数据来源**: `webapp.scheduler.logger.TaskLogger`
+- **更新频率**: 实时记录任务开始与结束
+
+### 18.1. 字段说明
+
+| 字段名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `task_id` | String | **[主键]** 任务执行唯一标识，通常由 `service_type_task_type_timestamp_rand` 组成。 |
+| `service_type` | String | 服务类型。可选值: `web`, `rpa`, `forecast`。 |
+| `task_type` | String | 任务类型标识。如: `load_aggregation`, `forecast_daily`。 |
+| `task_name` | String | 任务显示名称。 |
+| `trigger_type` | String | 触发方式。可选值: `schedule` (定时), `event` (事件推动), `manual` (手工确认)。 |
+| `status` | String | 执行状态。可选值: `RUNNING`, `SUCCESS`, `FAILED`, `PARTIAL`。 |
+| `start_time` | ISODate | 任务开始时间（系统本地时间）。 |
+| `end_time` | ISODate | 任务结束时间（系统本地时间）。 |
+| `duration` | Number | 执行耗时（秒）。 |
+| `summary` | String | 执行结果摘要描述。 |
+| `details` | Object | 详细执行数据/指标。 |
+| `error` | Object | 错误详情信息（若失败）。 |
+| `error.code` | String | 错误码。 |
+| `error.message` | String | 错误消息详情。 |
+| `created_at` | ISODate | 记录创建时间。 |
+| `updated_at` | ISODate | 记录最后更新时间。 |
+
+### 18.2. 索引
+
+- `(task_id: 1)`: 唯一索引。
+- `(task_type: 1, start_time: -1)`: 用于按任务类型查询执行历史。
+- `(status: 1, start_time: -1)`: 用于按状态刷选日志。
+
+---
+
+## 19. `system_alerts` - 系统告警
+
+该集合存储系统自动触发的所有异常告警信息，包括数据质量异常、系统错误等。
+
+- **数据来源**: 任务自动逻辑（如 `aggregation_jobs.py`）
+- **更新频率**: 异常发生时实时创建
+
+### 19.1. 字段说明
+
+| 字段名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `alert_id` | String | **[主键]** 告警唯一标识。 |
+| `level` | String | 告警级别。可选值: `P1` (严重), `P2` (一般), `P3` (提醒)。 |
+| `category` | String | 告警分类。可选值: `DATA_QUALITY` (数据质量), `SYSTEM_ERROR` (系统错误)。 |
+| `title` | String | 告警标题。 |
+| `content` | String | 告警详细内容描述。 |
+| `status` | String | 告警状态。可选值: `ACTIVE` (激活中), `RESOLVED` (已解决)。 |
+| `service_type` | String | 产生告警的服务类型。 |
+| `task_type` | String | 产生告警的任务类型。 |
+| `related_task_id` | String | 关联的任务执行 ID (`task_execution_logs.task_id`)。 |
+| `context` | Object | 告警上下文（如错误详情、具体参数等）。 |
+| `created_at` | ISODate | 告警创建时间。 |
+| `resolved_at` | ISODate | 解决时间（若已解决）。 |
+| `resolved_by` | String | 解决人。 |
+| `resolution_note` | String | 解决说明备注。 |
+
+### 19.2. 索引
+
+- `(alert_id: 1)`: 唯一索引。
+- `(status: 1, level: 1)`: 用于控制台显示活跃的高级告警。
+- `(created_at: -1)`: 按时间倒序查询告警。
+
+---
+
+## 20. `task_commands` - 远程任务/指令
+
+该集合作为指令中转站，用于前端向后端工作进程或外部服务（如 RPA）下发执行指令。
+
+- **数据来源**: 前端 API 触发
+- **消费端**: 后端调度器/执行器
+
+### 20.1. 字段说明
+
+| 字段名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `command_id` | String | **[主键]** 指令唯一 ID。 |
+| `command` | String | 执行指令。如: `re-predict`, `rerun_aggregation`。 |
+| `task_type` | String | 关联的任务类型。 |
+| `service_type` | String | 目标服务类型。 |
+| `status` | String | 指令状态。可选值: `PENDING`, `RUNNING`, `SUCCESS`, `FAILED`。 |
+| `parameters` | Object | 执行参数。如: `{"target_date": "2026-02-04"}`。 |
+| `priority` | Number | 优先级（数字越大优先级越高）。 |
+| `created_at` | ISODate | 创建时间。 |
+| `created_by` | String | 创建人/触发人账号名。 |
+| `started_at` | ISODate | 开始执行时间。 |
+| `completed_at` | ISODate | 完成执行时间。 |
+| `result_message` | String | 执行结果消息反馈。 |
+
+### 20.2. 索引
+
+- `(status: 1, priority: -1, created_at: 1)`: 消费端轮询索引。
+- `(command_id: 1)`: 唯一索引。

@@ -3,8 +3,7 @@ import {
     Box, Grid, Paper, Typography, Table, TableBody, TableCell, TableContainer,
     TableHead, TableRow, Chip, LinearProgress, Alert, Button, TablePagination,
     IconButton, TextField, InputAdornment, FormControl, InputLabel, Select, MenuItem,
-    CircularProgress, Tooltip, useMediaQuery, Tabs, Tab, Card, CardContent, ListSubheader,
-    Breadcrumbs, Link
+    CircularProgress, Tooltip, useMediaQuery, Tabs, Tab, Card, CardContent, ListSubheader
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import {
@@ -21,7 +20,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import NavigateNextIcon from '@mui/icons-material/NavigateNext';
+
 import CloseIcon from '@mui/icons-material/Close';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { Dialog, AppBar, Toolbar, Slide } from '@mui/material';
@@ -266,17 +265,18 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
     return (
         <Box sx={{ width: '100%' }}>
             {/* 标题栏 - 仅移动端显示，面包屑样式 */}
-            {isMobile && (
-                <Box mb={2}>
-                    <Box display="flex" alignItems="center" gap={1} mb={1}>
-                        <Breadcrumbs separator={<NavigateNextIcon fontSize="small" />} aria-label="breadcrumb">
-                            <Link underline="hover" color="inherit" href="/">
-                                首页
-                            </Link>
-                            <Typography color="text.primary" fontWeight="bold">负荷特征分析</Typography>
-                        </Breadcrumbs>
-                    </Box>
-                </Box>
+            {/* 标题栏 - 移动端/平板显示面包屑 */}
+            {!isDesktop && (
+                <Typography
+                    variant="subtitle1"
+                    sx={{
+                        mb: 2,
+                        fontWeight: 'bold',
+                        color: 'text.primary'
+                    }}
+                >
+                    负荷分析 / 负荷特征分析
+                </Typography>
             )}
 
             {/* 桌面端刷新按钮 */}

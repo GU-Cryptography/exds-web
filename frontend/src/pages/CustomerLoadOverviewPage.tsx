@@ -1014,7 +1014,7 @@ export const CustomerLoadOverviewPage: React.FC = () => {
                         color: 'text.primary'
                     }}
                 >
-                    客户管理 / 客户负荷分析
+                    负荷分析 / 客户负荷分析
                 </Typography>
             )}
 

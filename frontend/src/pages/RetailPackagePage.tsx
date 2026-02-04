@@ -45,15 +45,15 @@ const statusMap: { [key: string]: string } = {
 
 // 根据状态获取Chip颜色
 const getStatusChipColor = (status: string): 'success' | 'warning' | 'default' => {
-    switch (status) {
-        case 'active':
-            return 'success';
-        case 'archived':
-            return 'warning';
-        case 'draft':
-        default:
-            return 'default';
-    }
+  switch (status) {
+    case 'active':
+      return 'success';
+    case 'archived':
+      return 'warning';
+    case 'draft':
+    default:
+      return 'default';
+  }
 };
 
 const RetailPackagePage: React.FC = () => {
@@ -124,24 +124,24 @@ const RetailPackagePage: React.FC = () => {
     setMobilePackageLoading(true);
     setMobilePackageError(null);
     try {
-        const response = await apiClient.get(`/api/v1/retail-packages/${packageId}`);
-        setMobilePackageData(response.data);
+      const response = await apiClient.get(`/api/v1/retail-packages/${packageId}`);
+      setMobilePackageData(response.data);
     } catch (err: any) {
-        console.error('加载套餐详情失败:', err);
-        setMobilePackageError(err.response?.data?.detail || err.message || '加载套餐详情失败');
-        setMobilePackageData(null);
+      console.error('加载套餐详情失败:', err);
+      setMobilePackageError(err.response?.data?.detail || err.message || '加载套餐详情失败');
+      setMobilePackageData(null);
     } finally {
-        setMobilePackageLoading(false);
+      setMobilePackageLoading(false);
     }
   };
 
   // 根据路由参数加载移动端套餐数据
   useEffect(() => {
     if (currentPackageId && (isDetailView || isEditView || isCopyView)) {
-        loadMobilePackageData(currentPackageId);
+      loadMobilePackageData(currentPackageId);
     } else {
-        setMobilePackageData(null);
-        setMobilePackageError(null);
+      setMobilePackageData(null);
+      setMobilePackageError(null);
     }
   }, [currentPackageId, isDetailView, isEditView, isCopyView]);
 
@@ -164,7 +164,7 @@ const RetailPackagePage: React.FC = () => {
     open: boolean;
     message: string;
     severity: 'success' | 'error' | 'info' | 'warning';
-  }>({ 
+  }>({
     open: false,
     message: '',
     severity: 'success'
@@ -202,12 +202,12 @@ const RetailPackagePage: React.FC = () => {
       setPackages(response.data.items);
       setTotalCount(response.data.total);
     } catch (error: any) {
-        console.error("Failed to fetch packages", error);
-        console.error("错误详情:", error.response?.data); // 打印详细错误
-        const errorMsg = error.response?.data?.detail || error.message || "加载套餐列表失败";
-        showSnackbar(errorMsg, 'error');
-        setPackages([]); // 确保清空列表
-        setTotalCount(0);
+      console.error("Failed to fetch packages", error);
+      console.error("错误详情:", error.response?.data); // 打印详细错误
+      const errorMsg = error.response?.data?.detail || error.message || "加载套餐列表失败";
+      showSnackbar(errorMsg, 'error');
+      setPackages([]); // 确保清空列表
+      setTotalCount(0);
     } finally {
       setLoading(false);
     }
@@ -358,50 +358,50 @@ const RetailPackagePage: React.FC = () => {
   const handleSave = async (data: any, asDraft: boolean) => {
     console.log("Saving package:", data, "as draft:", asDraft);
     const payload = {
-        ...data,
-        save_as_draft: asDraft
+      ...data,
+      save_as_draft: asDraft
     };
 
     try {
-        let savedPackageId = editPackageId;
+      let savedPackageId = editPackageId;
 
-        if (editorMode === 'edit') {
-            await apiClient.put(`/api/v1/retail-packages/${editPackageId}`, payload);
-            showSnackbar('套餐更新成功', 'success');
-        } else { // create or copy mode
-            const response = await apiClient.post('/api/v1/retail-packages', payload);
-            savedPackageId = response.data.id || response.data._id; // 获取新创建的套餐ID
-            if (editorMode === 'copy') {
-                showSnackbar('套餐复制成功', 'success');
-            } else {
-                showSnackbar('套餐创建成功', 'success');
-            }
-        }
-
-        if (isMobile) {
-            // 移动端保存成功后的导航逻辑
-            if (isCreateView) {
-                // 新增成功后返回列表
-                navigate('/basic-data/retail-packages');
-            } else if (isEditView || isCopyView) {
-                // 编辑/复制成功后返回详情
-                if (savedPackageId) {
-                    navigate(`/basic-data/retail-packages/view/${savedPackageId}`);
-                } else {
-                    navigate('/basic-data/retail-packages');
-                }
-            }
+      if (editorMode === 'edit') {
+        await apiClient.put(`/api/v1/retail-packages/${editPackageId}`, payload);
+        showSnackbar('套餐更新成功', 'success');
+      } else { // create or copy mode
+        const response = await apiClient.post('/api/v1/retail-packages', payload);
+        savedPackageId = response.data.id || response.data._id; // 获取新创建的套餐ID
+        if (editorMode === 'copy') {
+          showSnackbar('套餐复制成功', 'success');
         } else {
-            // 桌面端关闭对话框并刷新列表
-            setEditorOpen(false);
-            fetchPackages(); // Refresh the list
+          showSnackbar('套餐创建成功', 'success');
         }
+      }
+
+      if (isMobile) {
+        // 移动端保存成功后的导航逻辑
+        if (isCreateView) {
+          // 新增成功后返回列表
+          navigate('/basic-data/retail-packages');
+        } else if (isEditView || isCopyView) {
+          // 编辑/复制成功后返回详情
+          if (savedPackageId) {
+            navigate(`/basic-data/retail-packages/view/${savedPackageId}`);
+          } else {
+            navigate('/basic-data/retail-packages');
+          }
+        }
+      } else {
+        // 桌面端关闭对话框并刷新列表
+        setEditorOpen(false);
+        fetchPackages(); // Refresh the list
+      }
     } catch (error: any) {
-        console.error("Failed to save package", error);
-        const errorMsg = error.response?.data?.detail || '操作失败，请重试';
-        showSnackbar(errorMsg, 'error');
-        // 不要关闭对话框，让用户可以修改后重试
-        throw error;
+      console.error("Failed to save package", error);
+      const errorMsg = error.response?.data?.detail || '操作失败，请重试';
+      showSnackbar(errorMsg, 'error');
+      // 不要关闭对话框，让用户可以修改后重试
+      throw error;
     }
   };
 
@@ -552,7 +552,7 @@ const RetailPackagePage: React.FC = () => {
             color: 'text.primary'
           }}
         >
-          基础数据 / 零售套餐管理
+          客户管理 / 零售套餐管理
         </Typography>
       )}
 
@@ -596,73 +596,73 @@ const RetailPackagePage: React.FC = () => {
             mt: isMobile ? 1 : 0
           }}>
             <TextField
-                label="套餐名称"
-                variant="outlined"
-                size="small"
-                value={filters.keyword}
-                onChange={handleKeywordChange}
-                InputProps={{
-                    startAdornment: (
-                        <InputAdornment position="start">
-                            <SearchIcon />
-                        </InputAdornment>
-                    ),
-                }}
-                sx={{ width: { xs: '100%', sm: '200px' } }}
+              label="套餐名称"
+              variant="outlined"
+              size="small"
+              value={filters.keyword}
+              onChange={handleKeywordChange}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon />
+                  </InputAdornment>
+                ),
+              }}
+              sx={{ width: { xs: '100%', sm: '200px' } }}
             />
             <FormControl variant="outlined" size="small" sx={{ width: { xs: '100%', sm: '150px' } }}>
-                <InputLabel>套餐类型</InputLabel>
-                <Select
-                    name="package_type"
-                    value={filters.package_type}
-                    onChange={handleFilterChange}
-                    label="套餐类型"
-                >
-                    <MenuItem value="">所有</MenuItem>
-                    <MenuItem value="time_based">分时段</MenuItem>
-                    <MenuItem value="non_time_based">不分时段</MenuItem>
-                </Select>
+              <InputLabel>套餐类型</InputLabel>
+              <Select
+                name="package_type"
+                value={filters.package_type}
+                onChange={handleFilterChange}
+                label="套餐类型"
+              >
+                <MenuItem value="">所有</MenuItem>
+                <MenuItem value="time_based">分时段</MenuItem>
+                <MenuItem value="non_time_based">不分时段</MenuItem>
+              </Select>
             </FormControl>
             <FormControl variant="outlined" size="small" sx={{ width: { xs: '100%', sm: '150px' } }}>
-                <InputLabel>绿电套餐</InputLabel>
-                <Select
-                    name="is_green_power"
-                    value={filters.is_green_power}
-                    onChange={handleFilterChange}
-                    label="绿电套餐"
-                >
-                    <MenuItem value="">所有</MenuItem>
-                    <MenuItem value="true">是</MenuItem>
-                    <MenuItem value="false">否</MenuItem>
-                </Select>
+              <InputLabel>绿电套餐</InputLabel>
+              <Select
+                name="is_green_power"
+                value={filters.is_green_power}
+                onChange={handleFilterChange}
+                label="绿电套餐"
+              >
+                <MenuItem value="">所有</MenuItem>
+                <MenuItem value="true">是</MenuItem>
+                <MenuItem value="false">否</MenuItem>
+              </Select>
             </FormControl>
             <FormControl variant="outlined" size="small" sx={{ width: { xs: '100%', sm: '150px' } }}>
-                <InputLabel>定价模型</InputLabel>
-                <Select
-                    name="model_code"
-                    value={filters.model_code}
-                    onChange={handleFilterChange}
-                    label="定价模型"
-                >
-                    <MenuItem value="">所有</MenuItem>
-                    {pricingModels.map(model => (
-                        <MenuItem key={model.model_code} value={model.model_code}>{model.display_name}</MenuItem>
-                    ))}
-                </Select>
+              <InputLabel>定价模型</InputLabel>
+              <Select
+                name="model_code"
+                value={filters.model_code}
+                onChange={handleFilterChange}
+                label="定价模型"
+              >
+                <MenuItem value="">所有</MenuItem>
+                {pricingModels.map(model => (
+                  <MenuItem key={model.model_code} value={model.model_code}>{model.display_name}</MenuItem>
+                ))}
+              </Select>
             </FormControl>
             <FormControl variant="outlined" size="small" sx={{ width: { xs: '100%', sm: '150px' } }}>
-                <InputLabel>状态</InputLabel>
-                <Select
-                    name="status"
-                    value={filters.status}
-                    onChange={handleFilterChange}
-                    label="状态"
-                >
-                    <MenuItem value="">所有</MenuItem>
-                    <MenuItem value="draft">草稿</MenuItem>
-                    <MenuItem value="active">生效</MenuItem>
-                    <MenuItem value="archived">归档</MenuItem>
-                </Select>
+              <InputLabel>状态</InputLabel>
+              <Select
+                name="status"
+                value={filters.status}
+                onChange={handleFilterChange}
+                label="状态"
+              >
+                <MenuItem value="">所有</MenuItem>
+                <MenuItem value="draft">草稿</MenuItem>
+                <MenuItem value="active">生效</MenuItem>
+                <MenuItem value="archived">归档</MenuItem>
+              </Select>
             </FormControl>
             <Button variant="contained" onClick={handleSearch}>刷新</Button>
             <Button variant="outlined" onClick={handleResetFilters}>重置</Button>
@@ -676,92 +676,212 @@ const RetailPackagePage: React.FC = () => {
           <Button variant="contained" color="primary" onClick={handleCreate}>+ 新增</Button>
         </Box>
         {loading ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
-                <CircularProgress />
-              </Box>
-            ) : packages.length === 0 ? (
-              isMobile ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
-                  <Typography variant="body2" color="text.secondary">暂无数据</Typography>
-                </Box>
-              ) : (
-                <TableContainer>
-                  <Table
-                    sx={{
-                        '& .MuiTableCell-root': {
-                            fontSize: { xs: '0.75rem', sm: '0.875rem'},
-                            px: { xs: 0.5, sm: 2},
-                        }
-                    }}
-                  >
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>套餐名称</TableCell>
-                        <TableCell>套餐类型</TableCell>
-                        <TableCell>绿电套餐</TableCell>
-                        <TableCell>定价模型</TableCell>
-                        <TableCell>状态</TableCell>
-                        <TableCell>合同数</TableCell>
-                        <TableCell>创建时间</TableCell>
-                        <TableCell align="right">操作</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      <TableRow>
-                        <TableCell colSpan={8} sx={{ textAlign: 'center', py: 3 }}>
-                          <Typography variant="body2" color="text.secondary">暂无数据</Typography>
-                        </TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              )
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
+            <CircularProgress />
+          </Box>
+        ) : packages.length === 0 ? (
+          isMobile ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
+              <Typography variant="body2" color="text.secondary">暂无数据</Typography>
+            </Box>
+          ) : (
+            <TableContainer>
+              <Table
+                sx={{
+                  '& .MuiTableCell-root': {
+                    fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                    px: { xs: 0.5, sm: 2 },
+                  }
+                }}
+              >
+                <TableHead>
+                  <TableRow>
+                    <TableCell>套餐名称</TableCell>
+                    <TableCell>套餐类型</TableCell>
+                    <TableCell>绿电套餐</TableCell>
+                    <TableCell>定价模型</TableCell>
+                    <TableCell>状态</TableCell>
+                    <TableCell>合同数</TableCell>
+                    <TableCell>创建时间</TableCell>
+                    <TableCell align="right">操作</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  <TableRow>
+                    <TableCell colSpan={8} sx={{ textAlign: 'center', py: 3 }}>
+                      <Typography variant="body2" color="text.secondary">暂无数据</Typography>
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )
 
-            ) : isMobile ? (
-              <Box>
+        ) : isMobile ? (
+          <Box>
+            {packages.map(pkg => (
+              <Paper key={getPackageId(pkg)} variant="outlined" sx={{ p: 2, mb: 2 }}>
+                <Typography
+                  variant="subtitle1"
+                  gutterBottom
+                  sx={{
+                    cursor: 'pointer',
+                    color: 'primary.main',
+                    '&:hover': { textDecoration: 'underline' }
+                  }}
+                  onClick={() => handleViewDetails(getPackageId(pkg))}
+                >
+                  {pkg.package_name}
+                </Typography>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="body2" color="text.secondary">类型:</Typography>
+                  <Chip label={pkg.package_type === 'time_based' ? '分时段' : '不分时段'} size="small" />
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="body2" color="text.secondary">绿电套餐:</Typography>
+                  {pkg.is_green_power ? (
+                    <Chip label="是" size="small" color="success" />
+                  ) : (
+                    <Chip label="否" size="small" variant="outlined" />
+                  )}
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="body2" color="text.secondary">定价模型:</Typography>
+                  <Chip label={getModelDisplayName(pkg.model_code)} size="small" color="primary" />
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="body2" color="text.secondary">状态:</Typography>
+                  <Chip label={statusMap[pkg.status] || pkg.status} size="small" color={getStatusChipColor(pkg.status)} />
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="body2" color="text.secondary">合同数:</Typography>
+                  <Typography variant="body2">{pkg.contract_count || 0}</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="body2" color="text.secondary">创建时间:</Typography>
+                  <Typography variant="body2">{format(new Date(pkg.created_at), 'yyyy-MM-dd HH:mm')}</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
+                  {canEdit(pkg.status) && (
+                    <Tooltip title="编辑套餐">
+                      <IconButton
+                        size="small"
+                        onClick={() => handleEdit(getPackageId(pkg))}
+                      >
+                        <EditIcon />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                  <Tooltip title="复制套餐">
+                    <IconButton size="small" onClick={() => handleCopy(getPackageId(pkg))}>
+                      <ContentCopyIcon />
+                    </IconButton>
+                  </Tooltip>
+                  {canActivate(pkg.status) && (
+                    <Tooltip title="激活套餐">
+                      <IconButton
+                        size="small"
+                        onClick={() => handleActivate(getPackageId(pkg))}
+                        color="success"
+                      >
+                        <CheckCircleIcon />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                  {canArchive(pkg.status) && (
+                    <Tooltip title="归档套餐">
+                      <IconButton
+                        size="small"
+                        onClick={() => handleArchive(getPackageId(pkg))}
+                        color="warning"
+                      >
+                        <ArchiveIcon />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                  {/* 新增：删除按钮（仅草稿可见） */}
+                  {pkg.status === 'draft' && (
+                    <Tooltip title="删除套餐">
+                      <IconButton
+                        size="small"
+                        onClick={() => handleDeleteClick(getPackageId(pkg))}
+                        color="error"
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                </Box>
+              </Paper>
+            ))}
+          </Box>
+        ) : (
+          <TableContainer>
+            <Table
+              sx={{
+                '& .MuiTableCell-root': {
+                  fontSize: { xs: '0.75rem', sm: '0.875rem' },  // 响应式字体
+                  px: { xs: 0.5, sm: 2 },  // 响应式内边距
+                }
+              }}
+            >
+              <TableHead>
+                <TableRow>
+                  <TableCell>套餐名称</TableCell>
+                  <TableCell>套餐类型</TableCell>
+                  <TableCell>绿电套餐</TableCell>
+                  <TableCell>定价模型</TableCell>
+                  <TableCell>状态</TableCell>
+                  <TableCell>合同数</TableCell>
+                  <TableCell>创建时间</TableCell>
+                  <TableCell align="right">操作</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
                 {packages.map(pkg => (
-                  <Paper key={getPackageId(pkg)} variant="outlined" sx={{ p: 2, mb: 2 }}>
-                    <Typography
-                      variant="subtitle1"
-                      gutterBottom
-                      sx={{
-                        cursor: 'pointer',
-                        color: 'primary.main',
-                        '&:hover': { textDecoration: 'underline' }
-                      }}
-                      onClick={() => handleViewDetails(getPackageId(pkg))}
-                    >
-                      {pkg.package_name}
-                    </Typography>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                      <Typography variant="body2" color="text.secondary">类型:</Typography>
-                      <Chip label={pkg.package_type === 'time_based' ? '分时段' : '不分时段'} size="small" />
-                    </Box>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                      <Typography variant="body2" color="text.secondary">绿电套餐:</Typography>
+                  <TableRow key={getPackageId(pkg)}>
+                    <TableCell>
+                      <Typography
+                        sx={{
+                          cursor: 'pointer',
+                          color: 'primary.main',
+                          '&:hover': { textDecoration: 'underline' }
+                        }}
+                        onClick={() => handleViewDetails(getPackageId(pkg))}
+                      >
+                        {pkg.package_name}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={pkg.package_type === 'time_based' ? '分时段' : '不分时段'}
+                        size="small"
+                      />
+                    </TableCell>
+                    <TableCell>
                       {pkg.is_green_power ? (
                         <Chip label="是" size="small" color="success" />
                       ) : (
                         <Chip label="否" size="small" variant="outlined" />
                       )}
-                    </Box>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                      <Typography variant="body2" color="text.secondary">定价模型:</Typography>
-                      <Chip label={getModelDisplayName(pkg.model_code)} size="small" color="primary" />
-                    </Box>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                      <Typography variant="body2" color="text.secondary">状态:</Typography>
-                      <Chip label={statusMap[pkg.status] || pkg.status} size="small" color={getStatusChipColor(pkg.status)} />
-                    </Box>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                      <Typography variant="body2" color="text.secondary">合同数:</Typography>
-                      <Typography variant="body2">{pkg.contract_count || 0}</Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                      <Typography variant="body2" color="text.secondary">创建时间:</Typography>
-                      <Typography variant="body2">{format(new Date(pkg.created_at), 'yyyy-MM-dd HH:mm')}</Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={getModelDisplayName(pkg.model_code)}
+                        size="small"
+                        color="primary"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={statusMap[pkg.status] || pkg.status}
+                        size="small"
+                        color={getStatusChipColor(pkg.status)}
+                      />
+                    </TableCell>
+                    <TableCell>{pkg.contract_count || 0}</TableCell>
+                    <TableCell>{format(new Date(pkg.created_at), 'yyyy-MM-dd HH:mm')}</TableCell>
+                    <TableCell align="right">
                       {canEdit(pkg.status) && (
                         <Tooltip title="编辑套餐">
                           <IconButton
@@ -811,284 +931,164 @@ const RetailPackagePage: React.FC = () => {
                           </IconButton>
                         </Tooltip>
                       )}
-                    </Box>
-                  </Paper>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </Box>
-            ) : (
-              <TableContainer>
-                <Table
-                  sx={{
-                      '& .MuiTableCell-root': {
-                          fontSize: { xs: '0.75rem', sm: '0.875rem' },  // 响应式字体
-                          px: { xs: 0.5, sm: 2 },  // 响应式内边距
-                      }
-                  }}
-                >
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>套餐名称</TableCell>
-                      <TableCell>套餐类型</TableCell>
-                      <TableCell>绿电套餐</TableCell>
-                      <TableCell>定价模型</TableCell>
-                      <TableCell>状态</TableCell>
-                      <TableCell>合同数</TableCell>
-                      <TableCell>创建时间</TableCell>
-                      <TableCell align="right">操作</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {packages.map(pkg => (
-                        <TableRow key={getPackageId(pkg)}>
-                          <TableCell>
-                            <Typography
-                              sx={{
-                                cursor: 'pointer',
-                                color: 'primary.main',
-                                '&:hover': { textDecoration: 'underline' }
-                              }}
-                              onClick={() => handleViewDetails(getPackageId(pkg))}
-                            >
-                              {pkg.package_name}
-                            </Typography>
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              label={pkg.package_type === 'time_based' ? '分时段' : '不分时段'}
-                              size="small"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            {pkg.is_green_power ? (
-                              <Chip label="是" size="small" color="success" />
-                            ) : (
-                              <Chip label="否" size="small" variant="outlined" />
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              label={getModelDisplayName(pkg.model_code)}
-                              size="small"
-                              color="primary"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              label={statusMap[pkg.status] || pkg.status}
-                              size="small"
-                              color={getStatusChipColor(pkg.status)}
-                            />
-                          </TableCell>
-                          <TableCell>{pkg.contract_count || 0}</TableCell>
-                          <TableCell>{format(new Date(pkg.created_at), 'yyyy-MM-dd HH:mm')}</TableCell>
-                          <TableCell align="right">
-                            {canEdit(pkg.status) && (
-                              <Tooltip title="编辑套餐">
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleEdit(getPackageId(pkg))}
-                                >
-                                  <EditIcon />
-                                </IconButton>
-                              </Tooltip>
-                            )}
-                            <Tooltip title="复制套餐">
-                              <IconButton size="small" onClick={() => handleCopy(getPackageId(pkg))}>
-                                <ContentCopyIcon />
-                              </IconButton>
-                            </Tooltip>
-                            {canActivate(pkg.status) && (
-                              <Tooltip title="激活套餐">
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleActivate(getPackageId(pkg))}
-                                  color="success"
-                                >
-                                  <CheckCircleIcon />
-                                </IconButton>
-                              </Tooltip>
-                            )}
-                            {canArchive(pkg.status) && (
-                              <Tooltip title="归档套餐">
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleArchive(getPackageId(pkg))}
-                                  color="warning"
-                                >
-                                  <ArchiveIcon />
-                                </IconButton>
-                              </Tooltip>
-                            )}
-                            {/* 新增：删除按钮（仅草稿可见） */}
-                            {pkg.status === 'draft' && (
-                              <Tooltip title="删除套餐">
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleDeleteClick(getPackageId(pkg))}
-                                  color="error"
-                                >
-                                  <DeleteIcon />
-                                </IconButton>
-                              </Tooltip>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
-            <TablePagination
-              component="div"
-              count={totalCount}
-              page={page}
-              onPageChange={handleChangePage}
-              rowsPerPage={rowsPerPage}
-              onRowsPerPageChange={handleChangeRowsPerPage}
-              rowsPerPageOptions={isMobile ? [10, 20] : [5, 10, 20]}
-              labelRowsPerPage={isMobile ? "行数:" : "每页行数:"}
-              labelDisplayedRows={({ from, to, count }) =>
-                isMobile ? `${from}-${to}/${count}` : `${from}-${to} 共 ${count} 条`
-              }
-              sx={{
-                '& .MuiTablePagination-toolbar': {
-                  paddingLeft: { xs: 1, sm: 2 },
-                  paddingRight: { xs: 1, sm: 2 },
-                },
-                '& .MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows': {
-                  fontSize: { xs: '0.75rem', sm: '0.875rem' },
-                },
-                '& .MuiTablePagination-input': {
-                  fontSize: { xs: '0.75rem', sm: '0.875rem' },
-                }
-              }}
-            />
-          </Paper>
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+        <TablePagination
+          component="div"
+          count={totalCount}
+          page={page}
+          onPageChange={handleChangePage}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={handleChangeRowsPerPage}
+          rowsPerPageOptions={isMobile ? [10, 20] : [5, 10, 20]}
+          labelRowsPerPage={isMobile ? "行数:" : "每页行数:"}
+          labelDisplayedRows={({ from, to, count }) =>
+            isMobile ? `${from}-${to}/${count}` : `${from}-${to} 共 ${count} 条`
+          }
+          sx={{
+            '& .MuiTablePagination-toolbar': {
+              paddingLeft: { xs: 1, sm: 2 },
+              paddingRight: { xs: 1, sm: 2 },
+            },
+            '& .MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows': {
+              fontSize: { xs: '0.75rem', sm: '0.875rem' },
+            },
+            '& .MuiTablePagination-input': {
+              fontSize: { xs: '0.75rem', sm: '0.875rem' },
+            }
+          }}
+        />
+      </Paper>
 
-          <PackageEditorDialog
-              open={isEditorOpen}
-              onClose={() => setEditorOpen(false)}
-              packageId={editPackageId}
-              mode={editorMode}
-              onSave={handleSave}
-          />
+      <PackageEditorDialog
+        open={isEditorOpen}
+        onClose={() => setEditorOpen(false)}
+        packageId={editPackageId}
+        mode={editorMode}
+        onSave={handleSave}
+      />
 
-          {/* 删除确认对话框 */}
-          <Dialog
-            open={deleteDialogOpen}
-            onClose={(event, reason) => {
-              if (reason && reason === "backdropClick") {
-                return;
-              }
-              handleDeleteCancel();
-            }}
-            disableEnforceFocus
-            aria-labelledby="delete-dialog-title"
-          >
-            <DialogTitle id="delete-dialog-title">确认删除</DialogTitle>
-            <DialogContent>
-              <DialogContentText>
-                确定要删除这个套餐吗？此操作不可撤销。
-              </DialogContentText>
-              {deleteError && (
-                <Alert severity="error" sx={{ mt: 2 }}>
-                  {deleteError}
-                </Alert>
-              )}
-            </DialogContent>
-            <DialogActions>
-              <Button onClick={handleDeleteCancel}>取消</Button>
-              <Button onClick={handleDeleteConfirm} color="error" variant="contained">
-                删除
-              </Button>
-            </DialogActions>
-          </Dialog>
-
-          {/* 归档确认对话框 */}
-          <Dialog
-            open={archiveDialogOpen}
-            onClose={(event, reason) => {
-              if (reason && reason === "backdropClick") {
-                return;
-              }
-              handleArchiveCancel();
-            }}
-            disableEnforceFocus
-            aria-labelledby="archive-dialog-title"
-          >
-            <DialogTitle id="archive-dialog-title">确认归档</DialogTitle>
-            <DialogContent>
-              <DialogContentText>
-                归档后的套餐将不能再编辑或激活，确定要归档吗？
-              </DialogContentText>
-            </DialogContent>
-            <DialogActions>
-              <Button onClick={handleArchiveCancel}>取消</Button>
-              <Button onClick={handleArchiveConfirm} color="warning" variant="contained">
-                归档
-              </Button>
-            </DialogActions>
-          </Dialog>
-
-          {/* 激活确认对话框 */}
-          <Dialog
-            open={activateDialogOpen}
-            onClose={(event, reason) => {
-              if (reason && reason === "backdropClick") {
-                return;
-              }
-              handleActivateCancel();
-            }}
-            disableEnforceFocus
-            aria-labelledby="activate-dialog-title"
-          >
-            <DialogTitle id="activate-dialog-title">确认激活</DialogTitle>
-            <DialogContent>
-              <DialogContentText>
-                激活后的套餐将对用户可见并可供选择，确定要激活吗？
-              </DialogContentText>
-            </DialogContent>
-            <DialogActions>
-              <Button onClick={handleActivateCancel}>取消</Button>
-              <Button onClick={handleActivateConfirm} color="success" variant="contained">
-                激活
-              </Button>
-            </DialogActions>
-          </Dialog>
-
-          {/* 详情对话框 */}
-          <PackageDetailsDialog
-            open={detailsDialogOpen}
-            packageId={detailsPackageId}
-            onClose={() => {
-              setDetailsDialogOpen(false);
-              setDetailsPackageId(null);
-            }}
-            onEdit={(id) => {
-              setDetailsDialogOpen(false);
-              handleEdit(id);
-            }}
-            onCopy={(id) => {
-              setDetailsDialogOpen(false);
-              handleCopy(id);
-            }}
-          />
-
-          {/* 全局 Snackbar 反馈 */}
-          <Snackbar
-            open={snackbar.open}
-            autoHideDuration={3000}
-            onClose={handleSnackbarClose}
-            anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-          >
-            <Alert
-              onClose={handleSnackbarClose}
-              severity={snackbar.severity}
-              sx={{ width: '100%' }}
-            >
-              {snackbar.message}
+      {/* 删除确认对话框 */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={(event, reason) => {
+          if (reason && reason === "backdropClick") {
+            return;
+          }
+          handleDeleteCancel();
+        }}
+        disableEnforceFocus
+        aria-labelledby="delete-dialog-title"
+      >
+        <DialogTitle id="delete-dialog-title">确认删除</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            确定要删除这个套餐吗？此操作不可撤销。
+          </DialogContentText>
+          {deleteError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {deleteError}
             </Alert>
-          </Snackbar>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleDeleteCancel}>取消</Button>
+          <Button onClick={handleDeleteConfirm} color="error" variant="contained">
+            删除
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 归档确认对话框 */}
+      <Dialog
+        open={archiveDialogOpen}
+        onClose={(event, reason) => {
+          if (reason && reason === "backdropClick") {
+            return;
+          }
+          handleArchiveCancel();
+        }}
+        disableEnforceFocus
+        aria-labelledby="archive-dialog-title"
+      >
+        <DialogTitle id="archive-dialog-title">确认归档</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            归档后的套餐将不能再编辑或激活，确定要归档吗？
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleArchiveCancel}>取消</Button>
+          <Button onClick={handleArchiveConfirm} color="warning" variant="contained">
+            归档
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 激活确认对话框 */}
+      <Dialog
+        open={activateDialogOpen}
+        onClose={(event, reason) => {
+          if (reason && reason === "backdropClick") {
+            return;
+          }
+          handleActivateCancel();
+        }}
+        disableEnforceFocus
+        aria-labelledby="activate-dialog-title"
+      >
+        <DialogTitle id="activate-dialog-title">确认激活</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            激活后的套餐将对用户可见并可供选择，确定要激活吗？
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleActivateCancel}>取消</Button>
+          <Button onClick={handleActivateConfirm} color="success" variant="contained">
+            激活
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 详情对话框 */}
+      <PackageDetailsDialog
+        open={detailsDialogOpen}
+        packageId={detailsPackageId}
+        onClose={() => {
+          setDetailsDialogOpen(false);
+          setDetailsPackageId(null);
+        }}
+        onEdit={(id) => {
+          setDetailsDialogOpen(false);
+          handleEdit(id);
+        }}
+        onCopy={(id) => {
+          setDetailsDialogOpen(false);
+          handleCopy(id);
+        }}
+      />
+
+      {/* 全局 Snackbar 反馈 */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={3000}
+        onClose={handleSnackbarClose}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={handleSnackbarClose}
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

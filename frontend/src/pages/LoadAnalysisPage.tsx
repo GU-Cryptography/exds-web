@@ -91,7 +91,7 @@ export const LoadAnalysisPage: React.FC = () => {
                     variant="subtitle1"
                     sx={{ mb: 2, fontWeight: 'bold', color: 'text.primary' }}
                 >
-                    负荷预测 / 整体负荷分析
+                    负荷分析 / 总体负荷分析
                 </Typography>
             )}
 
