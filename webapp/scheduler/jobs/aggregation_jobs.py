@@ -145,7 +145,7 @@ async def event_driven_load_aggregation_job():
         await TaskLogger.log_task_end(
             task_id=task_id,
             status="SUCCESS",
-            summary=f"成功聚合 {result['customers_processed']} 个客户",
+            summary=f"成功聚合 {result['customers_processed']} 个客户, {result['dates_aggregated']} 个日期, {result['records_aggregated']} 条记录",
             details={
                 **result,
                 "rpa_task_id": str(rpa_record["_id"])
@@ -184,64 +184,104 @@ async def event_driven_load_aggregation_job():
 
 # ========== 共享业务逻辑 ==========
 
-async def _aggregate_all_customers(date: str) -> Dict[str, Any]:
+async def _aggregate_all_customers(trigger_date: str) -> Dict[str, Any]:
     """
-    聚合所有客户的数据
+    增量聚合所有客户的数据
+    
+    逻辑:
+    1. 查找 raw_mp_data 和 raw_meter_data 中所有存在的日期
+    2. 对每个客户,找出 unified_load_curve 中缺失的日期
+    3. 调用 LoadAggregationService.upsert_unified_load_curve 进行聚合
     
     Args:
-        date: 日期 (YYYY-MM-DD)
+        trigger_date: 触发日期 (用于日志,不影响聚合逻辑)
     
     Returns:
         {
-            "customers_processed": int,
-            "records_aggregated": int
+            "customers_processed": int,  # 成功聚合的客户数
+            "dates_aggregated": int,     # 聚合的日期数
+            "records_aggregated": int    # 聚合的记录数
         }
     """
-    customers = list(DATABASE["customer_archives"].find({}, {"_id": 1}))
+    # 1. 获取所有客户
+    customers = list(DATABASE["customer_archives"].find({}, {"_id": 1, "user_name": 1}))
+    
+    if not customers:
+        logger.warning("没有找到任何客户")
+        return {
+            "customers_processed": 0,
+            "dates_aggregated": 0,
+            "records_aggregated": 0
+        }
+    
+    # 2. 查找 raw_mp_data 和 raw_meter_data 中所有存在的日期
+    mp_dates = DATABASE["raw_mp_data"].distinct("date")
+    meter_dates = DATABASE["raw_meter_data"].distinct("date")
+    all_dates = sorted(set(mp_dates + meter_dates))
+    
+    if not all_dates:
+        logger.info("raw_mp_data 和 raw_meter_data 中没有数据")
+        return {
+            "customers_processed": 0,
+            "dates_aggregated": 0,
+            "records_aggregated": 0
+        }
+    
+    logger.info(f"发现 {len(all_dates)} 个日期需要检查: {all_dates[0]} ~ {all_dates[-1]}")
     
     customers_processed = 0
+    dates_aggregated_set = set()
     records_aggregated = 0
     
+    # 3. 对每个客户进行增量聚合
     for customer in customers:
         customer_id = str(customer["_id"])
+        customer_name = customer.get("user_name", "未知")
         
         try:
-            # 调用聚合服务
-            result = LoadAggregationService.aggregate_mp_load(customer_id, date)
-            
-            if result:
-                # 写入 unified_load_curve
-                DATABASE["unified_load_curve"].update_one(
-                    {
-                        "customer_id": customer_id,
-                        "date": date,
-                        "source": "mp"
-                    },
-                    {
-                        "$set": {
-                            "values": result["values"],
-                            "total": result["total"],
-                            "tou_usage": result.get("tou_usage", {}),
-                            "mp_count": result.get("mp_count", 0),
-                            "missing_mps": result.get("missing_mps", []),
-                            "updated_at": datetime.utcnow()
-                        },
-                        "$setOnInsert": {
-                            "created_at": datetime.utcnow()
-                        }
-                    },
-                    upsert=True
+            # 查找该客户在 unified_load_curve 中已有的日期
+            existing_dates = set(
+                DATABASE["unified_load_curve"].distinct(
+                    "date",
+                    {"customer_id": customer_id}
                 )
-                
+            )
+            
+            # 找出缺失的日期
+            missing_dates = [d for d in all_dates if d not in existing_dates]
+            
+            if not missing_dates:
+                continue  # 该客户所有日期都已聚合
+            
+            # 对每个缺失日期进行聚合
+            customer_success = False
+            for date in missing_dates:
+                try:
+                    success = LoadAggregationService.upsert_unified_load_curve(
+                        customer_id=customer_id,
+                        date=date,
+                        customer_name=customer_name
+                    )
+                    
+                    if success:
+                        records_aggregated += 1
+                        dates_aggregated_set.add(date)
+                        customer_success = True
+                        
+                except Exception as e:
+                    logger.warning(f"聚合失败 customer={customer_id} date={date}: {str(e)}")
+                    continue
+            
+            if customer_success:
                 customers_processed += 1
-                records_aggregated += 1
                 
         except Exception as e:
-            logger.warning(f"聚合客户 {customer_id} 失败: {str(e)}")
+            logger.warning(f"处理客户 {customer_id} 失败: {str(e)}")
             continue
     
     return {
         "customers_processed": customers_processed,
+        "dates_aggregated": len(dates_aggregated_set),
         "records_aggregated": records_aggregated
     }
 

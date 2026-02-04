@@ -51,14 +51,14 @@ class TaskLogger:
             "task_name": task_name,
             "trigger_type": trigger_type,
             "status": "RUNNING",
-            "start_time": datetime.utcnow(),
+            "start_time": datetime.now(),
             "end_time": None,
             "duration": None,
             "summary": None,
             "details": None,
             "error": None,
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
+            "created_at": datetime.now(),
+            "updated_at": datetime.now()
         }
         
         if trigger_source:
@@ -97,7 +97,7 @@ class TaskLogger:
         
         # 计算耗时
         start_time = task_record["start_time"]
-        end_time = datetime.utcnow()
+        end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
         
         # 更新数据库
@@ -105,7 +105,7 @@ class TaskLogger:
             "status": status,
             "end_time": end_time,
             "duration": duration,
-            "updated_at": datetime.utcnow()
+            "updated_at": datetime.now()
         }
         
         if summary:
