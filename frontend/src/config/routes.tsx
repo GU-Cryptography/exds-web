@@ -19,6 +19,7 @@ import { CustomerLoadAnalysisPage } from '../pages/CustomerLoadAnalysisPage';
 import { CustomerLoadOverviewPage } from '../pages/CustomerLoadOverviewPage';
 import LoadCharacteristicsOverviewPage from '../pages/LoadCharacteristicsOverviewPage';
 import LoadCharacteristicsDetailPage from '../pages/LoadCharacteristicsDetailPage';
+import { SystemLogsPage } from '../pages/SystemLogsPage';
 
 // 路由配置接口
 export interface RouteConfig {
@@ -84,6 +85,7 @@ export const routeConfigs: RouteConfig[] = [
     // 系统管理
     { path: '/system-settings/user-permissions', title: '用户与权限', component: PlaceholderPage },
     { path: '/system-settings/data-access', title: '数据下载监控', component: RpaMonitorPage },
+    { path: '/system-settings/system-logs', title: '告警与日志', component: SystemLogsPage },
     { path: '/system-settings/model-parameters', title: '预测模型参数', component: PlaceholderPage },
 ];
 

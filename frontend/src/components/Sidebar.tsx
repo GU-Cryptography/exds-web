@@ -42,7 +42,8 @@ import {
     ModelTrainingOutlined,
     SourceOutlined,
     VpnKeyOutlined,
-    BarChartOutlined
+    BarChartOutlined,
+    NotificationsActiveOutlined
 } from '@mui/icons-material';
 import { useTabContext } from '../contexts/TabContext';
 import { getRouteConfig } from '../config/routes';
@@ -157,6 +158,7 @@ const menuItems: MenuItem[] = [
         subItems: [
             { text: '用户与权限', path: '/system-settings/user-permissions', icon: <VpnKeyOutlined /> },
             { text: '数据下载监控', path: '/system-settings/data-access', icon: <SourceOutlined /> },
+            { text: '告警与日志', path: '/system-settings/system-logs', icon: <NotificationsActiveOutlined /> },
             { text: '预测模型参数', path: '/system-settings/model-parameters', icon: <ModelTrainingOutlined /> },
         ],
     },
