@@ -12,6 +12,9 @@ from apscheduler.executors.asyncio import AsyncIOExecutor
 from webapp.scheduler.jobs.aggregation_jobs import (
     event_driven_load_aggregation_job
 )
+from webapp.scheduler.jobs.accuracy_jobs import (
+    event_driven_accuracy_job
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,15 @@ def setup_scheduler(app):
         'interval',
         minutes=5,
         id='web_event_load_aggregation',
+        replace_existing=True
+    )
+
+    # 预测准确度计算 (每10分钟检查日程出清数据下载状态)
+    scheduler.add_job(
+        event_driven_accuracy_job,
+        'interval',
+        minutes=10,
+        id='web_event_forecast_accuracy',
         replace_existing=True
     )
     

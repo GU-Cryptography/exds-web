@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any
 from bson import ObjectId
 
-from webapp.tools.mongo import DATABASE
+from webapp.tools.mongo import DATABASE, get_config
 from webapp.scheduler.logger import TaskLogger
 from webapp.services.load_aggregation_service import LoadAggregationService
 
@@ -101,7 +101,23 @@ async def event_driven_load_aggregation_job():
     执行策略: 每天只执行一次 (使用内存缓存优化)
     """
     try:
-        today = datetime.now().strftime("%Y-%m-%d")
+        now = datetime.now()
+        # 优化：RPA 任务通常在凌晨 6 点后完成，此前无需频繁查询数据库
+        # 配置化：从 [SCHEDULE].run_times 读取第一个时间点作为开始时间
+        # 示例 run_times = 06:00,09:10,12:00,21:00 -> 取 06:00 -> 6点
+        run_times_str = get_config("SCHEDULE", "run_times", "06:00")
+        try:
+            first_time = run_times_str.split(',')[0].strip()
+            start_hour = int(first_time.split(':')[0])
+        except Exception as e:
+            logger.warning(f"解析 [SCHEDULE].run_times 失败: {run_times_str}, 使用默认值 6. Error: {e}")
+            start_hour = 6
+        
+        if now.hour < start_hour:
+            # logger.debug(f"当前时间早于 {start_hour}:00, 跳过聚合任务")
+            return
+
+        today = now.strftime("%Y-%m-%d")
         
         # 1. 检查今天是否已执行过 (优先查缓存)
         if _is_executed_today("load_aggregation", today):

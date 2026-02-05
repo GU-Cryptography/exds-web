@@ -187,3 +187,29 @@ def get_tou_summary(version_date: datetime, collection=None) -> Dict[str, Any]:
     summary["coefficients"] = filtered_coefficients
             
     return summary
+
+def get_period_indices_by_date(date: datetime, collection=None) -> Dict[str, List[int]]:
+    """
+    获取指定日期的分时时段索引列表 (用于准确度计算)
+    
+    Args:
+        date: 目标日期
+        collection: MongoDB集合 (可选)
+        
+    Returns:
+        Dict[str, List[int]]: j键为时段名称(如"高峰"), 值为0-95的索引列表
+    """
+    # 获取时间点到时段的映射 (00:00 -> "平段")
+    time_map = get_tou_rule_by_date(date, collection)
+    indices_map = {}
+    
+    # 按时间顺序遍历 (确保索引 0 对应 00:00)
+    sorted_times = sorted(time_map.keys())
+    
+    for idx, time_str in enumerate(sorted_times):
+        period = time_map[time_str]
+        if period not in indices_map:
+            indices_map[period] = []
+        indices_map[period].append(idx)
+        
+    return indices_map
