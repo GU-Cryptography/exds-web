@@ -214,20 +214,7 @@ async def _aggregate_all_customers(trigger_date: str) -> Dict[str, Any]:
             "records_aggregated": 0
         }
     
-    # 2. 查找 raw_mp_data 和 raw_meter_data 中所有存在的日期
-    mp_dates = DATABASE["raw_mp_data"].distinct("date")
-    meter_dates = DATABASE["raw_meter_data"].distinct("date")
-    all_dates = sorted(set(mp_dates + meter_dates))
-    
-    if not all_dates:
-        logger.info("raw_mp_data 和 raw_meter_data 中没有数据")
-        return {
-            "customers_processed": 0,
-            "dates_aggregated": 0,
-            "records_aggregated": 0
-        }
-    
-    logger.info(f"发现 {len(all_dates)} 个日期需要检查: {all_dates[0]} ~ {all_dates[-1]}")
+    logger.info(f"开始执行增量聚合...")
     
     customers_processed = 0
     dates_aggregated_set = set()
@@ -239,16 +226,9 @@ async def _aggregate_all_customers(trigger_date: str) -> Dict[str, Any]:
         customer_name = customer.get("user_name", "未知")
         
         try:
-            # 查找该客户在 unified_load_curve 中已有的日期
-            existing_dates = set(
-                DATABASE["unified_load_curve"].distinct(
-                    "date",
-                    {"customer_id": customer_id}
-                )
-            )
-            
-            # 找出缺失的日期
-            missing_dates = [d for d in all_dates if d not in existing_dates]
+            # 查找该客户待处理的日期 (包含缺失、不完整、过期)
+            pending_tasks = LoadAggregationService.get_pending_tasks([customer_id])
+            missing_dates = pending_tasks.get(customer_id, [])
             
             if not missing_dates:
                 continue  # 该客户所有日期都已聚合

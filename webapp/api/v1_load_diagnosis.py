@@ -658,43 +658,29 @@ async def trigger_reaggregate(
             }
         
         # 收集所有需要的 mp_ids 和 meter_ids
-        all_mp_ids = [mp for info in customer_info.values() for mp in info["mp_ids"]]
-        all_meter_ids = [m for info in customer_info.values() for m in info["meter_ids"]]
+        # 仅在全量模式下需要手动查询原始数据日期 (增量模式由 get_pending_tasks 内部处理)
+        raw_mp_dates = {}
+        raw_meter_dates = {}
+        aggregated_status = {}
         
-        # 查询原始数据的日期
-        raw_mp_dates = {}  # mp_id -> set of dates
-        if all_mp_ids:
-            for doc in RAW_MP_DATA.find({"mp_id": {"$in": all_mp_ids}}, {"mp_id": 1, "date": 1}):
-                mp_id = doc.get("mp_id")
-                date = doc.get("date")
-                if mp_id and date:
-                    raw_mp_dates.setdefault(mp_id, set()).add(date)
-        
-        raw_meter_dates = {}  # meter_id -> set of dates
-        if all_meter_ids:
-            for doc in RAW_METER_DATA.find({"meter_id": {"$in": all_meter_ids}}, {"meter_id": 1, "date": 1}):
-                meter_id = doc.get("meter_id")
-                date = doc.get("date")
-                if meter_id and date:
-                    raw_meter_dates.setdefault(meter_id, set()).add(date)
-        
-        # 查询已聚合的详细状态 (date -> {mp: bool, meter: bool})
-        aggregated_status = {}  # customer_id -> {date: {mp: bool, meter: bool}}
-        if mode != "full":
-            for doc in UNIFIED_LOAD_CURVE.find(
-                {"customer_id": {"$in": list(customer_info.keys())}},
-                {"customer_id": 1, "date": 1, "mp_load": 1, "meter_load": 1}
-            ):
-                cid = doc.get("customer_id")
-                date = doc.get("date")
-                if cid and date:
-                    if cid not in aggregated_status:
-                        aggregated_status[cid] = {}
-                    
-                    has_mp = bool(doc.get("mp_load") and doc.get("mp_load").get("mp_count", 0) > 0)
-                    has_meter = bool(doc.get("meter_load") and doc.get("meter_load").get("meter_count", 0) > 0)
-                    
-                    aggregated_status[cid][date] = {"mp": has_mp, "meter": has_meter}
+        if mode == "full":
+            all_mp_ids = [mp for info in customer_info.values() for mp in info["mp_ids"]]
+            all_meter_ids = [m for info in customer_info.values() for m in info["meter_ids"]]
+            
+            # 查询原始数据的日期
+            if all_mp_ids:
+                for doc in RAW_MP_DATA.find({"mp_id": {"$in": all_mp_ids}}, {"mp_id": 1, "date": 1}):
+                    mp_id = doc.get("mp_id")
+                    date = doc.get("date")
+                    if mp_id and date:
+                        raw_mp_dates.setdefault(mp_id, set()).add(date)
+            
+            if all_meter_ids:
+                for doc in RAW_METER_DATA.find({"meter_id": {"$in": all_meter_ids}}, {"meter_id": 1, "date": 1}):
+                    meter_id = doc.get("meter_id")
+                    date = doc.get("date")
+                    if meter_id and date:
+                        raw_meter_dates.setdefault(meter_id, set()).add(date)
         
         # 确定每个客户需要处理的日期
         customer_pending_dates = {}  # customer_id -> set of pending dates
@@ -737,43 +723,16 @@ async def trigger_reaggregate(
                     customer_pending_dates[cid] = sorted(all_dates)
 
         else:
-            # 增量模式 (incremental) - 原有逻辑
-            for cid, info in customer_info.items():
-                # ... (原有增量逻辑代码保持不变，但为了减少代码替换量，我们可以重用之前的逻辑并稍作修改，但这里直接重写循环可能更清晰)
-                # 由于这是 replace 内容，我需要保留原有的增量逻辑。
-                # 复用上面已经查询到的 raw dates
-                current_raw_mp_dates = set()
-                for mp_id in info["mp_ids"]:
-                    current_raw_mp_dates.update(raw_mp_dates.get(mp_id, set()))
-                    
-                current_raw_meter_dates = set()
-                for meter_id in info["meter_ids"]:
-                    current_raw_meter_dates.update(raw_meter_dates.get(meter_id, set()))
-                
-                all_raw_dates = current_raw_mp_dates | current_raw_meter_dates
-                cust_agg_status = aggregated_status.get(cid, {})
-                
-                pending_dates = set()
-                
-                for date in all_raw_dates:
-                    if date not in cust_agg_status:
-                        pending_dates.add(date)
-                    else:
-                        status = cust_agg_status[date]
-                        if date in current_raw_mp_dates and not status["mp"]:
-                            pending_dates.add(date)
-                            continue
-                        if date in current_raw_meter_dates and not status["meter"]:
-                            pending_dates.add(date)
-                            continue
-                
-                if start_date:
-                    pending_dates = {d for d in pending_dates if d >= start_date}
-                if end_date:
-                    pending_dates = {d for d in pending_dates if d <= end_date}
-                
-                if pending_dates:
-                    customer_pending_dates[cid] = sorted(pending_dates)
+            # 增量模式 (incremental) - 使用新的服务方法，支持新鲜度检查
+            try:
+                customer_pending_dates = LoadAggregationService.get_pending_tasks(
+                    customer_ids=customer_ids,
+                    start_date=start_date,
+                    end_date=end_date
+                )
+            except Exception as e:
+                logger.error(f"获取增量聚合任务失败: {e}")
+                customer_pending_dates = {}
         
         # 统计要处理的总数
         total_pending = sum(len(dates) for dates in customer_pending_dates.values())

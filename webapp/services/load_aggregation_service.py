@@ -831,6 +831,148 @@ class LoadAggregationService:
         return refined
 
     @staticmethod
+    def get_pending_tasks(
+        customer_ids: List[str], 
+        start_date: Optional[str] = None, 
+        end_date: Optional[str] = None
+    ) -> Dict[str, List[str]]:
+        """
+        获取待聚合的任务列表 (Customer -> Dates)
+        检查逻辑:
+        1. 缺失 (Missing): 有原始数据但无聚合记录
+        2. 不完整 (Incomplete): 有聚合记录但内容为空 (及 mp/meter 均为 None 或 count=0)
+        3. 过期 (Stale): 原始数据比聚合记录更新 (Freshness Check)
+        
+        Args:
+            customer_ids: 客户ID列表
+            start_date: 开始日期 (YYYY-MM-DD)
+            end_date: 结束日期 (YYYY-MM-DD)
+            
+        Returns:
+            Dict[customer_id, List[date_str]]
+        """
+        pending_results = {}
+        
+        # 1. 批量获取客户档案
+        cids_obj = []
+        for cid in customer_ids:
+            try:
+                if len(cid) == 24: cids_obj.append(ObjectId(cid))
+                else: cids_obj.append(cid)
+            except: cids_obj.append(cid)
+            
+        customers = list(CUSTOMER_ARCHIVES.find({"_id": {"$in": cids_obj}}))
+        customer_map = {str(c["_id"]): c for c in customers}
+
+        for cid in customer_ids:
+            customer = customer_map.get(cid)
+            if not customer: continue
+            
+            # 2. 提取计量点和电表ID
+            mp_ids = []
+            meter_ids = []
+            for account in customer.get("accounts", []):
+                for mp in account.get("metering_points", []):
+                    if mp.get("mp_no"): mp_ids.append(mp["mp_no"])
+                for meter in account.get("meters", []):
+                    if meter.get("meter_id"): meter_ids.append(meter["meter_id"])
+            
+            # 3. 获取所有原始数据的日期和最新生成时间
+            raw_dates = {} # date -> max_timestamp (naive UTC)
+            
+            def update_raw_dates(collection, id_field, ids):
+                if not ids: return
+                pipeline = [
+                    {"$match": {id_field: {"$in": ids}}},
+                    {"$group": {
+                        "_id": "$date",
+                        "max_ts": {"$max": "$_id"}
+                    }}
+                ]
+                
+                match_stage = pipeline[0]["$match"]
+                if start_date or end_date:
+                    match_stage["date"] = {}
+                    if start_date: match_stage["date"]["$gte"] = start_date
+                    if end_date: match_stage["date"]["$lte"] = end_date
+                
+                try:
+                    for doc in collection.aggregate(pipeline):
+                        d = doc["_id"]
+                        if not d: continue
+                        # _id.generation_time is timezone aware (UTC)
+                        # We convert to naive UTC to compare with updated_at (usually naive)
+                        ts = doc["max_ts"].generation_time.replace(tzinfo=None)
+                        
+                        if d not in raw_dates or ts > raw_dates[d]:
+                            raw_dates[d] = ts
+                except Exception as e:
+                    logger.warning(f"Error querying raw dates for {cid}: {e}")
+
+            update_raw_dates(RAW_MP_DATA, "mp_id", mp_ids)
+            update_raw_dates(RAW_METER_DATA, "meter_id", meter_ids)
+            
+            if not raw_dates:
+                continue
+                
+            # 4. 获取现有的聚合记录
+            existing_query = {"customer_id": cid}
+            if start_date or end_date:
+                existing_query["date"] = {}
+                if start_date: existing_query["date"]["$gte"] = start_date
+                if end_date: existing_query["date"]["$lte"] = end_date
+                
+            existing_docs = list(UNIFIED_LOAD_CURVE.find(
+                existing_query, 
+                {"date": 1, "updated_at": 1, "mp_load": 1, "meter_load": 1}
+            ))
+            
+            existing_map = {doc["date"]: doc for doc in existing_docs}
+                
+            # 5. 判定待处理日期
+            pending = []
+            for date, raw_ts in raw_dates.items():
+                if date not in existing_map:
+                    pending.append(date) # Case 1: Missing
+                    continue
+                
+                doc = existing_map[date]
+                
+                # Case 2: Incomplete (Check if effective data exists)
+                has_mp_content = bool(doc.get("mp_load") and doc["mp_load"].get("mp_count", 0) > 0)
+                has_meter_content = bool(doc.get("meter_load") and doc["meter_load"].get("meter_count", 0) > 0)
+                
+                if not has_mp_content and not has_meter_content:
+                    pending.append(date)
+                    continue
+                    
+                # Case 3: Freshness
+                updated_at = doc.get("updated_at")
+                if not updated_at:
+                    pending.append(date) # No timestamp -> outdated
+                    continue
+                
+                # Ensure updated_at is comparable
+                if isinstance(updated_at, str):
+                    try:
+                        updated_at = datetime.strptime(updated_at, "%Y-%m-%d %H:%M:%S")
+                    except:
+                        pass # keep as is or fail comparison
+                
+                try:
+                    # Compare: if raw data is newer than last update
+                    if raw_ts > updated_at:
+                        pending.append(date) 
+                except Exception:
+                    # If comparison fails (e.g. types), assume pending
+                    pending.append(date)
+                    
+            if pending:
+                pending_results[cid] = sorted(pending)
+                
+        return pending_results
+
+    @staticmethod
     def generate_unified_load_curve(
         customer_id: str, 
         date: str, 

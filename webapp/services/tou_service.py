@@ -1,6 +1,6 @@
 
 from datetime import datetime, timedelta
-from typing import Dict, Any
+from typing import Dict, Any, List
 from webapp.tools.mongo import DATABASE
 
 # 默认集合
@@ -84,7 +84,7 @@ def get_tou_rule_by_date(date: datetime, collection=None) -> Dict[str, str]:
         
     return time_to_period_map
 
-def get_tou_versions(collection=None) -> list[str]:
+def get_tou_versions(collection=None) -> List[str]:
     """
     获取所有可用的分时电价版本日期
     """
