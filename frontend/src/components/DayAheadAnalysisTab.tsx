@@ -99,19 +99,24 @@ export const DayAheadAnalysisTab: React.FC<DayAheadAnalysisTabProps> = ({ select
                     correlationValue = null;
                 }
 
-                setChartData(processedData);
-                setCorrelation(correlationValue);
                 // 更新缓存
                 setCachedDate(formattedDate);
                 setCachedData({ data: processedData, correlation: correlationValue });
+
+                setChartData(processedData);
+                setCorrelation(correlationValue);
             })
             .catch(error => {
-                console.error('Error fetching day-ahead analysis data:', error);
+                console.error("Failed to fetch data:", error);
                 setChartData([]);
                 setCorrelation(null);
             })
-            .finally(() => setLoading(false));
+            .finally(() => {
+                setLoading(false);
+            });
     };
+
+
 
     useEffect(() => {
         fetchData(selectedDate);

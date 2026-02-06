@@ -5,6 +5,8 @@
 监听日前出清数据下载任务 (day_ahead)，一旦成功，触发对相关日期的准确度计算。
 """
 import logging
+import asyncio
+import functools
 from datetime import datetime, timedelta
 from typing import Dict, Any
 import uuid
@@ -19,11 +21,30 @@ logger = logging.getLogger(__name__)
 _daily_execution_cache: Dict[str, Dict[str, str]] = {}
 
 def _is_executed_today(task_key: str, date: str) -> bool:
-    """检查今天是否已执行过"""
+    """检查今天是否已执行过 (无论成功失败，避免重复触发)"""
     if task_key in _daily_execution_cache:
         cached = _daily_execution_cache[task_key]
-        if cached.get("date") == date and cached.get("status") == "SUCCESS":
+        if cached.get("date") == date:
+             # 如果内存中有记录(无论成功失败)，都视为已执行，避免短时间内重复尝试
+             # 如果需要重试，需重启服务或手动清理缓存
             return True
+            
+    # 2. 缓存未命中,查询数据库 (防止服务重启后重复执行)
+    # 查询今天是否有执行记录（无论成功失败）
+    db_record = DATABASE["task_execution_logs"].find_one({
+        "task_type": task_key,
+        "trigger_type": "event",
+        "start_time": {
+            "$gte": datetime.strptime(date, "%Y-%m-%d"),
+            "$lt": datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)
+        }
+    })
+    
+    if db_record:
+        # 查到记录,写入缓存并返回 True
+        _mark_executed(task_key, date, db_record.get("status", "UNKNOWN"))
+        return True
+        
     return False
 
 def _mark_executed(task_key: str, date: str, status: str):
@@ -38,6 +59,7 @@ async def event_driven_accuracy_job():
     1. 每天执行一次
     2. 依赖 task_execution_logs 中 task_type="day_ahead" 且 status="SUCCESS"
     """
+    task_key = "forecast_accuracy_daily"
     today = datetime.now().strftime("%Y-%m-%d")
     now = datetime.now()
     
@@ -83,9 +105,10 @@ async def event_driven_accuracy_job():
         )
         
         # 4. 执行计算
-        # 假设日前数据下载的是明天的价格 (D+1)，但也可能是 T+1 的数据
-        # 策略：计算 明天 (T+1) 的准确度，因为日前预测是针对 T+1 的
-        target_date = datetime.now() + timedelta(days=1)
+        # 策略：尝试计算 昨天(T-1) 和 今天(T) 的准确度
+        # 确保能覆盖 T日的实时修正后对 T-1 的回顾，以及 T日的最新预测
+        today_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        target_dates = [today_date - timedelta(days=1), today_date]
         
         # 定义需要评估的配置列表
         evaluations = [
@@ -99,41 +122,56 @@ async def event_driven_accuracy_job():
             # 可扩展其他类型
         ]
         
+        
         results_summary = []
-        for config in evaluations:
-            try:
-                evaluated_ids = evaluate_forecast_accuracy(
-                    target_date=target_date,
-                    forecast_type=config["forecast_type"],
-                    actual_collection=config["actual_collection"],
-                    actual_field=config["actual_field"],
-                    forecast_collection=config["forecast_collection"],
-                    forecast_field=config["forecast_field"],
-                    points_per_day=96, # 假设是96点
-                    force_update=True # 强制更新以确保使用最新数据
-                )
-                if evaluated_ids:
-                    results_summary.append(f"{config['forecast_type']}: {len(evaluated_ids)} 个批次")
-                else:
-                    results_summary.append(f"{config['forecast_type']}: 无数据")
-            except Exception as e:
-                logger.error(f"计算 {config['forecast_type']} 准确度失败: {e}")
-                results_summary.append(f"{config['forecast_type']}: 失败 ({str(e)})")
+        has_data = False
+        loop = asyncio.get_running_loop()
+        
+        for target_date in target_dates:
+            date_str = target_date.strftime("%Y-%m-%d")
+            for config in evaluations:
+                try:
+                    # Run blocking calculation in thread pool to avoid blocking scheduler
+                    evaluated_ids = await loop.run_in_executor(
+                        None,
+                        functools.partial(
+                            evaluate_forecast_accuracy,
+                            target_date=target_date,
+                            forecast_type=config["forecast_type"],
+                            actual_collection=config["actual_collection"],
+                            actual_field=config["actual_field"],
+                            forecast_collection=config["forecast_collection"],
+                            forecast_field=config["forecast_field"],
+                            points_per_day=96,
+                            force_update=True
+                        )
+                    )
+                    
+                    if evaluated_ids:
+                        results_summary.append(f"[{date_str}] {config['forecast_type']}: {len(evaluated_ids)} 条")
+                        has_data = True
+                    else:
+                        logger.debug(f"[{date_str}] {config['forecast_type']}: 无数据")
+                except Exception as e:
+                    logger.error(f"计算 {config['forecast_type']} ({date_str}) 准确度失败: {e}")
+                    results_summary.append(f"[{date_str}] {config['forecast_type']}: 失败")
+
+        final_summary = ", ".join(results_summary) if results_summary else "无有效准确度数据生成"
+        status = "SUCCESS" if has_data else "SKIPPED" # 如果都没有数据，标记为 SKIPPED? 或者 SUCCESS 但提示无数据
 
         # 5. 记录结束
         await TaskLogger.log_task_end(
             task_id=task_id,
-            status="SUCCESS",
-            summary=f"准确度计算完成。目标日期: {target_date.date()}。结果: {', '.join(results_summary)}",
+            status="SUCCESS", # 任务本身在逻辑上是成功的（完成了检查流程）
+            summary=f"准确度计算完成。结果: {final_summary}",
             details={
                 "dependency_task_id": dependency.get("task_id"),
-                "target_date": target_date.strftime("%Y-%m-%d"),
+                "target_dates": [d.strftime("%Y-%m-%d") for d in target_dates],
                 "results": results_summary
             }
         )
         
-        _mark_executed(task_key, today, "SUCCESS")
-        logger.info(f"✅ 准确度计算任务完成: {task_id}")
+        _mark_executed(task_key, today, "SUCCESS") # 标记为已执行，避免今天再次重试
 
     except Exception as e:
         logger.error(f"❌ 准确度计算任务异常: {e}")
@@ -161,7 +199,7 @@ async def _create_alert(level: str, category: str, title: str, content: str):
         "service_type": "forecast",
         "task_type": "forecast_accuracy",
         "status": "ACTIVE",
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.now(),
         "resolved_at": None
     })
     

@@ -43,7 +43,7 @@ def get_service() -> PriceForecastService:
     - created_at: 创建时间
     """
 )
-async def get_versions(
+def get_versions(
     target_date: str = Query(..., description="目标日期, 格式 YYYY-MM-DD"),
     forecast_type: str = Query("d1_price", description="预测类型: d1_price")
 ) -> List[Dict[str, Any]]:
@@ -78,7 +78,7 @@ async def get_versions(
     - confidence_80_upper: 80%置信区间上界
     """
 )
-async def get_chart_data(
+def get_chart_data(
     forecast_id: str = Query(..., description="预测批次ID"),
     target_date: str = Query(..., description="目标日期, 格式 YYYY-MM-DD")
 ) -> List[Dict[str, Any]]:
@@ -119,7 +119,7 @@ async def get_chart_data(
     如果暂无评估数据，返回 null。
     """
 )
-async def get_accuracy(
+def get_accuracy(
     forecast_id: str = Query(..., description="预测批次ID"),
     target_date: Optional[str] = Query(None, description="目标日期, 格式 YYYY-MM-DD")
 ) -> Optional[Dict[str, Any]]:
