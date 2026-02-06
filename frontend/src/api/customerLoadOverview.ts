@@ -15,6 +15,7 @@ export interface TouUsage {
 
 export interface OverviewKpi {
     signed_customers_count: number;
+    valid_customers_count: number;
     signed_total_quantity: number;
     signed_quantity_yoy: number | null;
     actual_total_usage: number;

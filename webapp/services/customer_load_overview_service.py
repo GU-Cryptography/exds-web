@@ -237,6 +237,9 @@ class CustomerLoadOverviewService:
         signed_customers_count = len(signed_customers)
         signed_total_quantity = sum(c["signed_quantity"] for c in signed_customers)
         
+        # 计算当前选中月份的有效客户数 (合同覆盖该月的客户)
+        valid_customers_count = sum(1 for c in signed_customers if c["contract_start_month"] <= month <= c["contract_end_month"])
+        
         # 签约规模同比 (vs 去年同期实测，按签约期范围)
         last_year_contract_actual = 0.0
         
@@ -296,6 +299,7 @@ class CustomerLoadOverviewService:
         
         kpi_data = {
             "signed_customers_count": signed_customers_count,
+            "valid_customers_count": valid_customers_count,
             "signed_total_quantity": round(signed_total_quantity, 2),
             "signed_quantity_yoy": signed_quantity_yoy,
             "actual_total_usage": round(total_usage, 2),
@@ -485,7 +489,7 @@ class CustomerLoadOverviewService:
     def _empty_dashboard_response(self, page, page_size):
         return {
             "kpi": {
-                "signed_customers_count": 0, "signed_total_quantity": 0, "signed_quantity_yoy": None,
+                "signed_customers_count": 0, "valid_customers_count": 0, "signed_total_quantity": 0, "signed_quantity_yoy": None,
                 "actual_total_usage": 0, "actual_usage_yoy": None, "avg_peak_valley_ratio": 0, "tou_breakdown": TouUsage().model_dump()
             },
             "contribution": {"top5": [], "others": {"usage": 0, "percentage": 0}, "total": 0},

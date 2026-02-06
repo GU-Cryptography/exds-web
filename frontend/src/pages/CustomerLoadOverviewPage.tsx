@@ -142,7 +142,7 @@ export const CustomerLoadOverviewPage: React.FC = () => {
     // 状态
     // 状态
     // 缓存 Key - 升级版本以清理旧缓存
-    const CACHE_KEY = 'customer_overview_cache_v2';
+    const CACHE_KEY = 'customer_overview_cache_v3';
 
     // 状态初始化辅助函数
     const getInitialParam = <T,>(key: string, defaultValue: T): T => {
@@ -418,7 +418,7 @@ export const CustomerLoadOverviewPage: React.FC = () => {
         const cards = [
             {
                 title: '签约客户',
-                value: kpi.signed_customers_count,
+                value: `${kpi.valid_customers_count} / ${kpi.signed_customers_count}`,
                 unit: '户',
                 icon: <PeopleIcon sx={{ fontSize: 'inherit' }} />,
                 color: '#1976d2',
