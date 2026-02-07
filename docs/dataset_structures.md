@@ -764,6 +764,10 @@ actual_data = db.weather_actuals.find({
 | `values` | Array | 48个预测电量值 (MWh) | 预测输出 |
 | `confidence_90_lower`| Array | 90%置信区间下界 (48点) | 风险控制 |
 | `confidence_90_upper`| Array | 90%置信区间上界 (48点) | 风险控制 |
+| `manual_adjustment` | Object | 手工调整信息 | **用户干预** |
+| ├─ `is_modified` | Boolean | 是否有人工修改 (True/False) | |
+| ├─ `original_values` | Array | 备份的原始算法预测值 (48点) | 回退依据 |
+| └─ `logs` | Array | 修改日志 `[{user, time, action, reason}]` | 审计 |
 | `accuracy` | Object | 精度评价嵌入文档 (当实际值可用时更新) | **性能追踪** |
 | ├─ `wmape_accuracy` | Number | WMAPE 准确率 (0-100%) | 主指标 |
 | ├─ `mae` | Number | 平均绝对误差 | |

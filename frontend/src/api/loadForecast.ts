@@ -28,6 +28,11 @@ export interface LoadForecastData {
     };
     confidence_90_lower?: number[];
     confidence_90_upper?: number[];
+    manual_adjustment?: {
+        is_modified: boolean;
+        original_values?: number[];
+        logs?: any[];
+    };
 }
 
 export interface PerformanceOverview {
@@ -39,10 +44,12 @@ export interface PerformanceOverview {
 export interface LoadForecastCustomer {
     customer_id: string;
     short_name: string;
+    tags?: string[];
     wmape: number | null;
     history_wmape: number | null;
     pred_sum: number | null;
     has_data: boolean;
+    is_modified?: boolean;
 }
 
 export const loadForecastApi = {

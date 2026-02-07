@@ -17,11 +17,11 @@ import { RealTimeAnalysisTab } from '../components/RealTimeAnalysisTab';
 import { SpreadAnalysisTab } from '../components/SpreadAnalysisTab';
 import { PriceCurveComparisonTab } from '../components/PriceCurveComparisonTab';
 import { TimeslotAnalysisTab } from '../components/TimeslotAnalysisTab';
-import { getWeatherActualsSummary, DailyWeatherSummary } from '../api/weather';
-import { WeatherIcon } from '../components/WeatherIcon';
+import { useWeather } from '../hooks/useWeather';
+import { WeatherDisplay } from '../components/WeatherDisplay';
 
-// 南昌站点ID
-const NANCHANG_LOCATION_ID = 'nanchang';
+// 南昌站点ID removed from here, used in hook default or passed explicitly if needed.
+// But useWeather uses DEFAULT_LOCATION_ID = 'nanchang' internally by default.
 
 interface TabPanelProps {
     children?: React.ReactNode;
@@ -54,9 +54,8 @@ export const SpotIntradayAnalysisPage: React.FC = () => {
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
 
-    // 天气数据状态
-    const [weatherData, setWeatherData] = useState<DailyWeatherSummary | null>(null);
-    const [weatherLoading, setWeatherLoading] = useState(false);
+    // 天气数据状态 - 使用 Hook
+    const { weatherData, loading: weatherLoading } = useWeather(selectedDate);
 
     const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
         setTabIndex(newValue);
@@ -67,25 +66,6 @@ export const SpotIntradayAnalysisPage: React.FC = () => {
         const newDate = addDays(selectedDate, days);
         setSelectedDate(newDate);
     };
-
-    // 获取天气数据
-    useEffect(() => {
-        const fetchWeather = async () => {
-            if (!selectedDate) return;
-            setWeatherLoading(true);
-            try {
-                const dateStr = format(selectedDate, 'yyyy-MM-dd');
-                const data = await getWeatherActualsSummary(NANCHANG_LOCATION_ID, dateStr);
-                setWeatherData(data);
-            } catch (err) {
-                console.error('获取天气数据失败:', err);
-                setWeatherData(null);
-            } finally {
-                setWeatherLoading(false);
-            }
-        };
-        fetchWeather();
-    }, [selectedDate]);
 
     // Tab 配置：图标 + 完整标题 + 移动端简化标题
     const tabsConfig = [
@@ -139,26 +119,7 @@ export const SpotIntradayAnalysisPage: React.FC = () => {
                     <Divider orientation="vertical" flexItem sx={{ display: { xs: 'none', sm: 'block' } }} />
 
                     {/* 南昌天气信息 */}
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 1 } }}>
-                        {weatherLoading ? (
-                            <CircularProgress size={20} />
-                        ) : weatherData ? (
-                            <>
-                                <WeatherIcon type={weatherData.weather_type} size={28} />
-                                <Typography variant="body2" fontWeight="bold" sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>
-                                    {weatherData.weather_type}
-                                </Typography>
-                                <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
-                                <Typography variant="body2" sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>
-                                    🌡️ {weatherData.min_temp}~{weatherData.max_temp}°C
-                                </Typography>
-                            </>
-                        ) : (
-                            <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.75rem', sm: '0.8rem' } }}>
-                                无天气数据
-                            </Typography>
-                        )}
-                    </Box>
+                    <WeatherDisplay weatherData={weatherData} loading={weatherLoading} />
                 </Paper>
 
                 <Paper variant="outlined" sx={{ borderColor: 'divider' }}>

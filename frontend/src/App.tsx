@@ -34,6 +34,7 @@ import { SystemLogsPage } from './pages/SystemLogsPage';
 import { DayAheadPriceForecastPage } from './pages/DayAheadPriceForecastPage';
 import { WeatherDataPage } from './pages/WeatherDataPage';
 import { LoadDataDiagnosisPage } from './pages/LoadDataDiagnosisPage';
+import { LoadForecastWorkbench } from './pages/LoadForecastWorkbench';
 import { TabProvider } from './contexts/TabContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { DesktopTabLayout } from './layouts/DesktopTabLayout';
@@ -82,7 +83,7 @@ const ResponsiveLayout: React.FC = () => {
 
                     {/* 负荷预测 */}
                     <Route path="load-forecast/overall-analysis" element={<LoadAnalysisPage />} />
-                    <Route path="load-forecast/short-term" element={<PlaceholderPage />} />
+                    <Route path="load-forecast/short-term" element={<LoadForecastWorkbench />} />
                     <Route path="load-forecast/accuracy-analysis" element={<PlaceholderPage />} />
                     <Route path="load-forecast/long-term" element={<PlaceholderPage />} />
 

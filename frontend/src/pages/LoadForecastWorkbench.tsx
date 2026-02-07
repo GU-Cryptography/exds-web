@@ -46,6 +46,10 @@ import { loadForecastApi, LoadForecastVersion, LoadForecastData, LoadForecastCus
 import apiClient from '../api/client';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
 import { useTouPeriodBackground } from '../hooks/useTouPeriodBackground';
+import { ManualAdjustmentTab } from './ManualAdjustmentTab';
+import EditIcon from '@mui/icons-material/Edit';
+import { useWeather } from '../hooks/useWeather';
+import { WeatherDisplay } from '../components/WeatherDisplay';
 
 /**
  * 负荷预测综合工作台
@@ -56,9 +60,14 @@ export const LoadForecastWorkbench: React.FC = () => {
 
     // --- 状态管理 ---
     const [targetDate, setTargetDate] = useState<Date | null>(addDays(new Date(), 1)); // 默认看明天
+
+    // 天气数据
+    const { weatherData, loading: weatherLoading } = useWeather(targetDate);
+
     const [forecastVersions, setForecastVersions] = useState<LoadForecastVersion[]>([]);
     const [selectedVersion, setSelectedVersion] = useState<string>('');
     const [loadingVersions, setLoadingVersions] = useState(false);
+    const [refreshKey, setRefreshKey] = useState(0); // Trigger data refresh
 
     const [overallData, setOverallData] = useState<LoadForecastData | null>(null);
     const [loadingOverall, setLoadingOverall] = useState(false);
@@ -83,10 +92,13 @@ export const LoadForecastWorkbench: React.FC = () => {
     const targetDateStr = targetDate ? format(targetDate, 'yyyy-MM-dd') : '';
     const currentVersion = useMemo(() => forecastVersions.find(v => v.forecast_id === selectedVersion), [forecastVersions, selectedVersion]);
 
+    const modifiedCount = useMemo(() => customers.filter(c => c.is_modified).length, [customers]);
+
     const filteredCustomers = useMemo(() => {
         return customers.filter(c =>
             c.short_name.toLowerCase().includes(searchKeyword.toLowerCase()) ||
-            c.customer_id.toLowerCase().includes(searchKeyword.toLowerCase())
+            c.customer_id.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+            (c.tags && c.tags.some(t => t.toLowerCase().includes(searchKeyword.toLowerCase())))
         );
     }, [customers, searchKeyword]);
 
@@ -101,21 +113,10 @@ export const LoadForecastWorkbench: React.FC = () => {
     };
 
     // --- 数据加载 ---
-
-    // 0. 加载 TOU 背景 (This useEffect is now redundant as period_types come with forecast data)
-    // useEffect(() => {
-    //     if (!targetDateStr) return;
-    //     apiClient.get<TouPeriodData[]>('/api/v1/common/tou-rules/day', { params: { date: targetDateStr } })
-    //         .then(res => setTouData(res.data))
-    //         .catch(err => console.error('Failed to load TOU rules', err));
-    // }, [targetDateStr]);
-
     // 1. 加载版本与总体性能
     useEffect(() => {
         if (!targetDateStr) return;
         setLoadingVersions(true);
-
-        // (sortBy state removed, defaulting to 'energy')
 
         Promise.all([
             loadForecastApi.getVersions(targetDateStr),
@@ -124,7 +125,8 @@ export const LoadForecastWorkbench: React.FC = () => {
             setForecastVersions(vRes.data);
             setPerformance(pRes.data);
             if (vRes.data.length > 0) {
-                setSelectedVersion(vRes.data[0].forecast_id);
+                // If version already selected, keep it if exists, else select first
+                setSelectedVersion(prev => vRes.data.find(v => v.forecast_id === prev) ? prev : vRes.data[0].forecast_id);
             } else {
                 setSelectedVersion('');
             }
@@ -132,7 +134,7 @@ export const LoadForecastWorkbench: React.FC = () => {
             console.error(err);
             setError('获取版本及概览失败');
         }).finally(() => setLoadingVersions(false));
-    }, [targetDateStr]);
+    }, [targetDateStr, refreshKey]);
 
     // 2. 加载整体数据和客户列表
     useEffect(() => {
@@ -162,7 +164,7 @@ export const LoadForecastWorkbench: React.FC = () => {
         };
 
         fetchAll();
-    }, [targetDateStr, currentVersion]);
+    }, [targetDateStr, currentVersion, refreshKey]);
 
     // 3. 加载客户详情数据
     useEffect(() => {
@@ -176,7 +178,7 @@ export const LoadForecastWorkbench: React.FC = () => {
             .then(res => setCustomerDetailData(res.data))
             .catch(err => console.error(err))
             .finally(() => setLoadingDetail(false));
-    }, [targetDateStr, currentVersion, selectedCustomerId]);
+    }, [targetDateStr, currentVersion, selectedCustomerId, refreshKey]);
 
     // --- 交互逻辑 ---
     const handleShiftDate = (days: number) => {
@@ -184,9 +186,11 @@ export const LoadForecastWorkbench: React.FC = () => {
         setTargetDate(addDays(targetDate, days));
     };
 
-    // --- 全屏 Hooks ---
-    // const { touAreas, TouPeriodAreas } = useTouPeriodBackground(touData); // This is now redundant
+    const handleRefresh = () => {
+        setRefreshKey(prev => prev + 1);
+    };
 
+    // --- 全屏 Hooks ---
     const overallFullscreen = useChartFullscreen({
         chartRef: overallChartRef,
         title: `全网预测 - ${targetDateStr}`,
@@ -196,13 +200,17 @@ export const LoadForecastWorkbench: React.FC = () => {
 
     const customerFullscreen = useChartFullscreen({
         chartRef: customerChartRef,
-        title: `客户预测 - ${selectedCustomerId} (${targetDateStr})`
+        title: `客户预测 - ${selectedCustomerId} (${targetDateStr})`,
+        onPrevious: () => handleShiftDate(-1),
+        onNext: () => handleShiftDate(1)
     });
 
     // --- 列表过滤与排序 ---
     const sortedCustomers = useMemo(() => {
         return [...filteredCustomers].sort((a, b) => {
-            // 默认按预测电量从大向小排 (V3: 移除准度排序，固定为电量排序)
+            // Priority: Manual Adjusted > High Energy
+            if (a.is_modified && !b.is_modified) return -1;
+            if (!a.is_modified && b.is_modified) return 1;
             return (b.pred_sum || 0) - (a.pred_sum || 0);
         });
     }, [filteredCustomers]);
@@ -211,7 +219,6 @@ export const LoadForecastWorkbench: React.FC = () => {
     const overallChartData = useMemo(() => {
         if (!overallData) return [];
         return overallData.values.map((v, i) => {
-            // 48点: 00:30, 01:00, ..., 24:00
             const minutes = (i + 1) * 30;
             const h = Math.floor(minutes / 60);
             const m = minutes % 60;
@@ -251,11 +258,9 @@ export const LoadForecastWorkbench: React.FC = () => {
         });
     }, [customerDetailData]);
 
-    // 使用合并后的数据计算 TOU 背景 (确保对齐)
     const overallTou = useTouPeriodBackground(overallChartData, '24:00', 'left');
     const customerTou = useTouPeriodBackground(customerChartData, '24:00', 'left');
 
-    // (V3.2: 修复 TOU 背景色在多 Y 轴下显示问题，增加 yAxisId="left")
     return (
         <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
             <Box sx={{
@@ -293,6 +298,18 @@ export const LoadForecastWorkbench: React.FC = () => {
                         </Select>
                     </FormControl>
 
+                    {/* Header Info: Manual Adj & Weather */}
+                    <Box display="flex" gap={2} alignItems="center" bgcolor="background.default" p={1} borderRadius={1}>
+                        <Box display="flex" alignItems="center" gap={0.5}>
+                            <EditIcon color={modifiedCount > 0 ? "warning" : "disabled"} fontSize="small" />
+                            <Typography variant="body2" fontWeight={modifiedCount > 0 ? "bold" : "normal"}>
+                                手工调整: {modifiedCount} 户
+                            </Typography>
+                        </Box>
+                        <Divider orientation="vertical" flexItem />
+                        <WeatherDisplay weatherData={weatherData} loading={weatherLoading} />
+                    </Box>
+
                     {/* KPI 概览 (整合在控制栏) */}
                     {(overallData || performance) && (
                         <Box display="flex" gap={2} ml="auto">
@@ -324,13 +341,13 @@ export const LoadForecastWorkbench: React.FC = () => {
                 {/* 主内容区: L2 + L3 */}
                 <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1, overflow: 'hidden' }}>
 
-                    {/* L2: 整体预测图表 (Desktop: ~40% 高度) */}
+                    {/* L2: 整体预测图表 (Desktop: ~35% 高度) */}
                     <Paper
                         variant="outlined"
                         sx={{
                             p: 1.5,
-                            flex: isDesktop ? '0 0 40%' : 'none',
-                            minHeight: 350,
+                            flex: isDesktop ? '0 0 35%' : 'none',
+                            minHeight: 300,
                             position: 'relative',
                             display: 'flex',
                             flexDirection: 'column'
@@ -340,10 +357,26 @@ export const LoadForecastWorkbench: React.FC = () => {
                             全网预测负荷曲线
                         </Typography>
 
-                        <Box ref={overallChartRef} sx={{ flex: 1, position: 'relative' }}>
+                        <Box ref={overallChartRef} sx={{
+                            position: 'relative',
+                            height: { xs: 300, md: '100%' }, // Fixed height on mobile
+                            flex: { xs: 'none', md: 1 },     // Disable flex shrinking/growing on mobile
+                            width: '100%',
+                            ...(overallFullscreen.isFullscreen && {
+                                position: 'fixed',
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                zIndex: 1300,
+                                backgroundColor: 'background.paper',
+                                p: 2
+                            })
+                        }}>
                             <overallFullscreen.FullscreenEnterButton />
                             <overallFullscreen.FullscreenExitButton />
                             <overallFullscreen.FullscreenTitle />
+                            <overallFullscreen.NavigationButtons />
 
                             {loadingOverall ? (
                                 <Box display="flex" justifyContent="center" alignItems="center" height="100%">
@@ -352,17 +385,23 @@ export const LoadForecastWorkbench: React.FC = () => {
                             ) : overallData ? (
                                 <ResponsiveContainer width="100%" height="100%">
                                     <ComposedChart data={overallChartData}
-                                        margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                        margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e0e0e0" />
                                         <XAxis
                                             dataKey="time"
-                                            interval={5} // 48个点，跳过5个显示一个 (约每3小时显示一次)
+                                            interval={5} // 48个点，跳过5个显示一个
                                             tickFormatter={(v) => v}
+                                            tick={{ fontSize: 11, fill: '#888' }}
+                                            tickLine={{ stroke: '#ccc' }}
+                                            axisLine={{ stroke: '#ccc' }}
                                         />
                                         <YAxis
                                             yAxisId="left"
-                                            hide
                                             domain={['auto', 'auto']}
+                                            tick={{ fontSize: 11, fill: '#888' }}
+                                            tickLine={{ stroke: '#ccc' }}
+                                            axisLine={{ stroke: '#ccc' }}
+                                            label={{ value: 'MW', angle: -90, position: 'insideLeft', fontSize: 11, fill: '#888' }}
                                         />
                                         <YAxis
                                             yAxisId="diff"
@@ -377,16 +416,20 @@ export const LoadForecastWorkbench: React.FC = () => {
                                                             <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1 }}>{label}</Typography>
                                                             {payload.map((entry: any, index: number) => {
                                                                 if (entry.dataKey === 'interval') {
-                                                                    const [low, high] = entry.value;
-                                                                    return (
-                                                                        <Typography key={index} variant="caption" display="block" color="text.secondary">
-                                                                            90% 置信区间: {low?.toFixed(2)} ~ {high?.toFixed(2)} MWh
-                                                                        </Typography>
-                                                                    );
+                                                                    const val = entry.value;
+                                                                    if (Array.isArray(val) && val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'number') {
+                                                                        const [low, high] = val;
+                                                                        return (
+                                                                            <Typography key={index} variant="body2" sx={{ color: '#8884d8' }}>
+                                                                                90%置信区间: {low.toFixed(1)} - {high.toFixed(1)} MW
+                                                                            </Typography>
+                                                                        );
+                                                                    }
+                                                                    return null;
                                                                 }
                                                                 return (
-                                                                    <Typography key={index} variant="body2" sx={{ color: entry.stroke || entry.fill }}>
-                                                                        {entry.name}: {typeof entry.value === 'number' ? entry.value.toFixed(2) : entry.value} MWh
+                                                                    <Typography key={index} variant="body2" sx={{ color: entry.color }}>
+                                                                        {entry.name}: {typeof entry.value === 'number' ? entry.value.toFixed(1) : '--'} MW
                                                                     </Typography>
                                                                 );
                                                             })}
@@ -396,6 +439,7 @@ export const LoadForecastWorkbench: React.FC = () => {
                                                 return null;
                                             }}
                                         />
+
                                         <Legend verticalAlign="top" height={36} />
                                         {overallTou.TouPeriodAreas}
                                         <Area
@@ -449,10 +493,21 @@ export const LoadForecastWorkbench: React.FC = () => {
                         </Box>
                     </Paper>
 
-                    {/* L3: 客户工作区 (Desktop: ~50% 高度, 左右结构) */}
-                    <Box sx={{ flex: isDesktop ? '1' : 'none', minHeight: 400, display: 'flex', gap: 1, overflow: 'hidden' }}>
+                    {/* L3: 客户工作区 (Desktop: ~65% 高度, 左右结构; Mobile: 堆叠) */}
+                    <Box sx={{
+                        flex: isDesktop ? '1' : 'none',
+                        minHeight: isDesktop ? 450 : 'auto',
+                        display: 'flex',
+                        flexDirection: { xs: 'column', md: 'row' },
+                        gap: 1,
+                        overflow: 'hidden'
+                    }}>
 
-                        <Grid size={{ xs: 12, md: 3 }} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                        <Grid size={{ xs: 12, md: 3 }} sx={{
+                            height: { xs: 400, md: '100%' },
+                            display: 'flex',
+                            flexDirection: 'column'
+                        }}>
                             <Paper variant="outlined" sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                                 <Box sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider' }}>
                                     <TextField
@@ -481,12 +536,18 @@ export const LoadForecastWorkbench: React.FC = () => {
                                                 key={customer.customer_id}
                                                 selected={selectedCustomerId === customer.customer_id}
                                                 onClick={() => setSelectedCustomerId(customer.customer_id)}
-                                                sx={{ borderBottom: 1, borderColor: 'grey.100', py: 1 }}
+                                                sx={{
+                                                    borderBottom: 1,
+                                                    borderColor: 'grey.100',
+                                                    py: 1,
+                                                    bgcolor: customer.is_modified ? 'warning.lighter' : 'inherit'
+                                                }}
                                             >
                                                 <ListItemText
                                                     primary={
                                                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                            <Typography variant="body2" noWrap sx={{ maxWidth: '140px' }}>
+                                                            <Typography variant="body2" noWrap sx={{ maxWidth: '120px', fontWeight: customer.is_modified ? 'bold' : 'normal' }}>
+                                                                {customer.is_modified && <EditIcon fontSize="inherit" color="warning" sx={{ mr: 0.5, verticalAlign: 'middle' }} />}
                                                                 {customer.short_name}
                                                             </Typography>
                                                             <Chip
@@ -525,15 +586,21 @@ export const LoadForecastWorkbench: React.FC = () => {
                         </Grid>
 
                         {/* 详情视图 (右侧 剩余空间) */}
-                        <Paper variant="outlined" sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                        <Paper variant="outlined" sx={{
+                            flex: 1,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            overflow: 'hidden',
+                            minHeight: { xs: 500, md: 0 } // Mobile needs height
+                        }}>
                             <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
                                 <Tabs value={detailTab} onChange={(e, v) => setDetailTab(v)}>
                                     <Tab label="预测曲线" />
-                                    <Tab label="手工调整" disabled />
+                                    <Tab label="手工调整" disabled={!selectedCustomerId} />
                                 </Tabs>
                             </Box>
 
-                            <Box sx={{ flex: 1, p: 1.5, position: 'relative', overflow: 'hidden' }}>
+                            <Box sx={{ flex: 1, p: 0, position: 'relative', overflow: 'hidden' }}>
                                 {!selectedCustomerId ? (
                                     <Box display="flex" justifyContent="center" alignItems="center" height="100%">
                                         <Typography color="text.secondary">请从左侧选择客户</Typography>
@@ -542,23 +609,61 @@ export const LoadForecastWorkbench: React.FC = () => {
                                     <Box display="flex" justifyContent="center" alignItems="center" height="100%">
                                         <CircularProgress />
                                     </Box>
-                                ) : customerDetailData ? (
-                                    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                                        <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold', color: 'primary.main', display: 'flex', alignItems: 'center' }}>
-                                            <Box component="span" sx={{ width: 3, height: 14, bgcolor: 'primary.main', mr: 1, borderRadius: 1 }} />
+                                ) : detailTab === 0 ? (
+                                    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', p: 1.5 }}>
+                                        <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold', color: 'primary.main', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+                                            <Box component="span" sx={{ width: 3, height: 14, bgcolor: 'primary.main', borderRadius: 1 }} />
                                             {sortedCustomers.find(c => c.customer_id === selectedCustomerId)?.short_name || '未知客户'} - 预测详情
+                                            {/* Tags */}
+                                            {sortedCustomers.find(c => c.customer_id === selectedCustomerId)?.tags?.map(tag => (
+                                                <Chip key={tag} label={tag} size="small" variant="outlined" color="info" sx={{ height: 20 }} />
+                                            ))}
                                         </Typography>
-                                        <Box ref={customerChartRef} sx={{ flex: 1, position: 'relative' }}>
+                                        <Box ref={customerChartRef} sx={{
+                                            position: 'relative',
+                                            height: { xs: 300, md: '100%' }, // Fixed height on mobile
+                                            flex: { xs: 'none', md: 1 },     // Disable flex shrinking/growing on mobile
+                                            width: '100%',
+                                            ...(customerFullscreen.isFullscreen && {
+                                                position: 'fixed',
+                                                top: 0,
+                                                left: 0,
+                                                right: 0,
+                                                bottom: 0,
+                                                zIndex: 1300,
+                                                backgroundColor: 'background.paper',
+                                                p: 2
+                                            })
+                                        }}>
                                             <customerFullscreen.FullscreenEnterButton />
+                                            <customerFullscreen.FullscreenExitButton />
+                                            <customerFullscreen.FullscreenTitle />
+                                            <customerFullscreen.NavigationButtons />
                                             <ResponsiveContainer width="100%" height="100%">
                                                 <ComposedChart data={customerChartData}
-                                                    margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                                    <XAxis dataKey="time" interval={5} />
+                                                    margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+                                                    onMouseDown={(e) => {
+                                                        if (e && e.activeLabel) {
+                                                            // onChartMouseDown(e); // If manual adjustment hook is used here
+                                                        }
+                                                    }}>
+                                                    {customerFullscreen.isFullscreen && customerTou.TouPeriodAreas}
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e0e0e0" />
+                                                    <XAxis
+                                                        dataKey="time"
+                                                        interval={5}
+                                                        tickFormatter={(v) => v}
+                                                        tick={{ fontSize: 11, fill: '#888' }}
+                                                        tickLine={{ stroke: '#ccc' }}
+                                                        axisLine={{ stroke: '#ccc' }}
+                                                    />
                                                     <YAxis
                                                         yAxisId="left"
-                                                        hide
                                                         domain={['auto', 'auto']}
+                                                        tick={{ fontSize: 11, fill: '#888' }}
+                                                        tickLine={{ stroke: '#ccc' }}
+                                                        axisLine={{ stroke: '#ccc' }}
+                                                        label={{ value: 'MW', angle: -90, position: 'insideLeft', fontSize: 11, fill: '#888' }}
                                                     />
                                                     <YAxis
                                                         yAxisId="diff"
@@ -573,16 +678,20 @@ export const LoadForecastWorkbench: React.FC = () => {
                                                                         <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1 }}>{label}</Typography>
                                                                         {payload.map((entry: any, index: number) => {
                                                                             if (entry.dataKey === 'interval') {
-                                                                                const [low, high] = entry.value;
-                                                                                return (
-                                                                                    <Typography key={index} variant="caption" display="block" color="text.secondary">
-                                                                                        90% 置信区间: {low?.toFixed(2)} ~ {high?.toFixed(2)} MWh
-                                                                                    </Typography>
-                                                                                );
+                                                                                const val = entry.value;
+                                                                                if (Array.isArray(val) && val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'number') {
+                                                                                    const [low, high] = val;
+                                                                                    return (
+                                                                                        <Typography key={index} variant="body2" sx={{ color: '#8884d8' }}>
+                                                                                            90%置信区间: {low.toFixed(1)} - {high.toFixed(1)} MW
+                                                                                        </Typography>
+                                                                                    );
+                                                                                }
+                                                                                return null;
                                                                             }
                                                                             return (
-                                                                                <Typography key={index} variant="body2" sx={{ color: entry.stroke || entry.fill }}>
-                                                                                    {entry.name}: {typeof entry.value === 'number' ? entry.value.toFixed(2) : entry.value} MWh
+                                                                                <Typography key={index} variant="body2" sx={{ color: entry.color }}>
+                                                                                    {entry.name}: {typeof entry.value === 'number' ? entry.value.toFixed(1) : '--'} MW
                                                                                 </Typography>
                                                                             );
                                                                         })}
@@ -590,6 +699,7 @@ export const LoadForecastWorkbench: React.FC = () => {
                                                                 );
                                                             }
                                                             return null;
+
                                                         }}
                                                     />
                                                     {customerTou.TouPeriodAreas}
@@ -602,7 +712,7 @@ export const LoadForecastWorkbench: React.FC = () => {
                                                         fill={theme.palette.success.main}
                                                         fillOpacity={0.08}
                                                     />
-                                                    {customerDetailData.actual_values && (
+                                                    {customerDetailData?.actual_values && (
                                                         <Area
                                                             yAxisId="diff"
                                                             name="偏差绝对值"
@@ -613,7 +723,7 @@ export const LoadForecastWorkbench: React.FC = () => {
                                                             fillOpacity={0.05}
                                                         />
                                                     )}
-                                                    {customerDetailData.actual_values && (
+                                                    {customerDetailData?.actual_values && (
                                                         <Line
                                                             yAxisId="left"
                                                             name="实际负荷"
@@ -638,9 +748,14 @@ export const LoadForecastWorkbench: React.FC = () => {
                                         </Box>
                                     </Box>
                                 ) : (
-                                    <Box display="flex" justifyContent="center" alignItems="center" height="100%">
-                                        <Typography color="text.secondary">该客户暂无预测数据</Typography>
-                                    </Box>
+                                    <ManualAdjustmentTab
+                                        targetDate={targetDateStr}
+                                        forecastDate={currentVersion?.forecast_date || ''}
+                                        customerId={selectedCustomerId}
+                                        initialData={customerDetailData}
+                                        onSaveSuccess={handleRefresh}
+                                        onDateShift={handleShiftDate}
+                                    />
                                 )}
                             </Box>
                         </Paper>
@@ -648,13 +763,15 @@ export const LoadForecastWorkbench: React.FC = () => {
                 </Box>
 
                 {/* 错误提示 */}
-                {error && (
-                    <Alert severity="error" onClose={() => setError(null)} sx={{ position: 'fixed', bottom: 16, right: 16, zIndex: 2000 }}>
-                        {error}
-                    </Alert>
-                )}
-            </Box>
-        </LocalizationProvider>
+                {
+                    error && (
+                        <Alert severity="error" onClose={() => setError(null)} sx={{ position: 'fixed', bottom: 16, right: 16, zIndex: 2000 }}>
+                            {error}
+                        </Alert>
+                    )
+                }
+            </Box >
+        </LocalizationProvider >
     );
 };
 
