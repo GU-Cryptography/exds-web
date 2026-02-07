@@ -16,6 +16,7 @@ import { DayAheadPriceForecastPage } from '../pages/DayAheadPriceForecastPage';
 import { WeatherDataPage } from '../pages/WeatherDataPage';
 import { LoadDataDiagnosisPage } from '../pages/LoadDataDiagnosisPage';
 import { CustomerLoadAnalysisPage } from '../pages/CustomerLoadAnalysisPage';
+import { LoadForecastWorkbench } from '../pages/LoadForecastWorkbench';
 import { CustomerLoadOverviewPage } from '../pages/CustomerLoadOverviewPage';
 import LoadCharacteristicsOverviewPage from '../pages/LoadCharacteristicsOverviewPage';
 import LoadCharacteristicsDetailPage from '../pages/LoadCharacteristicsDetailPage';
@@ -43,7 +44,7 @@ export const routeConfigs: RouteConfig[] = [
 
     // 负荷预测
     { path: '/load-forecast/overall-analysis', title: '总体负荷分析', component: LoadAnalysisPage },
-    { path: '/load-forecast/short-term', title: '短期负荷预测', component: PlaceholderPage },
+    { path: '/load-forecast/short-term', title: '短期负荷预测', component: LoadForecastWorkbench },
     { path: '/load-forecast/accuracy-analysis', title: '预测精度分析', component: PlaceholderPage },
     { path: '/load-forecast/long-term', title: '年度负荷预测', component: PlaceholderPage },
 

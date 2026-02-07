@@ -737,3 +737,51 @@ actual_data = db.weather_actuals.find({
 
 - `(status: 1, priority: -1, created_at: 1)`: 消费端轮询索引。
 - `(command_id: 1)`: 唯一索引。
+
+## 21. `load_forecast_results` - 客户负荷预测结果
+
+该集合存储客户级别的负荷预测输出，包括单客户预测、聚合预测及配套的精度指标。
+
+**业务价值**:
+- 提供代理用户电量预测 (D ~ D+2)
+- 为交易申报提供数据支撑
+- 集成实时精度评估，反馈模型质量
+
+- **数据来源**: 负荷预测流水线输出
+- **更新频率**: 每日
+- **数据粒度**: 30分钟，每日48个数据点
+- **预测视野**: D, D+1, D+2 (通过 Gap 区分)
+
+### 21.1 字段说明
+
+| 字段名 | 数据类型 | 描述 | 示例 |
+| :--- | :--- | :--- | :--- |
+| `customer_id` | String | **[复合主键]** 客户ID 或 `"AGGREGATE"` (聚合结果) | 区分维度 |
+| `forecast_date` | ISODate | **[复合主键]** 预测执行参考日期 (基准日) | 2026-01-31 00:00 |
+| `gap` | Number | **[复合主键]** 偏移天数。0:当天, 1:次日, 2:第三日 | 1 |
+| `target_date` | ISODate | 预测目标日期 (forecast_date + gap + 1) | 2026-02-02 00:00 |
+| `forecast_id` | String | 预测批次号 | "LOAD_20260131_0000" |
+| `values` | Array | 48个预测电量值 (MWh) | 预测输出 |
+| `confidence_90_lower`| Array | 90%置信区间下界 (48点) | 风险控制 |
+| `confidence_90_upper`| Array | 90%置信区间上界 (48点) | 风险控制 |
+| `accuracy` | Object | 精度评价嵌入文档 (当实际值可用时更新) | **性能追踪** |
+| ├─ `wmape_accuracy` | Number | WMAPE 准确率 (0-100%) | 主指标 |
+| ├─ `mae` | Number | 平均绝对误差 | |
+| ├─ `rmse` | Number | 均方根误差 | |
+| └─ `calculated_at` | ISODate | 指标计算时间 | |
+| `aggregated_count` | Number | 聚合客户统计 (仅针对 AGGREGATE 记录) | 验证覆盖率 |
+| `created_at` | ISODate | 记录创建时间 | |
+
+### 21.2 索引配置
+
+```javascript
+// 复合唯一索引
+db.customer_load_forecasts.createIndex({
+    "customer_id": 1,
+    "forecast_date": 1,
+    "gap": 1
+}, { unique: true })
+
+// 目标日期查询（用于对外展示/聚合）
+db.customer_load_forecasts.createIndex({ "target_date": 1, "customer_id": 1 })
+```

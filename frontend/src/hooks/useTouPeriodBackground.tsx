@@ -57,9 +57,26 @@ export interface UseTouPeriodBackgroundReturn {
  * @param endTime 最后一个时段的结束时间，默认为 "24:00"
  * @returns Hook 返回值对象
  */
+export interface UseTouPeriodBackgroundProps {
+    data: TouPeriodData[] | null | undefined;
+    endTime?: string;
+    yAxisId?: string;
+}
+
+/**
+ * 分时电价时段背景色 Hook
+ *
+ * 用于在 Recharts 图表中渲染分时电价时段的背景色
+ *
+ * @param data 图表数据数组，每项必须包含 time 和 period_type 字段
+ * @param endTime 最后一个时段的结束时间，默认为 "24:00"
+ * @param yAxisId 绑定的 Y 轴 ID（可选，在多 Y 轴图表中建议指定）
+ * @returns Hook 返回值对象
+ */
 export const useTouPeriodBackground = (
     data: TouPeriodData[] | null | undefined,
-    endTime: string = '24:00'
+    endTime: string = '24:00',
+    yAxisId?: string
 ): UseTouPeriodBackgroundReturn => {
 
     /**
@@ -104,6 +121,7 @@ export const useTouPeriodBackground = (
         return touAreas.map((area, index) => (
             <ReferenceArea
                 key={`tou-area-${index}`}
+                yAxisId={yAxisId}
                 x1={area.x1}
                 x2={area.x2}
                 strokeOpacity={0}
