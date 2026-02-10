@@ -58,6 +58,6 @@ export const loadForecastApi = {
         apiClient.get<LoadForecastData>(`/api/v1/load-forecast/data`, { params: { target_date: target, forecast_date: forecast, customer_id: customer } }),
     getCustomers: (target: string, forecast: string) =>
         apiClient.get<LoadForecastCustomer[]>(`/api/v1/load-forecast/customers`, { params: { target_date: target, forecast_date: forecast } }),
-    getPerformanceOverview: (customer: string = 'AGGREGATE') =>
-        apiClient.get<PerformanceOverview>(`/api/v1/load-forecast/performance-overview`, { params: { customer_id: customer } }),
+    getPerformanceOverview: (customer: string = 'AGGREGATE', gap?: number) =>
+        apiClient.get<PerformanceOverview>(`/api/v1/load-forecast/performance-overview`, { params: { customer_id: customer, gap: gap } }),
 };

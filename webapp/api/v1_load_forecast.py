@@ -44,7 +44,8 @@ def get_customer_list(
 @router.get("/performance-overview", summary="获取负荷预测概览指标")
 def get_performance_overview(
     customer_id: str = Query("AGGREGATE", description="客户ID"),
+    gap: Optional[int] = Query(None, description="提前天数(Gap)"),
     service: LoadForecastService = Depends(get_service),
     current_user: Any = Depends(get_current_active_user)
 ):
-    return service.get_performance_overview(customer_id)
+    return service.get_performance_overview(customer_id, gap)

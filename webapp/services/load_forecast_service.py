@@ -123,6 +123,15 @@ class LoadForecastService:
             
             doc["actual_values"] = actual_values
             
+            # --- 增加预测电量兜底计算 (针对未结算的未来日期) ---
+            if doc.get("pred_sum") is None:
+                accuracy_pred_sum = doc.get("accuracy", {}).get("pred_sum")
+                if accuracy_pred_sum is not None:
+                    doc["pred_sum"] = accuracy_pred_sum
+                elif "values" in doc and doc["values"]:
+                    # 如果 values 是 [0] * 48 (骨架数据)，sum 也是 0
+                    doc["pred_sum"] = round(sum(doc["values"]), 2)
+
             # --- 增加 96 点时段类型 (V2: 确保对齐) ---
             # 根据用户反馈，负荷是 48 点 (30min 间隔)，从 00:30 到 24:00
             try:
@@ -217,13 +226,17 @@ class LoadForecastService:
             ))
             forecast_map = {f["customer_id"]: f for f in forecasts}
 
-            # 4. 批量获取这些客户的历史平均准度 (最近7天)
+            # 4. 批量获取这些客户的历史平均准度 (最近7天, 且匹配相同 gap)
             history_map = {}
             if signed_cids:
+                # 计算当前 gap
+                current_gap = (target_dt - forecast_dt).days
+                
                 hist_pipeline = [
                     {
                         "$match": {
                             "customer_id": {"$in": signed_cids},
+                            "gap": current_gap,
                             "accuracy.wmape_accuracy": {"$exists": True, "$ne": None}
                         }
                     },
@@ -271,15 +284,19 @@ class LoadForecastService:
             return []
 
 
-    def get_performance_overview(self, customer_id: str = "AGGREGATE") -> Dict[str, Any]:
+    def get_performance_overview(self, customer_id: str = "AGGREGATE", gap: Optional[int] = None) -> Dict[str, Any]:
         """获取最近 7 个已结算（有实际值）版本的平均精度"""
         try:
+            match_query = {
+                "customer_id": customer_id,
+                "accuracy.wmape_accuracy": {"$exists": True, "$ne": None}
+            }
+            if gap is not None:
+                match_query["gap"] = gap
+                
             pipeline = [
                 {
-                    "$match": {
-                        "customer_id": customer_id,
-                        "accuracy.wmape_accuracy": {"$exists": True, "$ne": None}
-                    }
+                    "$match": match_query
                 },
                 {"$sort": {"target_date": -1}},
                 {"$limit": 7},

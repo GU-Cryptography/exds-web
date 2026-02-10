@@ -22,6 +22,8 @@ import {
     Chip,
     Tabs,
     Tab,
+    FormControlLabel,
+    Switch,
 } from '@mui/material';
 import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -57,9 +59,11 @@ import { WeatherDisplay } from '../components/WeatherDisplay';
 export const LoadForecastWorkbench: React.FC = () => {
     const theme = useTheme();
     const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
+    const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
     // --- 状态管理 ---
     const [targetDate, setTargetDate] = useState<Date | null>(addDays(new Date(), 1)); // 默认看明天
+    const [yAxisStartFromZero, setYAxisStartFromZero] = useState(false);
 
     // 天气数据
     const { weatherData, loading: weatherLoading } = useWeather(targetDate);
@@ -113,28 +117,39 @@ export const LoadForecastWorkbench: React.FC = () => {
     };
 
     // --- 数据加载 ---
-    // 1. 加载版本与总体性能
+    // 1. 加载版本
     useEffect(() => {
         if (!targetDateStr) return;
         setLoadingVersions(true);
 
-        Promise.all([
-            loadForecastApi.getVersions(targetDateStr),
-            loadForecastApi.getPerformanceOverview('AGGREGATE')
-        ]).then(([vRes, pRes]) => {
-            setForecastVersions(vRes.data);
-            setPerformance(pRes.data);
-            if (vRes.data.length > 0) {
-                // If version already selected, keep it if exists, else select first
-                setSelectedVersion(prev => vRes.data.find(v => v.forecast_id === prev) ? prev : vRes.data[0].forecast_id);
-            } else {
-                setSelectedVersion('');
-            }
-        }).catch(err => {
-            console.error(err);
-            setError('获取版本及概览失败');
-        }).finally(() => setLoadingVersions(false));
+        loadForecastApi.getVersions(targetDateStr)
+            .then((res) => {
+                setForecastVersions(res.data);
+                if (res.data.length > 0) {
+                    // 如果已选中版本且仍在列表中，保持现状；否则选第一个
+                    setSelectedVersion(prev => res.data.find(v => v.forecast_id === prev) ? prev : res.data[0].forecast_id);
+                } else {
+                    setSelectedVersion('');
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                setError('获取版本失败');
+            })
+            .finally(() => setLoadingVersions(false));
     }, [targetDateStr, refreshKey]);
+
+    // 1.5 加载总体性能概览 (按 gap 分离)
+    useEffect(() => {
+        const gap = currentVersion?.gap;
+        loadForecastApi.getPerformanceOverview('AGGREGATE', gap)
+            .then(res => {
+                setPerformance(res.data);
+            })
+            .catch(err => {
+                console.error('Fetch performance overview failed:', err);
+            });
+    }, [currentVersion?.gap, refreshKey]);
 
     // 2. 加载整体数据和客户列表
     useEffect(() => {
@@ -353,9 +368,22 @@ export const LoadForecastWorkbench: React.FC = () => {
                             flexDirection: 'column'
                         }}
                     >
-                        <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-                            全网预测负荷曲线
-                        </Typography>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                            <Typography variant="subtitle1" fontWeight="bold">
+                                全网预测负荷曲线
+                            </Typography>
+                            <FormControlLabel
+                                control={
+                                    <Switch
+                                        size="small"
+                                        checked={yAxisStartFromZero}
+                                        onChange={(e) => setYAxisStartFromZero(e.target.checked)}
+                                    />
+                                }
+                                label={<Typography variant="caption">Y轴归零</Typography>}
+                                sx={{ mr: 0 }}
+                            />
+                        </Box>
 
                         <Box ref={overallChartRef} sx={{
                             position: 'relative',
@@ -397,7 +425,7 @@ export const LoadForecastWorkbench: React.FC = () => {
                                         />
                                         <YAxis
                                             yAxisId="left"
-                                            domain={['auto', 'auto']}
+                                            domain={yAxisStartFromZero ? [0, 'auto'] : ['auto', 'auto']}
                                             tick={{ fontSize: 11, fill: '#888' }}
                                             tickLine={{ stroke: '#ccc' }}
                                             axisLine={{ stroke: '#ccc' }}
@@ -611,14 +639,27 @@ export const LoadForecastWorkbench: React.FC = () => {
                                     </Box>
                                 ) : detailTab === 0 ? (
                                     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', p: 1.5 }}>
-                                        <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold', color: 'primary.main', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
-                                            <Box component="span" sx={{ width: 3, height: 14, bgcolor: 'primary.main', borderRadius: 1 }} />
-                                            {sortedCustomers.find(c => c.customer_id === selectedCustomerId)?.short_name || '未知客户'} - 预测详情
-                                            {/* Tags */}
-                                            {sortedCustomers.find(c => c.customer_id === selectedCustomerId)?.tags?.map(tag => (
-                                                <Chip key={tag} label={tag} size="small" variant="outlined" color="info" sx={{ height: 20 }} />
-                                            ))}
-                                        </Typography>
+                                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexWrap: 'wrap', gap: 1 }}>
+                                            <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: 'primary.main', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+                                                <Box component="span" sx={{ width: 3, height: 14, bgcolor: 'primary.main', borderRadius: 1 }} />
+                                                {sortedCustomers.find(c => c.customer_id === selectedCustomerId)?.short_name || '未知客户'}
+                                                {/* Tags */}
+                                                {sortedCustomers.find(c => c.customer_id === selectedCustomerId)?.tags?.map(tag => (
+                                                    <Chip key={tag} label={tag} size="small" variant="outlined" color="info" sx={{ height: 20 }} />
+                                                ))}
+                                            </Typography>
+                                            <FormControlLabel
+                                                control={
+                                                    <Switch
+                                                        size="small"
+                                                        checked={yAxisStartFromZero}
+                                                        onChange={(e) => setYAxisStartFromZero(e.target.checked)}
+                                                    />
+                                                }
+                                                label={<Typography variant="caption">Y轴归零</Typography>}
+                                                sx={{ mr: 0 }}
+                                            />
+                                        </Box>
                                         <Box ref={customerChartRef} sx={{
                                             position: 'relative',
                                             height: { xs: 300, md: '100%' }, // Fixed height on mobile
@@ -659,7 +700,7 @@ export const LoadForecastWorkbench: React.FC = () => {
                                                     />
                                                     <YAxis
                                                         yAxisId="left"
-                                                        domain={['auto', 'auto']}
+                                                        domain={yAxisStartFromZero ? [0, 'auto'] : ['auto', 'auto']}
                                                         tick={{ fontSize: 11, fill: '#888' }}
                                                         tickLine={{ stroke: '#ccc' }}
                                                         axisLine={{ stroke: '#ccc' }}

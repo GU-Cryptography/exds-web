@@ -19,16 +19,17 @@ router = APIRouter(prefix="/system", tags=["系统管理"])
 # ========== 数据模型 ==========
 
 class AlertItem(BaseModel):
-    alert_id: str
+    alert_id: Optional[str] = None
     level: str
     category: str
     title: str
     content: str
     status: str
     service_type: Optional[str] = None
-    task_type: str
+    task_type: Optional[str] = None
     related_task_id: Optional[str] = None
     created_at: datetime
+    context: Optional[dict] = None
     resolved_at: Optional[datetime] = None
     resolved_by: Optional[str] = None
     resolution_note: Optional[str] = None
@@ -175,10 +176,26 @@ async def get_alerts(
         
         # 查询数据(分页)
         skip = (page - 1) * page_size
-        alerts = list(DATABASE["system_alerts"].find(
-            query,
-            {"_id": 0}
+        raw_alerts = list(DATABASE["system_alerts"].find(
+            query
         ).sort(sort_field, sort_dir).skip(skip).limit(page_size))
+        
+        # 处理缺失字段并转换数据
+        alerts = []
+        for doc in raw_alerts:
+            # 补全 alert_id (如果缺失则使用 _id)
+            if not doc.get("alert_id"):
+                doc["alert_id"] = str(doc["_id"])
+            
+            # 补全 task_type (如果缺失则设为 UNKNOWN)
+            if not doc.get("task_type"):
+                doc["task_type"] = "UNKNOWN"
+            
+            # 移除 _id 以符合 AlertItem 模型
+            if "_id" in doc:
+                del doc["_id"]
+            
+            alerts.append(doc)
         
         return {
             "total": total,
@@ -304,8 +321,22 @@ async def resolve_alert(
 ):
     """解决告警"""
     try:
+        # 支持通过 alert_id 或 ObjectId 匹配
+        from bson import ObjectId
+        
+        query = {"alert_id": alert_id}
+        # 如果 alert_id 看起来像 ObjectId, 也尝试作为 _id 查询
+        if len(alert_id) == 24:
+            try:
+                query = {"$or": [
+                    {"alert_id": alert_id},
+                    {"_id": ObjectId(alert_id)}
+                ]}
+            except:
+                pass
+
         result = DATABASE["system_alerts"].update_one(
-            {"alert_id": alert_id},
+            query,
             {
                 "$set": {
                     "status": "RESOLVED",
