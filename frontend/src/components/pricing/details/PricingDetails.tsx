@@ -3,101 +3,117 @@ import { Paper, Typography, Grid, Box, Chip, Alert, Divider } from '@mui/materia
 import { PricingModel } from '../../../types/pricing';
 
 interface PricingDetailsProps {
-  model: PricingModel | undefined;
-  pricingConfig: Record<string, any>;
-  packageType: 'time_based' | 'non_time_based';
-  isGreenPower?: boolean;
+    model: PricingModel | undefined;
+    pricingConfig: Record<string, any>;
+    packageType: 'time_based' | 'non_time_based';
+    isGreenPower?: boolean;
 }
 
 // 参考价类型映射
 const getReferenceTypeLabel = (value: string, isTimeBased: boolean): string => {
-  const map: Record<string, { timeBased: string; nonTimeBased: string }> = {
-    'day_ahead_avg': {
-      timeBased: '日前市场均价（分时）',
-      nonTimeBased: '日前市场均价'
-    },
-    'real_time_avg': {
-      timeBased: '实时市场均价（分时）',
-      nonTimeBased: '实时市场均价'
-    },
-    'market_monthly_avg': {
-      timeBased: '电力市场月度交易均价(当月平均上网电价)（分时）',
-      nonTimeBased: '电力市场月度交易均价(当月平均上网电价)'
-    },
-    'grid_agency_price': {
-      timeBased: '电网代理购电价格（分时）',
-      nonTimeBased: '电网代理购电价格'
-    },
-    'ceiling_price': {
-      timeBased: '上限价',
-      nonTimeBased: '上限价'
-    },
-    'annual_longterm_time': {
-      timeBased: '售电侧年度中长期分时交易价格',
-      nonTimeBased: '售电侧年度中长期分时交易价格'
-    },
-    'monthly_settlement_avg': {
-      timeBased: '售电侧月度结算加权价（不分时）',
-      nonTimeBased: '售电侧月度结算加权价（不分时）'
-    },
-    'longterm_time': {
-      timeBased: '售电侧中长期分时交易价格',
-      nonTimeBased: '售电侧中长期分时交易价格'
-    }
-  };
+    const map: Record<string, { timeBased: string; nonTimeBased: string }> = {
+        'day_ahead_avg': {
+            timeBased: '日前市场均价（分时）',
+            nonTimeBased: '日前市场均价'
+        },
+        'real_time_avg': {
+            timeBased: '实时市场均价（分时）',
+            nonTimeBased: '实时市场均价'
+        },
+        'market_monthly_avg': {
+            timeBased: '电力市场月度交易均价(当月平均上网电价)（分时）',
+            nonTimeBased: '电力市场月度交易均价(当月平均上网电价)'
+        },
+        'grid_agency_price': {
+            timeBased: '电网代理购电价格（分时）',
+            nonTimeBased: '电网代理购电价格'
+        },
+        'ceiling_price': {
+            timeBased: '上限价',
+            nonTimeBased: '上限价'
+        },
+        'upper_limit_price': {
+            timeBased: '上限价',
+            nonTimeBased: '上限价'
+        },
+        'annual_longterm_time': {
+            timeBased: '售电侧年度中长期分时交易价格',
+            nonTimeBased: '售电侧年度中长期分时交易价格'
+        },
+        'annual_term_time_price': {
+            timeBased: '售电侧年度中长期分时交易价格',
+            nonTimeBased: '售电侧年度中长期分时交易价格'
+        },
+        'monthly_settlement_avg': {
+            timeBased: '售电侧月度结算加权价（不分时）',
+            nonTimeBased: '售电侧月度结算加权价（不分时）'
+        },
+        'monthly_settlement_weighted_price': {
+            timeBased: '售电侧月度结算加权价（不分时）',
+            nonTimeBased: '售电侧月度结算加权价（不分时）'
+        },
+        'longterm_time': {
+            timeBased: '售电侧中长期分时交易价格',
+            nonTimeBased: '售电侧中长期分时交易价格'
+        },
+        'term_time_price': {
+            timeBased: '售电侧中长期分时交易价格',
+            nonTimeBased: '售电侧中长期分时交易价格'
+        }
+    };
 
-  if (map[value]) {
-    return isTimeBased ? map[value].timeBased : map[value].nonTimeBased;
-  }
-  return value; // 如果找不到映射，返回原值
+    if (map[value]) {
+        return isTimeBased ? map[value].timeBased : map[value].nonTimeBased;
+    }
+    return value; // 如果找不到映射，返回原值
 };
 
 // 联动标的映射
 const getLinkedTargetLabel = (value: string, isTimeBased: boolean): string => {
-  const map: Record<string, { timeBased: string; nonTimeBased: string }> = {
-    'day_ahead_avg': {
-      timeBased: '日前市场均价（分时）',
-      nonTimeBased: '日前市场均价'
-    },
-    'real_time_avg': {
-      timeBased: '实时市场均价（分时）',
-      nonTimeBased: '实时市场均价'
-    }
-  };
+    const map: Record<string, { timeBased: string; nonTimeBased: string }> = {
+        'day_ahead_avg': {
+            timeBased: '日前市场均价（分时）',
+            nonTimeBased: '日前市场均价'
+        },
+        'real_time_avg': {
+            timeBased: '实时市场均价（分时）',
+            nonTimeBased: '实时市场均价'
+        }
+    };
 
-  if (map[value]) {
-    return isTimeBased ? map[value].timeBased : map[value].nonTimeBased;
-  }
-  return value;
+    if (map[value]) {
+        return isTimeBased ? map[value].timeBased : map[value].nonTimeBased;
+    }
+    return value;
 };
 
 // 格式化数字
 const formatNumber = (value: any, decimals: number = 0): string => {
-  if (value === undefined || value === null || value === '') return '';
-  const num = Number(value);
-  if (isNaN(num)) return String(value);
+    if (value === undefined || value === null || value === '') return '';
+    const num = Number(value);
+    if (isNaN(num)) return String(value);
 
-  // 如果 decimals 为 0，按实际小数位显示
-  if (decimals === 0) {
-    // 转换为字符串，去除不必要的尾随零
-    const str = num.toString();
-    // 如果是科学计数法，使用 toLocaleString 转换
-    if (str.includes('e')) {
-      return num.toLocaleString('zh-CN', { maximumFractionDigits: 10 });
+    // 如果 decimals 为 0，按实际小数位显示
+    if (decimals === 0) {
+        // 转换为字符串，去除不必要的尾随零
+        const str = num.toString();
+        // 如果是科学计数法，使用 toLocaleString 转换
+        if (str.includes('e')) {
+            return num.toLocaleString('zh-CN', { maximumFractionDigits: 10 });
+        }
+        // 处理普通数字
+        const parts = str.split('.');
+        if (parts.length === 1) {
+            // 整数
+            return parts[0];
+        } else {
+            // 小数，去除尾随零
+            const decimal = parts[1].replace(/0+$/, '');
+            return decimal ? `${parts[0]}.${decimal}` : parts[0];
+        }
     }
-    // 处理普通数字
-    const parts = str.split('.');
-    if (parts.length === 1) {
-      // 整数
-      return parts[0];
-    } else {
-      // 小数，去除尾随零
-      const decimal = parts[1].replace(/0+$/, '');
-      return decimal ? `${parts[0]}.${decimal}` : parts[0];
-    }
-  }
 
-  return num.toFixed(decimals);
+    return num.toFixed(decimals);
 };
 
 // 辅助函数，用于渲染单个配置项

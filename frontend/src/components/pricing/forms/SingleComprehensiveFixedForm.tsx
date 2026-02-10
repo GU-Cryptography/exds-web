@@ -21,7 +21,11 @@ export const SingleComprehensiveFixedForm: React.FC<SingleComprehensiveFixedForm
             name="pricing_config.flat_price"
             control={control}
             defaultValue=""
-            rules={{ required: '平段基准价必填' }}
+            rules={{
+              required: '平段基准价必填',
+              min: { value: 0.33144, message: '不得低于0.33144元/kWh' },
+              max: { value: 0.49716, message: '不得高于0.49716元/kWh' }
+            }}
             render={({ field, fieldState }) => (
               <TextField
                 {...field}

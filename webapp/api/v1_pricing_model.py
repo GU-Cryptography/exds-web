@@ -2,7 +2,7 @@ import logging
 from fastapi import APIRouter, Query, Body, HTTPException
 
 from webapp.tools.mongo import DATABASE
-from webapp.services import pricing_model_service
+from webapp.services.pricing_model_service import pricing_model_service
 from webapp.services.package_service import PackageService
 from webapp.services.pricing_engine import PricingEngine
 

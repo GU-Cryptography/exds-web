@@ -28,8 +28,6 @@ export const FixedLinkedPriceForm: React.FC<FixedLinkedPriceFormProps> = ({ cont
                   defaultValue=""
                   rules={{
                     required: '尖峰价格必填',
-                    min: { value: 0.33144, message: '不得低于0.33144元/kWh' },
-                    max: { value: 0.49716, message: '不得高于0.49716元/kWh' }
                   }}
                   render={({ field, fieldState }) => (
                     <TextField
@@ -51,8 +49,6 @@ export const FixedLinkedPriceForm: React.FC<FixedLinkedPriceFormProps> = ({ cont
                   defaultValue=""
                   rules={{
                     required: '峰价格必填',
-                    min: { value: 0.33144, message: '不得低于0.33144元/kWh' },
-                    max: { value: 0.49716, message: '不得高于0.49716元/kWh' }
                   }}
                   render={({ field, fieldState }) => (
                     <TextField
@@ -97,8 +93,6 @@ export const FixedLinkedPriceForm: React.FC<FixedLinkedPriceFormProps> = ({ cont
                   defaultValue=""
                   rules={{
                     required: '谷价格必填',
-                    min: { value: 0.33144, message: '不得低于0.33144元/kWh' },
-                    max: { value: 0.49716, message: '不得高于0.49716元/kWh' }
                   }}
                   render={({ field, fieldState }) => (
                     <TextField
@@ -120,8 +114,6 @@ export const FixedLinkedPriceForm: React.FC<FixedLinkedPriceFormProps> = ({ cont
                   defaultValue=""
                   rules={{
                     required: '深谷价格必填',
-                    min: { value: 0.33144, message: '不得低于0.33144元/kWh' },
-                    max: { value: 0.49716, message: '不得高于0.49716元/kWh' }
                   }}
                   render={({ field, fieldState }) => (
                     <TextField

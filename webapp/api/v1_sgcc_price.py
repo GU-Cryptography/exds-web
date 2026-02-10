@@ -5,7 +5,7 @@ from fastapi import APIRouter, File, UploadFile, Depends, HTTPException, Respons
 
 from webapp.tools.mongo import DATABASE
 from webapp.tools.security import get_current_active_user, User
-from webapp.services import sgcc_price_service
+from webapp.services.sgcc_price_service import sgcc_price_service
 
 logger = logging.getLogger(__name__)
 

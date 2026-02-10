@@ -150,28 +150,34 @@ class PricingModelService:
         errors = []
 
         if is_time_based:
-            # 分时：检查各时段价格
-            time_periods = ["peak", "high", "flat", "valley", "deep_valley"]
-            for period in time_periods:
-                price_key = f"fixed_price_{period}"
-                price = config.get(price_key)
+            # 分时：仅检查平段价格
+            price_key = "fixed_price_flat"
+            price_raw = config.get(price_key)
 
-                if price is not None:
+            if price_raw is not None and price_raw != "":
+                try:
+                    price = float(price_raw)
                     if price < LOWER_LIMIT or price > UPPER_LIMIT:
                         errors.append(
-                            f"{period} 价格 {price:.5f} 元/kWh 超出范围 "
+                            f"平段价格 {price:.5f} 元/kWh 超出范围 "
                             f"[{LOWER_LIMIT}, {UPPER_LIMIT}]"
                         )
+                except (ValueError, TypeError):
+                    errors.append(f"平段价格 {price_raw} 不是有效的数字")
         else:
             # 不分时：检查单一价格
-            price = config.get("fixed_price_value")
+            price_raw = config.get("fixed_price_value")
 
-            if price is not None:
-                if price < LOWER_LIMIT or price > UPPER_LIMIT:
-                    errors.append(
-                        f"固定价格 {price:.5f} 元/kWh 超出范围 "
-                        f"[{LOWER_LIMIT}, {UPPER_LIMIT}]"
-                    )
+            if price_raw is not None and price_raw != "":
+                try:
+                    price = float(price_raw)
+                    if price < LOWER_LIMIT or price > UPPER_LIMIT:
+                        errors.append(
+                            f"固定价格 {price:.5f} 元/kWh 超出范围 "
+                            f"[{LOWER_LIMIT}, {UPPER_LIMIT}]"
+                        )
+                except (ValueError, TypeError):
+                    errors.append(f"固定价格 {price_raw} 不是有效的数字")
 
         return errors
 
@@ -196,7 +202,12 @@ class PricingModelService:
         """验证463号文分时比例"""
         warnings = []
 
-        flat = config.get("fixed_price_flat")
+        # 安全地获取平段价格（浮点数）
+        flat_raw = config.get("fixed_price_flat")
+        try:
+            flat = float(flat_raw) if flat_raw else 0
+        except (ValueError, TypeError):
+            flat = 0
 
         if not flat or flat == 0:
             return warnings  # 平段价格不存在，不进行比例校验
@@ -208,11 +219,18 @@ class PricingModelService:
             "deep_valley_to_flat": 0.3  # 深谷/平 = 0.3 (下浮70%)
         }
 
+        def get_float(key):
+            val = config.get(key, 0)
+            try:
+                return float(val) if val else 0
+            except (ValueError, TypeError):
+                return 0
+
         actual_ratios = {
-            "peak_to_flat": (config.get("fixed_price_peak", 0) / flat) if flat else 0,
-            "high_to_flat": (config.get("fixed_price_high", 0) / flat) if flat else 0,
-            "valley_to_flat": (config.get("fixed_price_valley", 0) / flat) if flat else 0,
-            "deep_valley_to_flat": (config.get("fixed_price_deep_valley", 0) / flat) if flat else 0,
+            "peak_to_flat": (get_float("fixed_price_peak") / flat) if flat else 0,
+            "high_to_flat": (get_float("fixed_price_high") / flat) if flat else 0,
+            "valley_to_flat": (get_float("fixed_price_valley") / flat) if flat else 0,
+            "deep_valley_to_flat": (get_float("fixed_price_deep_valley") / flat) if flat else 0,
         }
 
         # 允许0.01的误差
