@@ -144,6 +144,7 @@
 | `pumped_storage_clearing_power` | Number | 抽蓄出清电量 (MWh)，精度4位小数。 |
 | `battery_storage_clearing_power` | Number | 储能出清电量 (MWh)，精度4位小数。 |
 | `avg_clearing_price` | Number | 出清均价 (元/MWh)，精度2位小数。 |
+| `arithmetic_avg_clearing_price` | Number | 算术出清均价 (元/MWh)，精度2位小数。 |
 
 ### 5.2. 索引
 
@@ -789,3 +790,79 @@ db.customer_load_forecasts.createIndex({
 // 目标日期查询（用于对外展示/聚合）
 db.customer_load_forecasts.createIndex({ "target_date": 1, "customer_id": 1 })
 ```
+
+## 22. `spot_settlement_daily` - 平台日报结算数据
+
+该集合存储交易平台发布的批发侧**日清算结果（电能量）**，用于与本地预结算数据进行比对。
+
+- **数据来源**: 交易平台发布（来源于《现货结算--用电侧日结算信息.xls》）
+- **更新频率**: 每日 (D+2)
+- **业务意义**: 官方电能量结算依据。
+
+### 22.1 字段说明
+
+| 字段名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `operating_date` | String | **[主键]** 结算日期 (YYYY-MM-DD)。 |
+| `contract_volume` | Number | 中长期合同电量 (MWh)。 |
+| `contract_avg_price` | Number | 中长期合同均价 (元/MWh)。 |
+| `contract_fee` | Number | 中长期差价电费 (元)。 |
+| `day_ahead_volume` | Number | 日前出清电量 (MWh)。 |
+| `day_ahead_fee` | Number | 日前差价电费 (元)。 |
+| `real_time_volume` | Number | 实际用电量 (MWh)。 |
+| `real_time_fee` | Number | 实时全电量电费 (元)。 |
+| `total_fee` | Number | 电能量电费合计 (元)。 |
+| `avg_price` | Number | 结算均价 (元/MWh)。 |
+
+### 22.2 索引
+
+- `(operating_date: 1)`: 唯一索引。
+
+---
+
+## 23. `spot_settlement_period` - 平台分时结算数据
+
+该集合存储交易平台发布的批发侧**分时结算详情** (48点)，提供精细化的费用构成分析。
+
+- **数据来源**: 交易平台发布（来源于《现货结算--用电侧24时段结算明细信息.xls》）
+- **更新频率**: 每日 (D+2)
+- **数据粒度**: 30分钟，每日48点
+
+### 23.1 字段说明
+
+| 字段名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `operating_date` | String | **[复合主键]** 结算日期 (YYYY-MM-DD)。 |
+| `period` | Number | **[复合主键]** 时段号 (1-48)。 |
+| `contract_volume` | Number | 中长期合同电量 (MWh)。 |
+| `contract_price` | Number | 中长期合同价格 (元/MWh)。 |
+| `contract_fee` | Number | 中长期差价电费 (元)。 |
+| `day_ahead_volume` | Number | 日前出清电量 (MWh)。 |
+| `day_ahead_price` | Number | 日前价格 (元/MWh)。 |
+| `day_ahead_fee` | Number | 日前差价电费 (元)。 |
+| `real_time_volume` | Number | 实际用电量 (MWh)。 |
+| `real_time_price` | Number | 实时价格 (元/MWh)。 |
+| `real_time_fee` | Number | 实时全电量电费 (元)。 |
+| `total_fee` | Number | 电能量电费合计 (元)。 |
+| `avg_price` | Number | 结算均价 (元/MWh)。 |
+
+
+## 24. `mechanism_energy_monthly` - 机制电量月度数据
+
+该集合存储**机制电量**（新能源机制）的月度分时数据。机制电量不参与市场化差价结算，在计算偏差考核时需从实际用电量中扣除。
+
+- **数据来源**: 线下导入（来源于《机制电量明细.xls》）
+- **更新频率**: 每月发布
+- **数据处理**: 结算时需将月度值平均分配到当月每一天。
+
+### 24.1 字段说明
+
+| 字段名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `month_str` | String | **[主键]** 月份 (YYYY-MM)。 |
+| `entity_name` | String | 市场成员名称。 |
+| `period_values` | Array\<Float\> | 48点电量值数组 (MWh) - **月度总值**。数组下标对应时段 (0 -> Period 1)。 |
+
+### 24.2 索引
+
+- `(month_str: 1, entity_name: 1)`: 唯一索引。

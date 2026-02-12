@@ -15,6 +15,9 @@ from webapp.scheduler.jobs.aggregation_jobs import (
 from webapp.scheduler.jobs.accuracy_jobs import (
     event_driven_accuracy_job
 )
+from webapp.scheduler.jobs.settlement_jobs import (
+    event_driven_settlement_job
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +58,15 @@ def setup_scheduler(app):
         'interval',
         minutes=10,
         id='web_event_forecast_accuracy',
+        replace_existing=True
+    )
+
+    # 预结算计算 (每30分钟检查数据完整性)
+    scheduler.add_job(
+        event_driven_settlement_job,
+        'interval',
+        minutes=30,
+        id='web_event_settlement_calc',
         replace_existing=True
     )
     
