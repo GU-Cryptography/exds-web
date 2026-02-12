@@ -102,11 +102,6 @@ class SettlementService:
         """核心计算逻辑: 单时段结算 & 偏差考核"""
         
         # 1. 基础电费计算
-        # 规则: 
-        # cost_contract = Q_contract * (P_contract - P_rt)
-        # cost_da = Q_da * (P_da - P_rt)
-        # cost_rt = Q_rt * P_rt
-        
         cost_contract = q_contract * (p_contract - p_rt)
         cost_da = q_da * (p_da - p_rt)
         cost_rt = q_rt * p_rt
@@ -114,55 +109,45 @@ class SettlementService:
         total_energy_fee = cost_contract + cost_da + cost_rt
         
         # 2. 偏差考核 (标准值机制)
-        # Q_base = Q_rt - Q_mech
-        q_base = q_rt - q_mech
-        
-        # 签约比例 K = Q_contract / Q_base
+        # 规则更新 (Step 1010): 签约比例 K = (Q_contract + Q_mech) / Q_rt
         k_ratio = 0.0
-        if abs(q_base) > 1e-4: # 避免除零
-            k_ratio = q_contract / q_base
+        if abs(q_rt) > 1e-4:
+            k_ratio = (q_contract + q_mech) / q_rt
         else:
-             # 基数为0时的特殊处理: 若有合同则无穷大，无合同则视为平衡(1.0)?
-             # 简单处理: 无基数且无合同 -> 1.0 (不考核); 无基数有合同 -> 999 (过大)
-             k_ratio = 999.0 if q_contract > 1e-4 else 1.0
+             k_ratio = 1.0
              
         cost_actual = total_energy_fee
-        cost_std = cost_actual # 默认等于实际
-        # recovery_fee = max(0, cost_std - cost_actual) by default logic
+        cost_std = cost_actual # Default (Qualified)
         
         # 考核规则
         # 场景 A: 0.8 <= k <= 1.2 -> 免考
         if 0.8 <= k_ratio <= 1.2:
-            pass # cost_std = cost_actual
+            pass 
             
-        # 场景 B: k < 0.8 (少签) -> 按 80% 补足
+        # 场景 B: k < 0.8 (少签) -> 按 80% 补足 (含机制电量)
         elif k_ratio < 0.8:
-            q_target = 0.8 * q_base
-            q_gap = q_target - q_contract # > 0
+            # 补足缺口 Q_fill = 0.8 * Q_rt - (Q_contract + Q_mech)
+            # 标准值 = 实际合同费用 + 缺口部分按市场均价计算的差价 + (DA+RT费用不变)
+            # Cost_std = Cost_Actual + Gap * (P_mkt - P_rt)
             
-            # 补足部分按 市场均价 结算，但只是模拟 Cost_std
-            # Cost_std = Cost_contract + Q_gap * (P_market_avg - P_rt) + ... (其他成分不变)
-            # 简化公式: Cost_std = Cost_Actual + Q_gap * (P_market_avg - P_rt)
-            # 原理: 假设缺口部分是以 P_market_avg 买入的中长期，而不是暴露在 P_rt
-            
-            cost_std = cost_actual + q_gap * (p_market_avg - p_rt)
+            q_fill_gap = 0.8 * q_rt - (q_contract + q_mech)
+            cost_std = cost_actual + q_fill_gap * (p_market_avg - p_rt)
             
         # 场景 C: k > 1.2 (多签) -> 按 120% 剔除
         elif k_ratio > 1.2:
-            q_target = 1.2 * q_base
-            q_over = q_contract - q_target # > 0
+            # 目标允许签约量 = 1.2 * Q_rt - Q_mech
+            # 若 Q_mech > 1.2 * Q_rt, 则允许签约量 < 0 ?? (暂取 max(0, ...))
+            q_target_contract = max(0, 1.2 * q_rt - q_mech)
             
-            # 剔除部分: 假设多余合同退回，不再产生中长期差价，而是暴露在 P_rt?
-            # 或者是 剔除该部分的中长期收益/亏损
-            # Cost_std = Cost_Actual - Q_over * (P_company_contract - P_rt)
+            # 标准值模型: 按 (1.2 * Q_rt - Q_mech) 作为用户合同量，价格按用户均价
+            cost_std_contract = q_target_contract * (p_company_contract - p_rt)
+            cost_std = cost_std_contract + cost_da + cost_rt
             
-            cost_std = cost_actual - q_over * (p_company_contract - p_rt)
-            
-        # 计算回收费 (只收不退)
-        recovery_fee = max(0, cost_std - cost_actual)
+        # 单时段不计算回收费 (设为0，留到日汇总 Netting)
+        # recovery_fee = 0.0
         
-        # 3. 预测费用
-        predicted_cost = total_energy_fee + recovery_fee
+        # 3. 预测费用 (暂不含回收费，最后加)
+        # predicted_cost = total_energy_fee + recovery_fee
         
         # 4. 组装对象
         return SettlementPeriodDetail(
@@ -174,10 +159,8 @@ class SettlementService:
             total_energy_fee=total_energy_fee,
             energy_avg_price=(total_energy_fee / q_rt) if abs(q_rt) > 1e-4 else 0.0,
             contract_ratio=k_ratio * 100, # 百分比
-            standard_value_cost=cost_std,
-            recovery_fee=recovery_fee,
-            predicted_wholesale_cost=predicted_cost,
-            predicted_wholesale_price=(predicted_cost / q_rt) if abs(q_rt) > 1e-4 else 0.0
+            standard_value_cost=cost_std
+            # Removed per-period recovery and predicted fields
         )
 
     async def _fetch_basis_data(self, date_str: str) -> Optional[Dict]:
@@ -415,7 +398,6 @@ class SettlementService:
             
         # Contract Avg Price: Weighted Avg
         total_contract_vol = _sum('contract.volume')
-        contract_fee_sum = _sum('contract.price') * 0 # calculate from vol*price? No, sum(vol*price)/sum(vol)
         # Re-calc weighted price
         w_price_sum = sum(p.contract.volume * p.contract.price for p in period_details)
         contract_avg_price = (w_price_sum / total_contract_vol) if total_contract_vol > 0.001 else 0.0
@@ -425,8 +407,14 @@ class SettlementService:
         total_energy_fee = _sum('total_energy_fee')
         energy_avg_price = (total_energy_fee / total_rt_vol) if total_rt_vol > 0.001 else 0.0
         
-        # Predicted
-        pred_cost = _sum('predicted_wholesale_cost')
+        # Deviation Recovery (Daily Netting)
+        # Sum Standard Cost vs Sum Actual Cost
+        total_std_cost = _sum('standard_value_cost')
+        daily_recovery_fee = max(0, total_std_cost - total_energy_fee)
+        
+        # Distribute / Adjust Predicted Cost in details? No, keep details as is, just update Daily Total.
+        # Predicted Wholesale Cost = Energy + Recovery
+        pred_cost = total_energy_fee + daily_recovery_fee
         pred_price = (pred_cost / total_rt_vol) if total_rt_vol > 0.001 else 0.0
         
         return SettlementDaily(
@@ -447,7 +435,8 @@ class SettlementService:
             total_energy_fee=total_energy_fee,
             energy_avg_price=energy_avg_price,
             
-            deviation_recovery_fee=_sum('recovery_fee'),
+            deviation_recovery_fee=daily_recovery_fee,
+            total_standard_value_cost=total_std_cost,
             
             predicted_wholesale_cost=pred_cost,
             predicted_wholesale_price=pred_price

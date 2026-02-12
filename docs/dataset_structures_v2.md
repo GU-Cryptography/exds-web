@@ -606,6 +606,105 @@ critical_alerts = db.customer_anomaly_alerts.find({
 
 ---
 
+## 14. `retail_settlement_daily` - 零售日结算单
+
+该集合存储客户每日的零售电费结算结果（预结算/正式结算），包含分时电费明细和汇总数据。
+
+**模型文件**: `webapp/models/retail_settlement.py`
+
+### 14.1. 字段说明
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `_id` | `ObjectId` | 唯一ID |
+| `customer_id` | `String` | 客户ID |
+| `customer_name` | `String` | 客户名称 |
+| `date` | `String` | 结算日期 (YYYY-MM-DD) |
+| `contract_id` | `String` | 关联合同ID |
+| `package_name` | `String` | 套餐名称 |
+| `model_code` | `String` | 定价模型代码 |
+| `settlement_type` | `String` | 结算类型: "daily" (预结算) / "monthly" (正式结算) |
+| `reference_price` | `Object` | 参考价信息 (价差分成类) |
+| `reference_price.type` | `String` | 类型: market_monthly_avg / upper_limit_price |
+| `reference_price.base_value` | `Number` | 基准值 (元/kWh) |
+| `reference_price.source` | `String` | 来源: official / simulated |
+| `reference_price.source_month` | `String` | 参考价所属月份 (YYYY-MM) |
+| `fixed_prices` | `Object` | 固定分时价格 (固定联动类) `{tip, peak, flat, valley, deep}` |
+| `linked_config` | `Object` | 联动配置 (固定联动类) |
+| `linked_config.ratio` | `Number` | 联动比例 (%) |
+| `linked_config.target` | `String` | 联动标的类型 |
+| `linked_config.target_prices` | `Object` | 联动标的分时价格 `{tip, peak, ...}` |
+| `final_prices` | `Object` | **最终结算价格** `{tip, peak, flat, valley, deep}` |
+| `price_ratio_adjusted` | `Boolean` | 是否经过463号文比例调节 |
+| `period_details` | `Array` | 48点明细列表 |
+| `period_details.period` | `Integer` | 时段号 (1-48) |
+| `period_details.period_type` | `String` | 时段类型 (尖峰/高峰/平段/低谷/深谷) |
+| `period_details.load_mwh` | `Number` | 时段电量 (MWh) |
+| `period_details.unit_price` | `Number` | 时段单价 (元/kWh) |
+| `period_details.fee` | `Number` | 时段电费 (元) |
+| `total_load_mwh` | `Number` | 日总电量 (MWh) |
+| `total_fee` | `Number` | 日总电费 (元) |
+| `avg_price` | `Number` | 日加权均价 (元/kWh) |
+| `tou_summary` | `Object` | 分时段汇总 `{tip, peak, flat, valley, deep}` |
+| `tou_summary.tip.load_mwh` | `Number` | 尖峰总电量 |
+| `tou_summary.tip.fee` | `Number` | 尖峰总电费 |
+| `version` | `Integer` | 数据版本 |
+| `created_at` | `DateTime` | 创建时间 |
+| `updated_at` | `DateTime` | 更新时间 |
+
+### 14.2. 索引信息
+
+- `_id_` (默认)
+- `customer_id`, `date`, `settlement_type` (唯一复合索引)
+- `date`
+- `contract_id`
 
 
 
+
+
+
+## 15. `settlement_daily` - 批发侧日结算单 (预结算/正式)
+
+该集合存储每日**批发侧**结算结果，用于支持电费账单生成、偏差分析及趋势预测。数据粒度为日汇总+48点明细。
+
+**模型文件**: `webapp/models/settlement.py`
+
+### 15.1. 字段说明
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `_id` | `ObjectId` | 唯一ID |
+| `operating_date` | `String` | 结算日期 (YYYY-MM-DD，唯一索引) |
+| `version` | `Integer` | 计算版本号 |
+| `contract_volume` | `Number` | 中长期合同电量 (MWh) |
+| `contract_avg_price` | `Number` | 中长期合同均价 (元/MWh) |
+| `contract_fee` | `Number` | 中长期差价电费 (元) |
+| `day_ahead_volume` | `Number` | 日前出清电量 (MWh) |
+| `day_ahead_fee` | `Number` | 日前差价电费 (元) |
+| `real_time_volume` | `Number` | 实际用电量 (MWh) |
+| `real_time_fee` | `Number` | 实时全电量电费 (元) |
+| `total_energy_fee` | `Number` | 电能量费用合计 (元) |
+| `energy_avg_price` | `Number` | 结算均价 (元/MWh) |
+| `deviation_recovery_fee` | `Number` | **偏差回收费用** (元，日净额后) |
+| `total_standard_value_cost` | `Number` | **标准值费用合计** (元，用于偏差回收计算) |
+| `predicted_wholesale_cost` | `Number` | 预测批发总费用 (元，含回收费) |
+| `predicted_wholesale_price` | `Number` | 预测批发均价 (元/MWh) |
+| `period_details` | `Array` | 48点分时明细 |
+| `period_details.period` | `Integer` | 时段号 |
+| `period_details.mechanism_volume` | `Number` | 机制电量 |
+| `period_details.contract` | `Object` | 中长期分量 `{volume, price, fee}` |
+| `period_details.day_ahead` | `Object` | 日前分量 `{volume, price, fee}` |
+| `period_details.real_time` | `Object` | 实时分量 `{volume, price, fee}` |
+| `period_details.total_energy_fee` | `Number` | 时段电能量费用 |
+| `period_details.contract_ratio` | `Number` | 签约比例 (%) |
+| `period_details.standard_value_cost` | `Number` | 标准值费用 (模拟) |
+| `created_at` | `DateTime` | 创建时间 |
+| `updated_at` | `DateTime` | 更新时间 |
+
+### 15.2. 索引信息
+
+- `_id_` (默认)
+- `operating_date` (唯一索引)
+
+---

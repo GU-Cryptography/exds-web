@@ -71,11 +71,9 @@ class SettlementPeriodDetail(BaseModel):
     # 偏差考核
     contract_ratio: float = Field(..., description="签约比例 (%)")
     standard_value_cost: float = Field(..., description="标准值费用 (模拟)")
-    recovery_fee: float = Field(..., description="偏差回收费 (Max(0, Std - Act))")
-
-    # 预测费用 (新增字段)
-    predicted_wholesale_cost: float = Field(..., description="预测批发总费用 (Total + Recovery)")
-    predicted_wholesale_price: float = Field(..., description="预测批发均价 (Predicted / RT_Vol)")
+    # 偏差考核
+    contract_ratio: float = Field(..., description="签约比例 (%)")
+    standard_value_cost: float = Field(..., description="标准值费用 (模拟)")
 
 
 # --- 日结算主模型 ---
@@ -111,6 +109,7 @@ class SettlementDaily(BaseMongoModel):
     
     # 考核
     deviation_recovery_fee: float = Field(..., description="偏差回收费用 (累加)")
+    total_standard_value_cost: float = Field(..., description="标准值模拟费用合计 (用于Max计算)")
     
     # 预测 (新增字段)
     predicted_wholesale_cost: float = Field(..., description="预测批发总费用 (Total + Recovery)")
