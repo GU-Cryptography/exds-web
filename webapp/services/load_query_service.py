@@ -128,6 +128,16 @@ class LoadQueryService:
             df.set_index(index_key, inplace=True)
         return df
 
+    @staticmethod
+    def get_latest_data_date(customer_id: Optional[str] = None) -> Optional[str]:
+        """查询统一负荷曲线的最新数据日期"""
+        query = {}
+        if customer_id:
+            query["customer_id"] = customer_id
+            
+        latest_doc = UNIFIED_LOAD_CURVE.find_one(query, sort=[("date", -1)])
+        return latest_doc.get("date") if latest_doc else None
+
     # =========================================================================
     # 1. 基础查询接口 (单客户)
     # =========================================================================

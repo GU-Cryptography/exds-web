@@ -22,6 +22,22 @@ class SettlementService:
         self.db = DATABASE
         self.contract_service = ContractService(self.db)
 
+    async def get_latest_results_date(self, version: SettlementVersion) -> Optional[str]:
+        """查询指定版本的最新结算结果日期"""
+        latest_doc = self.db.settlement_daily.find_one(
+            {"version": version}, 
+            sort=[("operating_date", -1)]
+        )
+        return latest_doc.get("operating_date") if latest_doc else None
+
+    async def get_latest_platform_source_date(self) -> Optional[str]:
+        """查询平台日报(D+2)源数据的最新日期"""
+        latest_doc = self.db.spot_settlement_daily.find_one(
+            {}, 
+            sort=[("operating_date", -1)]
+        )
+        return latest_doc.get("operating_date") if latest_doc else None
+
     def _round(self, value: float, decimals: int) -> float:
         """数值修约辅助函数"""
         if value is None:

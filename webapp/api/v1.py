@@ -10,7 +10,8 @@ from webapp.api import (
     # New modules
     v1_common, v1_market_analysis, v1_sgcc_price,
     v1_pricing_model, v1_customer_tags, v1_system,
-    v1_load_forecast, v1_manual_adjustment, v1_settlement
+    v1_load_forecast, v1_manual_adjustment, v1_settlement,
+    v1_retail_settlement
 )
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ router.include_router(v1_sgcc_price.router)
 router.include_router(v1_pricing_model.router)
 router.include_router(v1_customer_tags.router)
 router.include_router(v1_settlement.router)
+router.include_router(v1_retail_settlement.router)
 
 # Include additional routers previously in main.py
 router.include_router(v1_rpa_monitor.router, prefix="/rpa", tags=["RPA监控"])

@@ -648,7 +648,6 @@ critical_alerts = db.customer_anomaly_alerts.find({
 | `tou_summary` | `Object` | 分时段汇总 `{tip, peak, flat, valley, deep}` |
 | `tou_summary.tip.load_mwh` | `Number` | 尖峰总电量 |
 | `tou_summary.tip.fee` | `Number` | 尖峰总电费 |
-| `version` | `Integer` | 数据版本 |
 | `created_at` | `DateTime` | 创建时间 |
 | `updated_at` | `DateTime` | 更新时间 |
 
@@ -675,7 +674,7 @@ critical_alerts = db.customer_anomaly_alerts.find({
 | 字段名 | 类型 | 说明 |
 | :--- | :--- | :--- |
 | `_id` | `ObjectId` | 唯一ID |
-| `operating_date` | `String` | 结算日期 (YYYY-MM-DD，唯一索引) |
+| `operating_date` | `String` | 结算日期 (YYYY-MM-DD) |
 | `version` | `Integer` | 计算版本号 |
 | `contract_volume` | `Number` | 中长期合同电量 (MWh) |
 | `contract_avg_price` | `Number` | 中长期合同均价 (元/MWh) |
@@ -705,6 +704,7 @@ critical_alerts = db.customer_anomaly_alerts.find({
 ### 15.2. 索引信息
 
 - `_id_` (默认)
-- `operating_date` (唯一索引)
+- `operating_date`, `version` (唯一复合索引)
+- `operating_date`
 
 ---
