@@ -98,3 +98,130 @@ async def get_daily_settlement(
 
     except Exception as e:
         return ResponseModel(code=500, message=str(e), data=[])
+
+
+@router.get("/overview", response_model=ResponseModel)
+async def get_settlement_overview(
+    month: str = Query(..., regex=r"^\d{4}-\d{2}$", description="月份，格式 YYYY-MM"),
+    version: SettlementVersion = Query(SettlementVersion.PRELIMINARY, description="结算版本"),
+):
+    """
+    预结算总览：汇总指定月份的批发侧成本、零售侧收入，计算毛利和均价。
+    """
+    try:
+        import calendar
+        year, mon = int(month[:4]), int(month[5:7])
+        _, last_day = calendar.monthrange(year, mon)
+        start_date = f"{month}-01"
+        end_date = f"{month}-{last_day:02d}"
+
+        db = service.db
+
+        # ====== 批发侧 ======
+        wholesale_cursor = db.settlement_daily.find(
+            {"operating_date": {"$gte": start_date, "$lte": end_date}, "version": version.value}
+        ).sort("operating_date", 1)
+
+        wholesale_by_date = {}
+        for doc in wholesale_cursor:
+            d = doc["operating_date"]
+            wholesale_by_date[d] = {
+                "volume_mwh": doc.get("real_time_volume", 0) or 0,
+                "wholesale_cost": doc.get("predicted_wholesale_cost", 0) or 0,
+                "deviation_recovery_fee": doc.get("deviation_recovery_fee", 0) or 0,
+                "wholesale_avg_price": doc.get("predicted_wholesale_price", 0) or 0,
+            }
+
+        # ====== 零售侧（聚合全客户）======
+        retail_pipeline = [
+            {"$match": {"date": {"$gte": start_date, "$lte": end_date}}},
+            {"$group": {
+                "_id": "$date",
+                "total_fee": {"$sum": "$total_fee"},
+                "total_load": {"$sum": "$total_load_mwh"},
+                "customer_count": {"$sum": 1},
+            }},
+            {"$sort": {"_id": 1}},
+        ]
+        retail_results = list(db.retail_settlement_daily.aggregate(retail_pipeline))
+        retail_by_date = {}
+        for r in retail_results:
+            retail_by_date[r["_id"]] = {
+                "retail_revenue": r["total_fee"] or 0,
+                "retail_load": r["total_load"] or 0,
+                "customer_count": r["customer_count"],
+            }
+
+        # ====== 合并日度数据 ======
+        all_dates = sorted(set(list(wholesale_by_date.keys()) + list(retail_by_date.keys())))
+
+        daily_details = []
+        cumulative_profit = 0
+        total_wholesale_cost = 0
+        total_retail_revenue = 0
+        total_volume = 0
+        total_deviation_recovery = 0
+        total_retail_load = 0
+        max_customer_count = 0
+
+        for d in all_dates:
+            w = wholesale_by_date.get(d, {"volume_mwh": 0, "wholesale_cost": 0, "deviation_recovery_fee": 0, "wholesale_avg_price": 0})
+            r = retail_by_date.get(d, {"retail_revenue": 0, "retail_load": 0, "customer_count": 0})
+
+            retail_avg_price = round(r["retail_revenue"] / r["retail_load"], 3) if r["retail_load"] > 0 else 0
+            price_spread = round(retail_avg_price - w["wholesale_avg_price"], 3)
+            daily_profit = round(r["retail_revenue"] - w["wholesale_cost"], 2)
+            cumulative_profit = round(cumulative_profit + daily_profit, 2)
+
+            total_wholesale_cost += w["wholesale_cost"]
+            total_retail_revenue += r["retail_revenue"]
+            total_volume += w["volume_mwh"]
+            total_deviation_recovery += w["deviation_recovery_fee"]
+            total_retail_load += r["retail_load"]
+            max_customer_count = max(max_customer_count, r["customer_count"])
+
+            daily_details.append({
+                "date": d,
+                "volume_mwh": round(w["volume_mwh"], 3),
+                "wholesale_cost": round(w["wholesale_cost"], 2),
+                "deviation_recovery_fee": round(w["deviation_recovery_fee"], 2),
+                "wholesale_avg_price": round(w["wholesale_avg_price"], 3),
+                "retail_revenue": round(r["retail_revenue"], 2),
+                "retail_avg_price": retail_avg_price,
+                "price_spread": price_spread,
+                "daily_profit": daily_profit,
+                "cumulative_profit": cumulative_profit,
+            })
+
+        # ====== 汇总 ======
+        wholesale_avg = round(total_wholesale_cost / total_volume, 3) if total_volume > 0 else 0
+        retail_avg = round(total_retail_revenue / total_retail_load, 3) if total_retail_load > 0 else 0
+        gross_profit = round(total_retail_revenue - total_wholesale_cost, 2)
+        profit_margin = round(gross_profit / total_wholesale_cost * 100, 2) if total_wholesale_cost > 0 else 0
+
+        summary = {
+            "customer_count": max_customer_count,
+            "settlement_start": all_dates[0] if all_dates else start_date,
+            "settlement_end": all_dates[-1] if all_dates else end_date,
+            "total_wholesale_cost": round(total_wholesale_cost, 2),
+            "total_retail_revenue": round(total_retail_revenue, 2),
+            "total_volume_mwh": round(total_volume, 3),
+            "total_deviation_recovery_fee": round(total_deviation_recovery, 2),
+            "wholesale_avg_price": wholesale_avg,
+            "retail_avg_price": retail_avg,
+            "price_spread": round(retail_avg - wholesale_avg, 3),
+            "gross_profit": gross_profit,
+            "profit_margin": profit_margin,
+        }
+
+        return ResponseModel(code=200, data={
+            "month": month,
+            "version": version.value,
+            "summary": summary,
+            "daily_details": daily_details,
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return ResponseModel(code=500, message=str(e), data=None)

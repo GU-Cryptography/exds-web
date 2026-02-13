@@ -21,6 +21,7 @@ import { CustomerLoadOverviewPage } from '../pages/CustomerLoadOverviewPage';
 import LoadCharacteristicsOverviewPage from '../pages/LoadCharacteristicsOverviewPage';
 import LoadCharacteristicsDetailPage from '../pages/LoadCharacteristicsDetailPage';
 import { SystemLogsPage } from '../pages/SystemLogsPage';
+import PreSettlementOverviewPage from '../pages/PreSettlementOverviewPage';
 
 // 路由配置接口
 export interface RouteConfig {
@@ -72,7 +73,7 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/risk-management/exposure', title: '风险敞口分析', component: PlaceholderPage },
 
     // 结算管理
-    { path: '/settlement/wholesale-pre-settlement', title: '批发侧预结算', component: PlaceholderPage },
+    { path: '/settlement/pre-settlement-overview', title: '预结算总览', component: PreSettlementOverviewPage },
     { path: '/settlement/bill-review', title: '平台账单复核', component: PlaceholderPage },
     { path: '/settlement/retail-settlement', title: '零售用户结算', component: PlaceholderPage },
     { path: '/settlement/profit-analysis', title: '经营利润分析', component: PlaceholderPage },

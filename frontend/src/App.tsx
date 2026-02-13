@@ -35,6 +35,7 @@ import { DayAheadPriceForecastPage } from './pages/DayAheadPriceForecastPage';
 import { WeatherDataPage } from './pages/WeatherDataPage';
 import { LoadDataDiagnosisPage } from './pages/LoadDataDiagnosisPage';
 import { LoadForecastWorkbench } from './pages/LoadForecastWorkbench';
+import PreSettlementOverviewPage from './pages/PreSettlementOverviewPage';
 import { TabProvider } from './contexts/TabContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { DesktopTabLayout } from './layouts/DesktopTabLayout';
@@ -112,7 +113,7 @@ const ResponsiveLayout: React.FC = () => {
                     <Route path="risk-management/exposure" element={<PlaceholderPage />} />
 
                     {/* 结算管理 */}
-                    <Route path="settlement/wholesale-pre-settlement" element={<PlaceholderPage />} />
+                    <Route path="settlement/pre-settlement-overview" element={<PreSettlementOverviewPage />} />
                     <Route path="settlement/bill-review" element={<PlaceholderPage />} />
                     <Route path="settlement/retail-settlement" element={<PlaceholderPage />} />
                     <Route path="settlement/profit-analysis" element={<PlaceholderPage />} />
