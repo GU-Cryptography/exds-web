@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Union
 from datetime import datetime
+from enum import Enum
 from bson import ObjectId
 
 class PyObjectId(ObjectId):
@@ -31,6 +32,16 @@ class BaseMongoModel(BaseModel):
     )
 
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
+
+# --- 定位版本枚举 ---
+
+class SettlementVersion(str, Enum):
+    """
+    结算版本枚举
+    """
+    PRELIMINARY = "PRELIMINARY"           # 版本1: 基于系统原始数据的初步预结算
+    PLATFORM_DAILY = "PLATFORM_DAILY"     # 版本2: 基于平台发布的日结数据计算 (确权)
+    PLATFORM_MONTHLY = "PLATFORM_MONTHLY" # 版本3: 基于平台月度统计参数计算 (终清)
 
 # --- 组件模型 ---
 
@@ -85,7 +96,8 @@ class SettlementDaily(BaseMongoModel):
     """
     # A. 基础信息
     operating_date: str = Field(..., description="结算日期 YYYY-MM-DD")
-    version: int = Field(1, description="计算版本")
+    version: Union[SettlementVersion, int] = Field(SettlementVersion.PRELIMINARY, description="计算版本")
+    data_source: Optional[str] = Field("Raw", description="数据来源说明")
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     

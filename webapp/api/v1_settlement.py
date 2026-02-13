@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from datetime import datetime
 
 from webapp.services.settlement_service import SettlementService
-from webapp.models.settlement import SettlementDaily
+from webapp.models.settlement import SettlementDaily, SettlementVersion
 
 router = APIRouter(prefix="/settlement", tags=["Settlement"])
 
@@ -12,6 +12,7 @@ service = SettlementService()
 
 class CalculationRequest(BaseModel):
     date: str
+    version: SettlementVersion = SettlementVersion.PRELIMINARY
     force: bool = False
 
 class ResponseModel(BaseModel):
@@ -28,7 +29,7 @@ async def calculate_daily_settlement(req: CalculationRequest):
         # 校验日期格式
         datetime.strptime(req.date, "%Y-%m-%d")
         
-        result = await service.calculate_daily_settlement(req.date, req.force)
+        result = await service.calculate_daily_settlement(req.date, version=req.version, force=req.force)
         
         if not result:
             return ResponseModel(code=400, message="Calculation failed or data missing", data=None)
@@ -44,6 +45,7 @@ async def calculate_daily_settlement(req: CalculationRequest):
 async def get_daily_settlement(
     start_date: str = Query(..., regex=r"^\d{4}-\d{2}-\d{2}$"),
     end_date: str = Query(..., regex=r"^\d{4}-\d{2}-\d{2}$"),
+    version: Optional[SettlementVersion] = None,
     include_details: bool = False
 ):
     """
@@ -54,6 +56,8 @@ async def get_daily_settlement(
         query = {
             "operating_date": {"$gte": start_date, "$lte": end_date}
         }
+        if version:
+            query["version"] = version
         
         cursor = service.db.settlement_daily.find(query).sort("operating_date", 1)
         

@@ -9,7 +9,7 @@ from calendar import monthrange
 from webapp.tools.mongo import DATABASE
 from webapp.models.settlement import (
     SettlementDaily, SettlementPeriodDetail, 
-    ContractComponent, EnergyComponent
+    ContractComponent, EnergyComponent, SettlementVersion
 )
 from webapp.services.load_query_service import LoadQueryService
 from webapp.models.load_enums import FusionStrategy
@@ -22,48 +22,70 @@ class SettlementService:
         self.db = DATABASE
         self.contract_service = ContractService(self.db)
 
-    async def calculate_daily_settlement(self, date_str: str, force: bool = False) -> Optional[SettlementDaily]:
+    def _round(self, value: float, decimals: int) -> float:
+        """数值修约辅助函数"""
+        if value is None:
+            return 0.0
+        return round(float(value), decimals)
+
+    async def calculate_daily_settlement(
+        self, date_str: str, 
+        version: SettlementVersion = SettlementVersion.PRELIMINARY,
+        force: bool = False
+    ) -> Optional[SettlementDaily]:
         """
-        计算指定日期的预结算单
+        计算指定日期的结算单 (支持多个版本)
         """
         # 1. 检查是否需重算
         if not force:
-            existing = self.db.settlement_daily.find_one({"operating_date": date_str})
+            existing = self.db.settlement_daily.find_one({
+                "operating_date": date_str,
+                "version": version
+            })
             if existing:
-                logger.info(f"结算单已存在且非强制重算，跳过: {date_str}")
+                logger.info(f"结算单({version})已存在且非强制重算，跳过: {date_str}")
                 return SettlementDaily(**existing)
 
-        # 2. 获取基础数据
+        # 2. 根据版本获取基础数据
         try:
-            basis_data = await self._fetch_basis_data(date_str)
+            if version == SettlementVersion.PRELIMINARY:
+                basis_data = await self._fetch_basis_data_preliminary(date_str)
+                data_source = "Raw"
+            elif version == SettlementVersion.PLATFORM_DAILY:
+                basis_data = await self._fetch_basis_data_platform_daily(date_str)
+                data_source = "Platform_Daily"
+            else:
+                logger.error(f"不支持的结算版本: {version}")
+                return None
+                
             if not basis_data:
-                logger.warning(f"基础数据不全，无法计算: {date_str}")
+                logger.warning(f"基础数据不全，无法完成版本({version})计算: {date_str}")
                 return None
         except Exception as e:
-            logger.error(f"获取基础数据失败 {date_str}: {e}")
+            logger.error(f"获取基础数据失败 {date_str} 版本({version}): {e}")
             raise e
 
         # 3. 分时计算 (48点)
         period_details = []
         
         # 解包数据 (均为 48点 列表/数组)
-        # 价格单位: 元/MWh, 电量单位: MWh
         p_rt_curve = basis_data['p_rt']
         p_da_curve = basis_data['p_da']
         q_rt_curve = basis_data['q_rt']
         q_da_curve = basis_data['q_da']
         q_mech_curve = basis_data['q_mech']
         
-        # 合同数据 (特殊结构: list of dict -> 需要根据 contract_period 筛选并转为曲线)
-        # basis_data['contracts'] 是 API/DB 返回的原始结构，需进一步处理为 48点曲线
-        q_contract_curve, p_contract_curve = self._process_contracts(basis_data['contracts'])
+        # 合同数据
+        q_contract_curve, p_contract_curve = self._process_contracts(basis_data.get('contracts'))
         
         # 市场均价 (用于偏差考核补足)
-        _, p_market_avg_curve = self._process_contracts(basis_data['market_contracts'])
+        # 如果是平台版本，可能已经有明确的市场均价曲线
+        if 'p_market_avg' in basis_data:
+            p_market_avg_curve = basis_data['p_market_avg']
+        else:
+            _, p_market_avg_curve = self._process_contracts(basis_data.get('market_contracts'))
         
         # 售电公司均价 (用于偏差考核剔除) 
-        # *注: 这里简化逻辑，若无特定公司自家数据，可用合同均价或市场均价代替，
-        # 规则文档提到: "剔除价格: 售电公司自家中长期均价"。即 p_contract_curve 本身就是。
         p_company_contract_curve = p_contract_curve
 
         for i in range(48):
@@ -83,7 +105,7 @@ class SettlementService:
             period_details.append(detail)
 
         # 4. 日汇总聚合
-        daily_settlement = self._aggregate_daily(date_str, period_details)
+        daily_settlement = self._aggregate_daily(date_str, period_details, version=version, data_source=data_source)
         
         # 5. 入库保存
         self._save_result(daily_settlement)
@@ -149,22 +171,99 @@ class SettlementService:
         # 3. 预测费用 (暂不含回收费，最后加)
         # predicted_cost = total_energy_fee + recovery_fee
         
-        # 4. 组装对象
+        # 4. 组装对象并应用修约
         return SettlementPeriodDetail(
             period=period,
-            mechanism_volume=q_mech,
-            contract=ContractComponent(volume=q_contract, price=p_contract, fee=cost_contract),
-            day_ahead=EnergyComponent(volume=q_da, price=p_da, fee=cost_da),
-            real_time=EnergyComponent(volume=q_rt, price=p_rt, fee=cost_rt),
-            total_energy_fee=total_energy_fee,
-            energy_avg_price=(total_energy_fee / q_rt) if abs(q_rt) > 1e-4 else 0.0,
-            contract_ratio=k_ratio * 100, # 百分比
-            standard_value_cost=cost_std
-            # Removed per-period recovery and predicted fields
+            mechanism_volume=self._round(q_mech, 3),
+            contract=ContractComponent(
+                volume=self._round(q_contract, 3), 
+                price=self._round(p_contract, 3), 
+                fee=self._round(cost_contract, 2)
+            ),
+            day_ahead=EnergyComponent(
+                volume=self._round(q_da, 3), 
+                price=self._round(p_da, 3), 
+                fee=self._round(cost_da, 2)
+            ),
+            real_time=EnergyComponent(
+                volume=self._round(q_rt, 3), 
+                price=self._round(p_rt, 3), 
+                fee=self._round(cost_rt, 2)
+            ),
+            total_energy_fee=self._round(total_energy_fee, 2),
+            energy_avg_price=self._round(
+                (total_energy_fee / q_rt) if abs(q_rt) > 1e-4 else 0.0, 
+                3
+            ),
+            contract_ratio=self._round(k_ratio * 100, 3),
+            standard_value_cost=self._round(cost_std, 2)
         )
 
-    async def _fetch_basis_data(self, date_str: str) -> Optional[Dict]:
-        """获取所有源数据并对齐到 48点"""
+    async def _fetch_basis_data_platform_daily(self, date_str: str) -> Optional[Dict]:
+        """[版本2] 从交易平台日报表 (D+2) 获取确权结算数据"""
+        # 1. 获取汇总数据 (用于后续校验)
+        # spot_settlement_daily
+        daily_doc = self.db.spot_settlement_daily.find_one({"operating_date": date_str})
+        if not daily_doc:
+            logger.warning(f"平台日报汇总数据缺失: {date_str}")
+            return None
+            
+        # 2. 获取分时明细 (48点)
+        # spot_settlement_period
+        cursor = self.db.spot_settlement_period.find({"operating_date": date_str}).sort("period", 1)
+        periods = list(cursor)
+        if len(periods) < 48:
+            logger.warning(f"平台分时明细不足 48点: {date_str}, count={len(periods)}")
+            return None
+            
+        # 3. 构造 48点 曲线
+        # 注意: 平台字段名与内部字段名映射
+        q_rt = [p.get('actual_consumption_volume', 0.0) for p in periods]
+        p_rt = [p.get('real_time_market_avg_price', 0.0) for p in periods]
+        q_da = [p.get('day_ahead_demand_volume', 0.0) for p in periods]
+        p_da = [p.get('day_ahead_market_avg_price', 0.0) for p in periods]
+        
+        # 平台各时段合同量价
+        q_contract = [p.get('contract_volume', 0.0) for p in periods]
+        p_contract = [p.get('contract_avg_price', 0.0) for p in periods]
+        
+        # 4. 获取机制电量
+        month_str = date_str[:7]
+        mech_doc = self.db.mechanism_energy_monthly.find_one({"month_str": month_str})
+        q_mech = [0.0] * 48
+        if mech_doc:
+            days_in_month = monthrange(int(date_str[:4]), int(date_str[5:7]))[1]
+            raw_mech = mech_doc.get('period_values', [0.0]*48)
+            q_mech = [v / days_in_month for v in raw_mech]
+        else:
+            logger.warning(f"机制电量缺失: {month_str}")
+            
+        # 5. 获取全市场合同均价
+        market_contracts = self.db.contracts_aggregated_daily.find_one({
+             "date": date_str,
+             "entity": "全市场",
+             "contract_type": "整体",
+             "contract_period": "整体"
+        })
+        _, p_market_avg = self._process_contracts(market_contracts)
+        
+        return {
+            "q_rt": q_rt,
+            "p_rt": p_rt,
+            "p_da": p_da,
+            "q_da": q_da,
+            "q_mech": q_mech,
+            "p_market_avg": p_market_avg,
+            "contracts": {
+                "periods": [
+                    {"period": i+1, "quantity_mwh": q_contract[i], "price_yuan_per_mwh": p_contract[i]}
+                    for i in range(48)
+                ]
+            }
+        }
+
+    async def _fetch_basis_data_preliminary(self, date_str: str) -> Optional[Dict]:
+        """[版本1] 获取所有源数据并对齐到 48点 (Preliminary版)"""
         
         # 1. 负荷 (Unified Load Curve - MP_ONLY)
         # 获取所有有效用户的聚合
@@ -177,7 +276,7 @@ class SettlementService:
             
         load_curves = LoadQueryService.aggregate_curve_series(
             active_customers, date_str, date_str, 
-            strategy=FusionStrategy.MP_COMPLETE # 强制 MP_ONLY
+            strategy=FusionStrategy.MP_COMPLETE
         )
         if not load_curves:
             logger.warning(f"当日无聚合负荷数据: {date_str}")
@@ -203,6 +302,7 @@ class SettlementService:
         
         # Re-implement price fetching carefully
         try:
+             # 根据方案 3.1: 字段使用 arithmetic_avg_clearing_price
              p_rt = self._fetch_price_curve('real_time_spot_price', date_str, price_field='arithmetic_avg_clearing_price')
         except Exception:
              logger.warning(f"实时电价缺失: {date_str}")
@@ -383,7 +483,12 @@ class SettlementService:
             if n > 48: return values[:48]
             else: return values + [0.0]*(48-n)
 
-    def _aggregate_daily(self, date_str: str, period_details: List[SettlementPeriodDetail]) -> SettlementDaily:
+    def _aggregate_daily(
+        self, date_str: str, 
+        period_details: List[SettlementPeriodDetail],
+        version: SettlementVersion = SettlementVersion.PRELIMINARY,
+        data_source: str = "Raw"
+    ) -> SettlementDaily:
         """从分时明细聚合日文档"""
         # Sum helper
         def _sum(attr_path: str):
@@ -419,27 +524,29 @@ class SettlementService:
         
         return SettlementDaily(
             operating_date=date_str,
+            version=version,
+            data_source=data_source,
             period_details=period_details,
             
-            # C-Part Aggregations
-            contract_volume=total_contract_vol,
-            contract_avg_price=contract_avg_price,
-            contract_fee=_sum('contract.fee'),
+            # C-Part Aggregations (Apply Rounding)
+            contract_volume=self._round(total_contract_vol, 3),
+            contract_avg_price=self._round(contract_avg_price, 3),
+            contract_fee=self._round(_sum('contract.fee'), 2),
             
-            day_ahead_volume=_sum('day_ahead.volume'),
-            day_ahead_fee=_sum('day_ahead.fee'),
+            day_ahead_volume=self._round(_sum('day_ahead.volume'), 3),
+            day_ahead_fee=self._round(_sum('day_ahead.fee'), 2),
             
-            real_time_volume=total_rt_vol,
-            real_time_fee=_sum('real_time.fee'),
+            real_time_volume=self._round(total_rt_vol, 3),
+            real_time_fee=self._round(_sum('real_time.fee'), 2),
             
-            total_energy_fee=total_energy_fee,
-            energy_avg_price=energy_avg_price,
+            total_energy_fee=self._round(total_energy_fee, 2),
+            energy_avg_price=self._round(energy_avg_price, 3),
             
-            deviation_recovery_fee=daily_recovery_fee,
-            total_standard_value_cost=total_std_cost,
+            deviation_recovery_fee=self._round(daily_recovery_fee, 2),
+            total_standard_value_cost=self._round(total_std_cost, 2),
             
-            predicted_wholesale_cost=pred_cost,
-            predicted_wholesale_price=pred_price
+            predicted_wholesale_cost=self._round(pred_cost, 2),
+            predicted_wholesale_price=self._round(pred_price, 3)
         )
 
     def _save_result(self, daily: SettlementDaily):
@@ -453,7 +560,7 @@ class SettlementService:
         if '_id' in data: del data['_id']
         
         self.db.settlement_daily.update_one(
-            {"operating_date": daily.operating_date},
+            {"operating_date": daily.operating_date, "version": daily.version},
             {"$set": data},
             upsert=True
         )
