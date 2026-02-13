@@ -59,6 +59,11 @@ class RetailSettlementDaily(BaseModel):
     final_prices: Dict[str, float] = Field(default_factory=dict, description="最终时段价格 {tip, peak, flat, valley, deep}")
     price_ratio_adjusted: bool = Field(False, description="是否经过463号文比例调节")
 
+    # 封顶信息
+    is_capped: bool = Field(False, description="是否触发了封顶保护")
+    nominal_avg_price: float = Field(0.0, description="封顶前的名义均价 (元/kWh)")
+    cap_price: float = Field(0.0, description="计算所依据的封顶价基准 (元/kWh)")
+
     # 48时段明细
     period_details: List[RetailPeriodDetail] = Field(default_factory=list, description="48点明细")
 

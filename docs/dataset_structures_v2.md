@@ -636,6 +636,9 @@ critical_alerts = db.customer_anomaly_alerts.find({
 | `linked_config.target_prices` | `Object` | 联动标的分时价格 `{tip, peak, ...}` |
 | `final_prices` | `Object` | **最终结算价格** `{tip, peak, flat, valley, deep}` |
 | `price_ratio_adjusted` | `Boolean` | 是否经过463号文比例调节 |
+| `is_capped` | `Boolean` | 是否触发了封顶保护 |
+| `nominal_avg_price` | `Number` | 封顶前的名义均价 (元/kWh) |
+| `cap_price` | `Number` | 计算所依据的封顶价基准 (元/kWh) |
 | `period_details` | `Array` | 48点明细列表 |
 | `period_details.period` | `Integer` | 时段号 (1-48) |
 | `period_details.period_type` | `String` | 时段类型 (尖峰/高峰/平段/低谷/深谷) |

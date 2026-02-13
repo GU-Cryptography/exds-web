@@ -213,3 +213,54 @@ def get_period_indices_by_date(date: datetime, collection=None) -> Dict[str, Lis
         indices_map[period].append(idx)
         
     return indices_map
+
+def get_month_tou_meta(date: datetime, collection=None) -> Dict[str, Any]:
+    """
+    获取指定月份的TOU元数据 (系数, 是否尖峰月)
+    
+    Args:
+        date: 目标月份中的任意日期
+        collection: MongoDB集合 (可选)
+        
+    Returns:
+        {
+            "coefficients": Dict[str, float], # 系数 (Tip, Peak, Flat, Valley, Deep)
+            "is_tip_month": bool,             # 是否包含尖峰时段
+            "timelines": List[str]            # 96点时段类型
+        }
+    """
+    if collection is None:
+        collection = DEFAULT_TOU_COLLECTION
+        
+    # Reuse existing logic via get_tou_rule_by_date logic, but need direct access to metadata
+    # Base Rule Query
+    base_query = {
+        "type": "base",
+        "months": date.month,
+        "activation_date": {"$lte": date}
+    }
+    
+    doc = collection.find_one(
+        base_query,
+        sort=[("activation_date", -1)]
+    )
+    
+    if not doc:
+        # Default fallback
+        return {
+            "coefficients": {"尖峰": 1.8, "高峰": 1.6, "平段": 1.0, "低谷": 0.4, "深谷": 0.3},
+            "is_tip_month": False,
+            "timelines": ["平段"] * 96
+        }
+        
+    timelines = doc.get("timelines", ["平段"] * 96)
+    coefficients = doc.get("coefficients", {"尖峰": 1.8, "高峰": 1.6, "平段": 1.0, "低谷": 0.4, "深谷": 0.3})
+    
+    # Check if "尖峰" exists in timelines
+    is_tip_month = "尖峰" in timelines
+    
+    return {
+        "coefficients": coefficients,
+        "is_tip_month": is_tip_month,
+        "timelines": timelines
+    }

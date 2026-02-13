@@ -11,7 +11,7 @@ from typing import Dict, Optional, List, Any
 from webapp.tools.mongo import DATABASE
 from webapp.services.contract_service import ContractService
 from webapp.services.load_query_service import LoadQueryService
-from webapp.services.tou_service import get_tou_rule_by_date
+from webapp.services.tou_service import get_tou_rule_by_date, get_month_tou_meta
 from webapp.models.load_enums import FusionStrategy
 from webapp.models.retail_settlement import (
     RetailSettlementDaily, RetailPeriodDetail, TouSummaryItem,
@@ -20,17 +20,11 @@ from webapp.models.retail_settlement import (
 
 logger = logging.getLogger(__name__)
 
-# 463号文标准比例 (尖峰:高峰:平段:低谷:深谷)
-STANDARD_RATIOS = {
-    "tip": 1.8,
-    "peak": 1.6,
-    "flat": 1.0,
-    "valley": 0.4,
-    "deep": 0.3,
-}
-
 # 最高限价常量 (元/kWh)
 UPPER_LIMIT_PRICE = 414.3 * 1.2 / 1000  # = 0.49716
+
+# 463号文标准比例 (默认兜底值)
+DEFAULT_RATIOS = {"tip": 1.8, "peak": 1.6, "flat": 1.0, "valley": 0.4, "deep": 0.3}
 
 # 时段类型映射：tou_service 中文名 → 内部标识
 TOU_TYPE_MAP = {
@@ -40,6 +34,9 @@ TOU_TYPE_MAP = {
     "低谷": "valley",
     "深谷": "deep",
 }
+
+# 反向映射
+TOU_TYPE_MAP_REV = {v: k for k, v in TOU_TYPE_MAP.items()}
 
 # 96→48 优先级：两个15分钟合并为30分钟时，取优先级高的类型
 TOU_PRIORITY = {"尖峰": 5, "高峰": 4, "平段": 3, "深谷": 2, "低谷": 1}
@@ -134,10 +131,37 @@ class RetailSettlementService:
 
         load_values = daily_curve.values  # 48个值 (MWh)
 
-        # 5. 逐时段计算电费
+        # 5. 初始单价获取与封顶校验
         final_prices = price_result["final_prices"]
+        
+        # 预计算当日名义均价，判断是否触发封顶
+        total_load = sum(load_values)
+        nominal_avg_price = 0.0
+        if total_load > 0:
+            nominal_total_fee = sum(
+                final_prices.get(TOU_TYPE_MAP.get(tou_48[i], "flat"), 0.0) * load_values[i] * 1000
+                for i in range(48)
+            )
+            nominal_avg_price = nominal_total_fee / (total_load * 1000)
+
+        # 获取当月封顶价并判定
+        cap_info = self._get_monthly_cap_price(date_str)
+        cap_price = cap_info["cap_price"]
+        is_capped = nominal_avg_price > cap_price + 1e-6
+        
+        if is_capped:
+            k = cap_price / nominal_avg_price if nominal_avg_price > 0 else 1.0
+            for pk in final_prices:
+                final_prices[pk] *= k
+            logger.info(
+                f"触发日均价封顶: {customer_id} {date_str} "
+                f"名义均价={nominal_avg_price:.4f} > 封顶价={cap_price:.4f} "
+                f"修正系数 k={k:.4f}"
+            )
+
+        # 6. 执行最终计算循环 (仅跑一次)
         period_details = []
-        tou_summary = {k: {"load_mwh": 0.0, "fee": 0.0} for k in STANDARD_RATIOS}
+        tou_summary = {k: {"load_mwh": 0.0, "fee": 0.0} for k in DEFAULT_RATIOS}
 
         for i in range(48):
             period_type_cn = tou_48[i]
@@ -158,10 +182,9 @@ class RetailSettlementService:
             tou_summary[period_key]["load_mwh"] += load_mwh
             tou_summary[period_key]["fee"] += fee
 
-        # 6. 日汇总
-        total_load = sum(d.load_mwh for d in period_details)
-        total_fee = sum(d.fee for d in period_details)
-        avg_price = (total_fee / (total_load * 1000)) if total_load > 0 else 0.0
+        # 最终汇总
+        final_total_fee = sum(d.fee for d in period_details)
+        final_avg_price = (final_total_fee / (total_load * 1000)) if total_load > 0 else 0.0
 
         # 四舍五入汇总
         tou_summary_models = {}
@@ -186,10 +209,13 @@ class RetailSettlementService:
             linked_config=price_result.get("linked_config"),
             final_prices={k: round(v, 6) for k, v in final_prices.items()},
             price_ratio_adjusted=price_result.get("price_ratio_adjusted", False),
+            is_capped=is_capped,
+            nominal_avg_price=round(nominal_avg_price, 6),
+            cap_price=round(cap_price, 6),
             period_details=period_details,
             total_load_mwh=round(total_load, 6),
-            total_fee=round(total_fee, 2),
-            avg_price=round(avg_price, 6),
+            total_fee=round(final_total_fee, 2),
+            avg_price=round(final_avg_price, 6),
             tou_summary=tou_summary_models,
         )
 
@@ -206,7 +232,8 @@ class RetailSettlementService:
         )
         logger.info(
             f"零售结算完成: {customer_name} {date_str} "
-            f"电量={total_load:.3f}MWh 电费={total_fee:.2f}元 均价={avg_price:.4f}元/kWh"
+            f"电量={total_load:.3f}MWh 电费={final_total_fee:.2f}元 均价={final_avg_price:.4f}元/kWh "
+            f"(封顶: {'是' if is_capped else '否'})"
         )
         return doc
 
@@ -288,8 +315,9 @@ class RetailSettlementService:
 
         base_value = ref_info["base_value"]
 
-        # 2. 展开分时参考价
-        tou_ref = self._expand_reference_to_tou(base_value)
+        # 2. 展开分时参考价 (使用当日对应的动态比例)
+        ratios = self._get_tou_ratios(date_str)
+        tou_ref = self._expand_reference_to_tou(base_value, ratios=ratios)
 
         # 3. 扣减价差 + 浮动
         spread = float(pricing_config.get("agreed_price_spread", 0) or 0)
@@ -301,7 +329,7 @@ class RetailSettlementService:
             prices[period] = ref_val - spread * sharing / 100.0 + floating
 
         # 4. 比例调节
-        adjusted, was_adjusted = self._adjust_price_ratios(prices)
+        adjusted, was_adjusted = self._adjust_price_ratios(prices, date_str)
 
         return {
             "reference_price": ReferencePriceInfo(
@@ -344,13 +372,13 @@ class RetailSettlementService:
 
         # 4. 混合计算
         prices = {}
-        for period in STANDARD_RATIOS:
+        for period in DEFAULT_RATIOS:
             fp = fixed.get(period, 0)
             tp = target_prices.get(period, 0)
             prices[period] = fp * (1 - linked_ratio) + tp * linked_ratio
 
         # 5. 比例调节
-        adjusted, was_adjusted = self._adjust_price_ratios(prices)
+        adjusted, was_adjusted = self._adjust_price_ratios(prices, date_str)
 
         return {
             "fixed_prices": fixed,
@@ -361,6 +389,60 @@ class RetailSettlementService:
             ),
             "final_prices": adjusted,
             "price_ratio_adjusted": was_adjusted,
+        }
+
+    # ========== 辅助工具 ==========
+
+    def _get_tou_ratios(self, date_str: str) -> Dict[str, float]:
+        """
+        获取当日对应的分时比例系数映射 (En Key -> Ratio)
+        """
+        from datetime import datetime
+        date_dt = datetime.strptime(date_str, "%Y-%m-%d")
+        tou_meta = get_month_tou_meta(date_dt, self.db["tou_rules"])
+        coefficients = tou_meta.get("coefficients", {})
+        
+        ratios = {}
+        for cn_key, val in coefficients.items():
+            en_key = TOU_TYPE_MAP.get(cn_key)
+            if en_key:
+                ratios[en_key] = float(val)
+
+        # 补全缺省值
+        for k, v in DEFAULT_RATIOS.items():
+            if k not in ratios:
+                ratios[k] = v
+        return ratios
+
+    # ========== 封顶价获取 ==========
+
+    def _get_monthly_cap_price(self, date_str: str) -> Dict[str, float]:
+        """
+        获取当月的封顶价格信息
+        """
+        date_dt = datetime.strptime(date_str, "%Y-%m-%d")
+        month_str = date_str[:7]
+
+        # 1. 判定月份类型 (动态获取)
+        tou_meta = get_month_tou_meta(date_dt, self.db["tou_rules"])
+        is_tip_month = tou_meta.get("is_tip_month", False)
+        
+        ratio = 0.15 if is_tip_month else 0.10
+
+        # 2. 获取基准价 (使用 avg_on_grid_price)
+        base_price = 0.405745  # 默认兜底值
+        
+        doc = self.db["price_sgcc"].find_one({"_id": month_str})
+        if doc and doc.get("avg_on_grid_price"):
+             base_price = float(doc["avg_on_grid_price"])
+        
+        # 3. 计算封顶价
+        cap_price = base_price * (1 + ratio)
+
+        return {
+            "cap_price": cap_price,
+            "base_price": base_price,
+            "ratio": ratio
         }
 
     # ========== 参考价解析 ==========
@@ -421,47 +503,43 @@ class RetailSettlementService:
     # ========== 分时展开 ==========
 
     @staticmethod
-    def _expand_reference_to_tou(base_price: float) -> Dict[str, float]:
-        """按463号文比例展开为5个时段参考价"""
-        return {period: base_price * ratio for period, ratio in STANDARD_RATIOS.items()}
+    def _expand_reference_to_tou(base_price: float, ratios: Dict[str, float] = None) -> Dict[str, float]:
+        """按比例展开为5个时段参考价"""
+        if ratios is None:
+            ratios = DEFAULT_RATIOS
+        return {period: base_price * ratio for period, ratio in ratios.items()}
 
     # ========== 价差扣减 + 浮动 ==========
     # (内联在 _calculate_price_spread 中)
 
     # ========== 比例调节 ==========
 
-    @staticmethod
-    def _adjust_price_ratios(prices: Dict[str, float]) -> tuple:
+    def _adjust_price_ratios(self, prices: Dict[str, float], date_str: str) -> tuple:
         """
-        463号文价格比例调节
-
-        规则: 以平段价为锚点
-        - 尖峰/高峰: 低于要求时上调，已超过则不变
-        - 低谷/深谷: 高于要求时下调，已满足则不变
-
-        Returns:
-            (adjusted_prices, was_adjusted)
+        463号文价格比例调节 (使用动态系数)
         """
         flat = prices.get("flat", 0)
         if flat <= 0:
             return prices, False
+            
+        ratios = self._get_tou_ratios(date_str)
 
         adjusted = dict(prices)
         was_adjusted = False
 
-        for period, ratio in STANDARD_RATIOS.items():
+        for period, ratio in ratios.items():
             if period == "flat":
                 continue
             threshold = flat * ratio
 
             if period in ("tip", "peak"):
                 # 上浮时段: 仅在低于要求时上调
-                if adjusted[period] < threshold:
+                if adjusted.get(period, 0) < threshold:
                     adjusted[period] = threshold
                     was_adjusted = True
             elif period in ("valley", "deep"):
                 # 下浮时段: 仅在高于要求时下调
-                if adjusted[period] > threshold:
+                if adjusted.get(period, 0) > threshold:
                     adjusted[period] = threshold
                     was_adjusted = True
 
@@ -559,7 +637,7 @@ class RetailSettlementService:
         tou_48 = self._get_tou_48(date_str)
         if not tou_48:
             logger.warning(f"无法获取TOU映射，联动价格置0")
-            return {k: 0.0 for k in STANDARD_RATIOS}
+            return {k: 0.0 for k in DEFAULT_RATIOS}
 
         # 确定集合与价格字段
         if target == "real_time_avg":
@@ -579,7 +657,7 @@ class RetailSettlementService:
         docs = list(cursor)
         if not docs:
             logger.warning(f"未找到 {target} 价格数据: {date_str} (集合: {collection_name})")
-            return {k: 0.0 for k in STANDARD_RATIOS}
+            return {k: 0.0 for k in DEFAULT_RATIOS}
 
         if len(docs) != 96:
             logger.warning(
@@ -609,8 +687,8 @@ class RetailSettlementService:
             spot_prices_48.append(avg)
 
         # 按TOU类型分组求均值
-        period_sums = {k: 0.0 for k in STANDARD_RATIOS}
-        period_counts = {k: 0 for k in STANDARD_RATIOS}
+        period_sums = {k: 0.0 for k in DEFAULT_RATIOS}
+        period_counts = {k: 0 for k in DEFAULT_RATIOS}
 
         for i in range(48):
             period_cn = tou_48[i]
@@ -620,7 +698,7 @@ class RetailSettlementService:
 
         # 均值，单位转换 元/MWh → 元/kWh
         result = {}
-        for k in STANDARD_RATIOS:
+        for k in DEFAULT_RATIOS:
             if period_counts[k] > 0:
                 result[k] = (period_sums[k] / period_counts[k]) / 1000.0
             else:
