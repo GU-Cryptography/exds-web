@@ -4,126 +4,121 @@ from webapp.models.settlement import SettlementVersion
 from webapp.services.settlement_service import SettlementService
 from webapp.services.retail_settlement_service import RetailSettlementService
 from webapp.services.load_query_service import LoadQueryService
+from webapp.scheduler.logger import TaskLogger
 
 logger = logging.getLogger(__name__)
 
 async def event_driven_settlement_job():
     """
     事件驱动结算任务 (间隙补全模式)
-    
-    逻辑:
-    1. 获取各结算版本的最新已完成日期 (settlement_daily / retail_settlement_daily)
-    2. 获取各结算版本所需源数据的最新日期 (unified_load_curve / spot_settlement_daily)
-    3. 如果源数据日期 > 结算日期，则补齐中间的所有天数
     """
     logger.info("🚀 开始执行事件驱动结算调度 (间隙补全模式)...")
+    
+    # 注册任务开始
+    task_id = await TaskLogger.log_task_start(
+        service_type="settlement_service",
+        task_type="event_driven_settlement",
+        task_name="事件驱动结算补齐",
+        trigger_type="schedule"
+    )
     
     settlement_service = SettlementService()
     retail_service = RetailSettlementService()
     
+    processed_count = 0
+    skipped_dates = []
+    error_count = 0
+    
     # 安全上限：最多同步到昨天
-    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    yesterday_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # --- 1. 零售侧自动结算 ---
     try:
-        source_latest = LoadQueryService.get_latest_data_date()
-        result_latest = await retail_service.get_latest_results_date()
+        # 1. 获取最新数据日期 (使用过滤了未来日期的版本)
+        latest_load_date = LoadQueryService.get_latest_data_date()
+        if not latest_load_date:
+            await TaskLogger.log_task_end(task_id, "skipped", "未找到任何有效聚合负荷数据，取消运行")
+            return
+            
+        sync_limit = min(latest_load_date, yesterday_str)
         
-        if source_latest:
-            sync_end = min(source_latest, yesterday)
-            # 无结果时最多回溯 7 天，避免全量重算
-            if result_latest:
-                sync_start_dt = datetime.strptime(result_latest, "%Y-%m-%d") + timedelta(days=1)
-            else:
-                sync_start_dt = datetime.now() - timedelta(days=7)
-            
-            sync_start = sync_start_dt.strftime("%Y-%m-%d")
-            
-            if sync_start <= sync_end:
-                logger.info(f"⏰ 零售侧发现数据间隙: {sync_start} → {sync_end}")
-                curr_dt = sync_start_dt
-                end_dt = datetime.strptime(sync_end, "%Y-%m-%d")
-                while curr_dt <= end_dt:
-                    d_str = curr_dt.strftime("%Y-%m-%d")
-                    try:
-                        res = retail_service.calculate_all_customers_daily(d_str, force=False)
-                        success = res.get("success", 0)
-                        if success > 0:
-                            logger.info(f"✅ 零售侧结算完成: {d_str} ({success} 户)")
-                    except Exception as e:
-                        logger.error(f"❌ 零售侧结算异常 {d_str}: {e}")
-                    curr_dt += timedelta(days=1)
-            else:
-                logger.info("✅ 零售侧结算已是最新，无需补齐")
+        # 2. 获取已结算的最新日期 (以 PRELIMINARY 为准)
+        latest_settled_date = await settlement_service.get_latest_results_date(SettlementVersion.PRELIMINARY)
+        
+        # 定义开始日期: latest_settled_date + 1天
+        if not latest_settled_date:
+            start_dt = datetime.strptime(sync_limit, "%Y-%m-%d") - timedelta(days=7)
         else:
-            logger.warning("⚠️ 未找到 unified_load_curve 数据，跳过零售侧结算")
-    except Exception as e:
-        logger.error(f"❌ 零售侧调度逻辑异常: {e}")
+            start_dt = datetime.strptime(latest_settled_date, "%Y-%m-%d") + timedelta(days=1)
+            
+        end_dt = datetime.strptime(sync_limit, "%Y-%m-%d")
+        
+        if start_dt > end_dt:
+            await TaskLogger.log_task_end(task_id, "success", summary="结算数据已是最新，无需补齐")
+            return
 
-    # --- 2. 日前预结算 (PRELIMINARY) ---
-    try:
-        source_latest = LoadQueryService.get_latest_data_date()
-        result_latest = await settlement_service.get_latest_results_date(SettlementVersion.PRELIMINARY)
-        
-        if source_latest:
-            sync_end = min(source_latest, yesterday)
-            if result_latest:
-                sync_start_dt = datetime.strptime(result_latest, "%Y-%m-%d") + timedelta(days=1)
-            else:
-                sync_start_dt = datetime.now() - timedelta(days=7)
+        curr_dt = start_dt
+        while curr_dt <= end_dt:
+            date_str = curr_dt.strftime("%Y-%m-%d")
+            logger.info(f"⏳ 正在检查 {date_str} 结算基础数据...")
             
-            sync_start = sync_start_dt.strftime("%Y-%m-%d")
-            
-            if sync_start <= sync_end:
-                logger.info(f"⏰ 日前预结算发现数据间隙: {sync_start} → {sync_end}")
-                curr_dt = sync_start_dt
-                end_dt = datetime.strptime(sync_end, "%Y-%m-%d")
-                while curr_dt <= end_dt:
-                    d_str = curr_dt.strftime("%Y-%m-%d")
-                    try:
-                        await settlement_service.calculate_daily_settlement(d_str, version=SettlementVersion.PRELIMINARY, force=False)
-                        logger.info(f"✅ 日前预结算完成: {d_str}")
-                    except Exception as e:
-                        logger.error(f"❌ 日前预结算异常 {d_str}: {e}")
+            try:
+                # 检查批发侧数据完整性 (价格/负荷/合同)
+                basis_data = await settlement_service._fetch_basis_data_preliminary(date_str)
+                if not basis_data:
+                    logger.warning(f"⏩ 跳过 {date_str}: 基础数据缺失或格式异常")
+                    skipped_dates.append(f"{date_str}(数据不全)")
                     curr_dt += timedelta(days=1)
-            else:
-                logger.info("✅ 日前预结算已是最新，无需补齐")
-        else:
-            logger.warning("⚠️ 未找到 unified_load_curve 数据，跳过日前预结算")
-    except Exception as e:
-        logger.error(f"❌ 日前预结算调度逻辑异常: {e}")
+                    continue
 
-    # --- 3. 平台日报结算 (PLATFORM_DAILY, 依赖 spot_settlement_daily) ---
-    try:
-        source_latest = await settlement_service.get_latest_platform_source_date()
-        result_latest = await settlement_service.get_latest_results_date(SettlementVersion.PLATFORM_DAILY)
+                # A. 零售侧结算 (计算结果存在 upsert 逻辑)
+                retail_res = retail_service.calculate_all_customers_daily(date_str)
+                
+                # B. 日前预结算
+                await settlement_service.calculate_daily_settlement(
+                    target_date=date_str, 
+                    version=SettlementVersion.PRELIMINARY,
+                    force=False
+                )
+                
+                # C. 平台日报结算
+                await settlement_service.calculate_daily_settlement(
+                    target_date=date_str, 
+                    version=SettlementVersion.PLATFORM_DAILY,
+                    force=False
+                )
+                
+                processed_count += 1
+                logger.info(f"✅ {date_str} 结算补全完成")
+                
+            except Exception as ex:
+                logger.error(f"❌ {date_str} 结算执行过程中出错: {ex}")
+                error_count += 1
+                
+            curr_dt += timedelta(days=1)
+            
+        # 汇总任务日志
+        summary = f"执行完成。处理: {processed_count}天"
+        if skipped_dates:
+            summary += f", 跳过: {len(skipped_dates)}天 ({', '.join(skipped_dates[:3])}...)"
+        if error_count:
+            summary += f", 失败: {error_count}天"
+            
+        await TaskLogger.log_task_end(
+            task_id, 
+            "success" if error_count == 0 else "failed",
+            summary=summary,
+            details={
+                "processed_days": processed_count,
+                "skipped_days": len(skipped_dates),
+                "error_days": error_count,
+                "skipped_list": skipped_dates
+            }
+        )
         
-        if source_latest:
-            sync_end = source_latest  # 平台日报源数据本身已有 D+2 延迟，直接用源日期
-            if result_latest:
-                sync_start_dt = datetime.strptime(result_latest, "%Y-%m-%d") + timedelta(days=1)
-            else:
-                sync_start_dt = datetime.now() - timedelta(days=10)
-            
-            sync_start = sync_start_dt.strftime("%Y-%m-%d")
-            
-            if sync_start <= sync_end:
-                logger.info(f"⏰ 平台日报发现数据间隙: {sync_start} → {sync_end}")
-                curr_dt = sync_start_dt
-                end_dt = datetime.strptime(sync_end, "%Y-%m-%d")
-                while curr_dt <= end_dt:
-                    d_str = curr_dt.strftime("%Y-%m-%d")
-                    try:
-                        await settlement_service.calculate_daily_settlement(d_str, version=SettlementVersion.PLATFORM_DAILY, force=False)
-                        logger.info(f"✅ 平台日报结算完成: {d_str}")
-                    except Exception as e:
-                        logger.error(f"❌ 平台日报结算异常 {d_str}: {e}")
-                    curr_dt += timedelta(days=1)
-            else:
-                logger.info("✅ 平台日报结算已是最新，无需补齐")
-        else:
-            logger.warning("⚠️ 未找到 spot_settlement_daily 数据，跳过平台日报结算")
     except Exception as e:
-        logger.error(f"❌ 平台日报调度逻辑异常: {e}")
+        logger.error(f"💥 结算调度逻辑发生致命故障: {e}")
+        await TaskLogger.log_task_end(task_id, "failed", error={"message": str(e)})
+
+    logger.info("🏁 结算间隙补全调度任务结束")
 
     logger.info("🏁 结算间隙补全调度任务结束")

@@ -162,6 +162,8 @@ const PreSettlementOverviewPage: React.FC = () => {
 
     const [selectedMonth, setSelectedMonth] = useState<Date | null>(new Date());
     const [version, setVersion] = useState<string>('PLATFORM_DAILY');
+    const [metadata, setMetadata] = useState<any>(null);
+    const [hasInitializedVersion, setHasInitializedVersion] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [data, setData] = useState<OverviewData | null>(null);
@@ -171,6 +173,17 @@ const PreSettlementOverviewPage: React.FC = () => {
     const rightChartRef = useRef<HTMLDivElement>(null);
 
     const monthStr = selectedMonth ? format(selectedMonth, 'yyyy-MM') : '';
+
+    const handleShiftMonth = (offset: number) => {
+        if (!selectedMonth) return;
+        setSelectedMonth(addMonths(selectedMonth, offset));
+        setHasInitializedVersion(false); // 换月份重跑初始化
+    };
+
+    const handleVersionChange = (e: SelectChangeEvent) => {
+        setVersion(e.target.value);
+        setHasInitializedVersion(true); // 锁定手动选择
+    };
 
     // 全屏 — 左图
     const {
@@ -214,6 +227,32 @@ const PreSettlementOverviewPage: React.FC = () => {
         daily_profit_wan: true, cumulative_profit_wan: true,
     });
 
+    // 获取元数据并初始化版本
+    const fetchMetadataAndInit = useCallback(async () => {
+        try {
+            const res = await apiClient.get('/api/v1/settlement/metadata');
+            if (res.data.code === 200) {
+                const meta = res.data.data;
+                setMetadata(meta);
+
+                // 智能初始化版本：如果还没手动初始化过
+                if (!hasInitializedVersion && selectedMonth) {
+                    const monthKey = format(selectedMonth, 'yyyy-MM');
+                    const platDate = meta.platform_daily_latest_date || '';
+                    const prelDate = meta.preliminary_latest_date || '';
+
+                    // 如果日清最新日期不在当前月或进度明显落后于预结算，且预结算在当前月有数据，则切到预结算
+                    if (prelDate.startsWith(monthKey) && (!platDate.startsWith(monthKey) || prelDate > platDate)) {
+                        setVersion('PRELIMINARY');
+                    }
+                    setHasInitializedVersion(true);
+                }
+            }
+        } catch (err) {
+            console.error('Failed to fetch metadata', err);
+        }
+    }, [selectedMonth, hasInitializedVersion]);
+
     // 数据获取
     const fetchData = useCallback(async () => {
         if (!selectedMonth) return;
@@ -235,69 +274,74 @@ const PreSettlementOverviewPage: React.FC = () => {
         }
     }, [selectedMonth, version]);
 
-    useEffect(() => { fetchData(); }, [fetchData]);
+    useEffect(() => {
+        fetchMetadataAndInit();
+    }, [fetchMetadataAndInit]);
 
-    const handleShiftMonth = (offset: number) => {
-        if (!selectedMonth) return;
-        setSelectedMonth(addMonths(selectedMonth, offset));
-    };
-
-    const handleVersionChange = (e: SelectChangeEvent) => { setVersion(e.target.value); };
+    useEffect(() => {
+        if (hasInitializedVersion) {
+            fetchData();
+        }
+    }, [fetchData, hasInitializedVersion]);
 
     // ====== 图表数据 ======
-    const chartData = data?.daily_details.map((d, idx, arr) => {
-        // 累计均价差 = 截至当日的总利润 / 截至当日的总电量 (近似批零价差均值)
-        let cumVolume = 0, cumProfit = 0;
-        for (let i = 0; i <= idx; i++) {
-            cumVolume += arr[i].volume_mwh;
-            cumProfit += arr[i].daily_profit;
-        }
-        const cumulativeAvgSpread = cumVolume > 0 ? cumProfit / cumVolume : 0;
+    const chartData = data?.daily_details
+        .filter(d => d.volume_mwh > 0 || d.wholesale_cost > 0) // 过滤掉完全没数据的天数，以免折线图掉到 0
+        .map((d, idx, arr) => {
+            // 累计均价差 = 截至当日的总利润 / 截至当日的总电量 (近似批零价差均值)
+            let cumVolume = 0, cumProfit = 0;
+            for (let i = 0; i <= idx; i++) {
+                cumVolume += arr[i].volume_mwh;
+                cumProfit += arr[i].daily_profit;
+            }
+            const cumulativeAvgSpread = cumVolume > 0 ? cumProfit / cumVolume : 0;
 
-        return {
-            ...d,
-            dateLabel: d.date.substring(5),
-            daily_profit_wan: d.daily_profit / 10000,
-            cumulative_profit_wan: d.cumulative_profit / 10000,
-            wholesale_cost_wan: d.wholesale_cost / 10000,
-            retail_revenue_wan: d.retail_revenue / 10000,
-            cumulative_avg_spread: parseFloat(cumulativeAvgSpread.toFixed(2)),
-        };
-    }) || [];
+            return {
+                ...d,
+                dateLabel: d.date.substring(5),
+                daily_profit_wan: d.daily_profit / 10000,
+                cumulative_profit_wan: d.cumulative_profit / 10000,
+                wholesale_cost_wan: d.wholesale_cost / 10000,
+                retail_revenue_wan: d.retail_revenue / 10000,
+                cumulative_avg_spread: parseFloat(cumulativeAvgSpread.toFixed(2)),
+            };
+        }) || [];
 
     // ====== 渲染：汇总卡片 ======
     const renderSummaryCards = () => {
         if (!data) return null;
         const s = data.summary;
+        const hasData = s.total_volume_mwh > 0;
+
         return (
             <Grid container spacing={{ xs: 1, sm: 2 }}>
                 <Grid size={{ xs: 6, md: 2 }}>
-                    <StatCard title="购电成本" value={`${formatWanYuan(s.total_wholesale_cost)}元`}
-                        subtitle={`含偏差回收 ${formatWanYuan(s.total_deviation_recovery_fee)}`}
+                    <StatCard title="购电成本" value={hasData ? `${formatWanYuan(s.total_wholesale_cost)}元` : '-'}
+                        subtitle={hasData ? `含偏差回收 ${formatWanYuan(s.total_deviation_recovery_fee)}` : ''}
                         icon={<AccountBalanceWalletOutlinedIcon />} color="#1976d2" />
                 </Grid>
                 <Grid size={{ xs: 6, md: 2 }}>
-                    <StatCard title="售电收入" value={`${formatWanYuan(s.total_retail_revenue)}元`}
+                    <StatCard title="售电收入" value={hasData ? `${formatWanYuan(s.total_retail_revenue)}元` : '-'}
                         icon={<MonetizationOnOutlinedIcon />} color="#2e7d32" />
                 </Grid>
                 <Grid size={{ xs: 6, md: 2 }}>
-                    <StatCard title="当月毛利" value={`${formatWanYuan(s.gross_profit)}元`}
-                        subtitle={`利润率 ${s.profit_margin}%`}
+                    <StatCard title="当月毛利" value={hasData ? `${formatWanYuan(s.gross_profit)}元` : '-'}
+                        subtitle={hasData ? `利润率 ${s.profit_margin}%` : ''}
                         icon={<TrendingUpOutlinedIcon />}
-                        color={profitColor(s.gross_profit)} valueColor={profitColor(s.gross_profit)} />
+                        color={hasData ? profitColor(s.gross_profit) : 'text.disabled'} valueColor={hasData ? profitColor(s.gross_profit) : 'text.disabled'} />
                 </Grid>
                 <Grid size={{ xs: 6, md: 2 }}>
-                    <StatCard title="购电均价" value={`${s.wholesale_avg_price.toFixed(1)}`}
-                        subtitle="元/MWh" icon={<PriceChangeOutlinedIcon />} color="#1976d2" />
+                    <StatCard title="购电均价" value={hasData ? `${s.wholesale_avg_price.toFixed(1)}` : '-'}
+                        subtitle={hasData ? "元/MWh" : ""} icon={<PriceChangeOutlinedIcon />} color="#1976d2" />
                 </Grid>
                 <Grid size={{ xs: 6, md: 2 }}>
-                    <StatCard title="售电均价" value={`${s.retail_avg_price.toFixed(1)}`}
-                        subtitle="元/MWh" icon={<StorefrontOutlinedIcon />} color="#2e7d32" />
+                    <StatCard title="售电均价" value={hasData ? `${s.retail_avg_price.toFixed(1)}` : '-'}
+                        subtitle={hasData ? "元/MWh" : ""} icon={<StorefrontOutlinedIcon />} color="#2e7d32" />
                 </Grid>
                 <Grid size={{ xs: 6, md: 2 }}>
-                    <StatCard title="批零价差" value={`${s.price_spread > 0 ? '+' : ''}${s.price_spread.toFixed(1)}`}
-                        subtitle="元/MWh" icon={<CompareArrowsOutlinedIcon />}
-                        color={profitColor(s.price_spread)} valueColor={profitColor(s.price_spread)} />
+                    <StatCard title="批零价差" value={hasData ? `${s.price_spread > 0 ? '+' : ''}${s.price_spread.toFixed(1)}` : '-'}
+                        subtitle={hasData ? "元/MWh" : ""} icon={<CompareArrowsOutlinedIcon />}
+                        color={hasData ? profitColor(s.price_spread) : 'text.disabled'} valueColor={hasData ? profitColor(s.price_spread) : 'text.disabled'} />
                 </Grid>
             </Grid>
         );
@@ -318,7 +362,6 @@ const PreSettlementOverviewPage: React.FC = () => {
         if (chartData.length === 0) return null;
 
         if (chartView === 'price') {
-            // 购电/售电均价走势
             return (
                 <Box ref={leftChartRef} sx={chartBoxSx(isLeftFs)}>
                     <LeftFsEnter /><LeftFsExit /><LeftFsTitle /><LeftNavBtns />
@@ -339,7 +382,6 @@ const PreSettlementOverviewPage: React.FC = () => {
                 </Box>
             );
         } else {
-            // 购电成本 vs 售电收入（万元）— 曲线形式
             return (
                 <Box ref={leftChartRef} sx={chartBoxSx(isLeftFs)}>
                     <LeftFsEnter /><LeftFsExit /><LeftFsTitle /><LeftNavBtns />
@@ -367,7 +409,6 @@ const PreSettlementOverviewPage: React.FC = () => {
         if (chartData.length === 0) return null;
 
         if (chartView === 'price') {
-            // 日批零价差柱图 + 累计均价差曲线
             return (
                 <Box ref={rightChartRef} sx={chartBoxSx(isRightFs)}>
                     <RightFsEnter /><RightFsExit /><RightFsTitle /><RightNavBtns />
@@ -395,7 +436,6 @@ const PreSettlementOverviewPage: React.FC = () => {
                 </Box>
             );
         } else {
-            // 日毛利柱图 + 累计毛利曲线（万元）
             return (
                 <Box ref={rightChartRef} sx={chartBoxSx(isRightFs)}>
                     <RightFsEnter /><RightFsExit /><RightFsTitle /><RightNavBtns />
@@ -425,64 +465,57 @@ const PreSettlementOverviewPage: React.FC = () => {
         }
     };
 
-    // ====== 移动端卡片 ======
     const renderMobileCards = () => {
         if (!data) return null;
         const s = data.summary;
         return (
-            <Box sx={{ mt: 1 }}>
-                {data.daily_details.map((d) => (
-                    <Card key={d.date} variant="outlined" sx={{ mb: 1 }}>
-                        <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                                <Typography variant="subtitle2" fontWeight="bold">{d.date.substring(5)}</Typography>
-                                <Typography variant="subtitle2" sx={{ color: profitColor(d.daily_profit) }}>
-                                    毛利 {formatYuan(d.daily_profit)}
-                                </Typography>
-                            </Box>
-                            <Divider sx={{ my: 0.5 }} />
-                            <Grid container spacing={0.5}>
-                                <Grid size={{ xs: 6 }}>
-                                    <Typography variant="caption" color="text.secondary">电量</Typography>
-                                    <Typography variant="body2">{d.volume_mwh.toFixed(1)} MWh</Typography>
-                                </Grid>
-                                <Grid size={{ xs: 6 }}>
-                                    <Typography variant="caption" color="text.secondary">批零价差</Typography>
-                                    <Typography variant="body2" sx={{ color: profitColor(d.price_spread) }}>
-                                        {d.price_spread > 0 ? '+' : ''}{d.price_spread.toFixed(2)}
+            <Box sx={{ mt: 2, display: { xs: 'block', sm: 'none' } }}>
+                {data.daily_details.map((d) => {
+                    const hasRowData = d.volume_mwh > 0 || d.wholesale_cost > 0;
+                    return (
+                        <Card key={d.date} variant="outlined" sx={{ mb: 1.5, borderRadius: 2 }}>
+                            <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1, borderBottom: '1px solid', borderColor: 'divider', pb: 0.5 }}>
+                                    <Typography variant="subtitle2" fontWeight="bold">{d.date}</Typography>
+                                    <Typography variant="body2" sx={{ color: hasRowData ? profitColor(d.daily_profit) : 'text.disabled', fontWeight: 'bold' }}>
+                                        {hasRowData ? `利: ${formatYuan(d.daily_profit)}` : '-'}
                                     </Typography>
+                                </Box>
+                                <Grid container spacing={1}>
+                                    <Grid size={{ xs: 6 }}>
+                                        <Typography variant="caption" color="text.secondary">电量 (MWh)</Typography>
+                                        <Typography variant="body2">{hasRowData ? d.volume_mwh.toFixed(1) : '-'}</Typography>
+                                    </Grid>
+                                    <Grid size={{ xs: 6 }}>
+                                        <Typography variant="caption" color="text.secondary">价差 (元/MWh)</Typography>
+                                        <Typography variant="body2" sx={{ color: hasRowData ? profitColor(d.price_spread) : 'text.disabled' }}>
+                                            {hasRowData ? `${d.price_spread > 0 ? '+' : ''}${d.price_spread.toFixed(2)}` : '-'}
+                                        </Typography>
+                                    </Grid>
+                                    <Grid size={{ xs: 6 }}>
+                                        <Typography variant="caption" color="text.secondary">批发均价</Typography>
+                                        <Typography variant="body2">{hasRowData ? d.wholesale_avg_price.toFixed(2) : '-'}</Typography>
+                                    </Grid>
+                                    <Grid size={{ xs: 6 }}>
+                                        <Typography variant="caption" color="text.secondary">零售均价</Typography>
+                                        <Typography variant="body2">{hasRowData ? d.retail_avg_price.toFixed(2) : '-'}</Typography>
+                                    </Grid>
                                 </Grid>
-                                <Grid size={{ xs: 6 }}>
-                                    <Typography variant="caption" color="text.secondary">批发成本</Typography>
-                                    <Typography variant="body2">{formatYuan(d.wholesale_cost)}</Typography>
-                                </Grid>
-                                <Grid size={{ xs: 6 }}>
-                                    <Typography variant="caption" color="text.secondary">零售收入</Typography>
-                                    <Typography variant="body2">{formatYuan(d.retail_revenue)}</Typography>
-                                </Grid>
-                                <Grid size={{ xs: 6 }}>
-                                    <Typography variant="caption" color="text.secondary">购电均价</Typography>
-                                    <Typography variant="body2">{d.wholesale_avg_price.toFixed(2)}</Typography>
-                                </Grid>
-                                <Grid size={{ xs: 6 }}>
-                                    <Typography variant="caption" color="text.secondary">售电均价</Typography>
-                                    <Typography variant="body2">{d.retail_avg_price.toFixed(2)}</Typography>
-                                </Grid>
-                            </Grid>
-                        </CardContent>
-                    </Card>
-                ))}
-                <Card variant="outlined" sx={{ mb: 1, backgroundColor: 'action.hover' }}>
+                            </CardContent>
+                        </Card>
+                    );
+                })}
+                <Card variant="outlined" sx={{ mb: 2, backgroundColor: 'action.hover', borderRadius: 2 }}>
                     <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
-                        <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 0.5 }}>月度累计</Typography>
-                        <Divider sx={{ my: 0.5 }} />
-                        <Grid container spacing={0.5}>
+                        <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1 }}>月度累计</Typography>
+                        <Divider sx={{ mb: 1.5 }} />
+                        <Grid container spacing={1}>
                             <Grid size={{ xs: 6 }}>
                                 <Typography variant="caption" color="text.secondary">总电量</Typography>
-                                <Typography variant="body2">{s.total_volume_mwh.toFixed(1)} MWh</Typography>
+                                <Typography variant="body2" fontWeight="medium">{s.total_volume_mwh.toFixed(1)} MWh</Typography>
                             </Grid>
                             <Grid size={{ xs: 6 }}>
-                                <Typography variant="caption" color="text.secondary">毛利</Typography>
+                                <Typography variant="caption" color="text.secondary">总毛利</Typography>
                                 <Typography variant="body2" sx={{ color: profitColor(s.gross_profit), fontWeight: 'bold' }}>
                                     {formatYuan(s.gross_profit)}
                                 </Typography>
@@ -502,7 +535,6 @@ const PreSettlementOverviewPage: React.FC = () => {
         );
     };
 
-    // ====== 桌面端表格 ======
     const renderDesktopTable = () => {
         if (!data) return null;
         const s = data.summary;
@@ -529,24 +561,27 @@ const PreSettlementOverviewPage: React.FC = () => {
                         </TableRow>
                     </TableHead>
                     <TableBody>
-                        {data.daily_details.map((d) => (
-                            <TableRow key={d.date} hover>
-                                <TableCell>{d.date.substring(5)}</TableCell>
-                                <TableCell align="right">{d.volume_mwh.toFixed(1)}</TableCell>
-                                <TableCell align="right">{formatYuan(d.wholesale_cost)}</TableCell>
-                                <TableCell align="right">{formatYuan(d.deviation_recovery_fee)}</TableCell>
-                                <TableCell align="right">{d.wholesale_avg_price.toFixed(2)}</TableCell>
-                                <TableCell align="right">{formatYuan(d.retail_revenue)}</TableCell>
-                                <TableCell align="right">{d.retail_avg_price.toFixed(2)}</TableCell>
-                                <TableCell align="right" sx={{ color: profitColor(d.price_spread) }}>
-                                    {d.price_spread > 0 ? '+' : ''}{d.price_spread.toFixed(2)}
-                                </TableCell>
-                                <TableCell align="right" sx={{ color: profitColor(d.daily_profit) }}>
-                                    {formatYuan(d.daily_profit)}
-                                </TableCell>
-                                <TableCell align="right">{formatYuan(d.cumulative_profit)}</TableCell>
-                            </TableRow>
-                        ))}
+                        {data.daily_details.map((d) => {
+                            const hasRowData = d.volume_mwh > 0 || d.wholesale_cost > 0;
+                            return (
+                                <TableRow key={d.date} hover>
+                                    <TableCell>{d.date.substring(5)}</TableCell>
+                                    <TableCell align="right">{hasRowData ? d.volume_mwh.toFixed(1) : '-'}</TableCell>
+                                    <TableCell align="right">{hasRowData ? formatYuan(d.wholesale_cost) : '-'}</TableCell>
+                                    <TableCell align="right">{hasRowData ? formatYuan(d.deviation_recovery_fee) : '-'}</TableCell>
+                                    <TableCell align="right">{hasRowData ? d.wholesale_avg_price.toFixed(2) : '-'}</TableCell>
+                                    <TableCell align="right">{hasRowData ? formatYuan(d.retail_revenue) : '-'}</TableCell>
+                                    <TableCell align="right">{hasRowData ? d.retail_avg_price.toFixed(2) : '-'}</TableCell>
+                                    <TableCell align="right" sx={{ color: hasRowData ? profitColor(d.price_spread) : 'text.disabled' }}>
+                                        {hasRowData ? `${d.price_spread > 0 ? '+' : ''}${d.price_spread.toFixed(2)}` : '-'}
+                                    </TableCell>
+                                    <TableCell align="right" sx={{ color: hasRowData ? profitColor(d.daily_profit) : 'text.disabled' }}>
+                                        {hasRowData ? formatYuan(d.daily_profit) : '-'}
+                                    </TableCell>
+                                    <TableCell align="right">{hasRowData ? formatYuan(d.cumulative_profit) : '-'}</TableCell>
+                                </TableRow>
+                            );
+                        })}
                         <TableRow sx={{ backgroundColor: 'action.selected', '& .MuiTableCell-root': { fontWeight: 'bold' } }}>
                             <TableCell>月累计</TableCell>
                             <TableCell align="right">{s.total_volume_mwh.toFixed(1)}</TableCell>
@@ -569,7 +604,6 @@ const PreSettlementOverviewPage: React.FC = () => {
         );
     };
 
-    // ====== 主渲染 ======
     return (
         <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
             <Box sx={{ width: '100%' }}>
@@ -579,7 +613,6 @@ const PreSettlementOverviewPage: React.FC = () => {
                     </Typography>
                 )}
 
-                {/* 控制栏 */}
                 <Paper variant="outlined" sx={{ p: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
                     <IconButton onClick={() => handleShiftMonth(-1)} disabled={loading}>
                         <ArrowLeftIcon />
@@ -597,7 +630,6 @@ const PreSettlementOverviewPage: React.FC = () => {
                         <ArrowRightIcon />
                     </IconButton>
 
-                    {/* 版本选择 — 桌面端推到右侧 */}
                     <Box sx={{ flexGrow: 1 }} />
                     <FormControl size="small" sx={{ minWidth: 150 }}>
                         <InputLabel>版本</InputLabel>
@@ -609,7 +641,6 @@ const PreSettlementOverviewPage: React.FC = () => {
                     </FormControl>
                 </Paper>
 
-                {/* 首次加载 */}
                 {loading && !data ? (
                     <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
                         <CircularProgress />
@@ -628,10 +659,8 @@ const PreSettlementOverviewPage: React.FC = () => {
                             </Box>
                         )}
 
-                        {/* 汇总卡片 */}
                         <Box sx={{ mt: 2 }}>{renderSummaryCards()}</Box>
 
-                        {/* 图表面板 — 一个 Paper 内含切换 + 两图并列 */}
                         <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 }, mt: 2 }}>
                             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1, flexWrap: 'wrap', gap: 1 }}>
                                 <Typography variant="h6">
@@ -657,7 +686,6 @@ const PreSettlementOverviewPage: React.FC = () => {
                             </Grid>
                         </Paper>
 
-                        {/* 明细：桌面端无标题直接表格，移动端有标题+卡片 */}
                         {isMobile && <Typography variant="h6" sx={{ mt: 2 }}>日度明细</Typography>}
                         {isMobile ? renderMobileCards() : renderDesktopTable()}
                     </Box>
@@ -668,3 +696,4 @@ const PreSettlementOverviewPage: React.FC = () => {
 };
 
 export default PreSettlementOverviewPage;
+

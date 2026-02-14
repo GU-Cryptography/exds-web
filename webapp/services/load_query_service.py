@@ -131,7 +131,10 @@ class LoadQueryService:
     @staticmethod
     def get_latest_data_date(customer_id: Optional[str] = None) -> Optional[str]:
         """查询统一负荷曲线的最新数据日期"""
-        query = {}
+        # 获取今天日期，过滤掉未来测试数据
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        query = {"date": {"$lte": today_str}}
+        
         if customer_id:
             query["customer_id"] = customer_id
             

@@ -20,6 +20,26 @@ class ResponseModel(BaseModel):
     message: str = "success"
     data: Optional[Any] = None
 
+class SettlementMetadata(BaseModel):
+    preliminary_latest_date: Optional[str] = None
+    platform_daily_latest_date: Optional[str] = None
+
+@router.get("/metadata", response_model=ResponseModel)
+async def get_settlement_metadata():
+    """
+    获取结算元数据（各版本的最新日期）
+    """
+    try:
+        preliminary_date = await service.get_latest_results_date(SettlementVersion.PRELIMINARY)
+        platform_date = await service.get_latest_results_date(SettlementVersion.PLATFORM_DAILY)
+        
+        return ResponseModel(code=200, data=SettlementMetadata(
+            preliminary_latest_date=preliminary_date,
+            platform_daily_latest_date=platform_date
+        ))
+    except Exception as e:
+        return ResponseModel(code=500, message=str(e), data=None)
+
 @router.post("/calculate", response_model=ResponseModel)
 async def calculate_daily_settlement(req: CalculationRequest):
     """
