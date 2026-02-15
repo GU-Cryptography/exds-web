@@ -68,10 +68,10 @@ const RetailPackagePage: React.FC = () => {
   const isTablet = useMediaQuery(theme.breakpoints.down('md'));
 
   // 使用 matchPath 解析当前路由状态
-  const createMatch = matchPath('/basic-data/retail-packages/create', location.pathname);
-  const viewMatch = matchPath('/basic-data/retail-packages/view/:packageId', location.pathname);
-  const editMatch = matchPath('/basic-data/retail-packages/edit/:packageId', location.pathname);
-  const copyMatch = matchPath('/basic-data/retail-packages/copy/:packageId', location.pathname);
+  const createMatch = matchPath('/customer/retail-packages/create', location.pathname);
+  const viewMatch = matchPath('/customer/retail-packages/view/:packageId', location.pathname);
+  const editMatch = matchPath('/customer/retail-packages/edit/:packageId', location.pathname);
+  const copyMatch = matchPath('/customer/retail-packages/copy/:packageId', location.pathname);
 
   // 根据当前路由确定状态
   const isCreateView = !!createMatch;
@@ -304,14 +304,14 @@ const RetailPackagePage: React.FC = () => {
 
   // 移动端返回列表
   const handleBackToList = () => {
-    navigate('/basic-data/retail-packages');
+    navigate('/customer/retail-packages');
   };
 
   // 查看详情处理函数
   const handleViewDetails = (packageId: string) => {
     if (isMobile) {
       // 移动端使用路由导航
-      navigate(`/basic-data/retail-packages/view/${packageId}`);
+      navigate(`/customer/retail-packages/view/${packageId}`);
     } else {
       // 桌面端使用对话框
       setDetailsPackageId(packageId);
@@ -322,7 +322,7 @@ const RetailPackagePage: React.FC = () => {
   const handleEdit = (packageId: string) => {
     if (isMobile) {
       // 移动端使用路由导航
-      navigate(`/basic-data/retail-packages/edit/${packageId}`);
+      navigate(`/customer/retail-packages/edit/${packageId}`);
     } else {
       // 桌面端使用对话框
       setEditPackageId(packageId);
@@ -334,7 +334,7 @@ const RetailPackagePage: React.FC = () => {
   const handleCopy = (packageId: string) => {
     if (isMobile) {
       // 移动端使用路由导航
-      navigate(`/basic-data/retail-packages/copy/${packageId}`);
+      navigate(`/customer/retail-packages/copy/${packageId}`);
     } else {
       // 桌面端使用对话框
       setEditPackageId(packageId);
@@ -346,7 +346,7 @@ const RetailPackagePage: React.FC = () => {
   const handleCreate = () => {
     if (isMobile) {
       // 移动端使用路由导航
-      navigate('/basic-data/retail-packages/create');
+      navigate('/customer/retail-packages/create');
     } else {
       // 桌面端使用对话框
       setEditPackageId(undefined);
@@ -382,13 +382,13 @@ const RetailPackagePage: React.FC = () => {
         // 移动端保存成功后的导航逻辑
         if (isCreateView) {
           // 新增成功后返回列表
-          navigate('/basic-data/retail-packages');
+          navigate('/customer/retail-packages');
         } else if (isEditView || isCopyView) {
           // 编辑/复制成功后返回详情
           if (savedPackageId) {
-            navigate(`/basic-data/retail-packages/view/${savedPackageId}`);
+            navigate(`/customer/retail-packages/view/${savedPackageId}`);
           } else {
-            navigate('/basic-data/retail-packages');
+            navigate('/customer/retail-packages');
           }
         }
       } else {
@@ -495,8 +495,8 @@ const RetailPackagePage: React.FC = () => {
             open={true}
             packageId={getPackageId(mobilePackageData)}
             onClose={handleBackToList}
-            onEdit={(packageId) => navigate(`/basic-data/retail-packages/edit/${packageId}`)}
-            onCopy={(packageId) => navigate(`/basic-data/retail-packages/copy/${packageId}`)}
+            onEdit={(packageId) => navigate(`/customer/retail-packages/edit/${packageId}`)}
+            onCopy={(packageId) => navigate(`/customer/retail-packages/copy/${packageId}`)}
           />
         ) : null}
       </Box>
