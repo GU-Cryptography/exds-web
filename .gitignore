@@ -229,3 +229,4 @@ tmp/
 .vscode/
 run.bat
 .gemini/
+.agent/
