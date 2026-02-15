@@ -11,7 +11,8 @@ from webapp.api import (
     v1_common, v1_market_analysis, v1_sgcc_price,
     v1_pricing_model, v1_customer_tags, v1_system,
     v1_load_forecast, v1_manual_adjustment, v1_settlement,
-    v1_retail_settlement
+    v1_retail_settlement,
+    medium_term_forecast  # New module
 )
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ router.include_router(v1_customer_load_overview.router, prefix="/customer-load-o
 router.include_router(v1_load_forecast.router)
 router.include_router(v1_manual_adjustment.router)
 router.include_router(v1_system.router)
+router.include_router(medium_term_forecast.router, prefix="/load-forecast/medium-term", tags=["LoadForecast"])
 
 # Include public routers
 public_router.include_router(v1_sgcc_price.public_router)

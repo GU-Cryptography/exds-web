@@ -110,6 +110,10 @@ class CustomerCharacteristics(BaseMongoModel):
     
     baseline_curve: Optional[List[float]] = Field(None, description="基准曲线 (近30天均值，用于异动对比)")
     
+    # 中长期预测专用基线 (归一化)
+    baseline_workday: Optional[List[float]] = Field(None, description="工作日基准曲线 (归一化)")
+    baseline_weekend: Optional[List[float]] = Field(None, description="周末基准曲线 (归一化)")
+    
     tags: List[TagItem] = Field(default_factory=list)
     
     regularity_score: Optional[float] = Field(None, description="规律性评分 (0-100)")

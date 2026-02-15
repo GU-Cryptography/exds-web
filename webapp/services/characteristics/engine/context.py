@@ -23,6 +23,8 @@ class LabelingContext:
     
     # 典型负荷 (用于班次识别、光伏识别等通用特征)
     typical_load_series: List[float] = field(default_factory=list)
+    typical_workday_series: List[float] = field(default_factory=list) # 工作日典型曲线
+    typical_weekend_series: List[float] = field(default_factory=list) # 周末典型曲线
 
     # 预计算特征 (避免重复计算)
     normalized_series: List[float] = field(default_factory=list) # 归一化曲线 (0-1)

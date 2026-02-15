@@ -118,7 +118,7 @@ class CharacteristicService:
             short_term_metrics = self._calc_legacy_short_term(customer_id, date)
             
             # 4. 保存结果
-            self._save_results(customer_id, date, tags, long_term_metrics, short_term_metrics)
+            self._save_results(customer_id, date, tags, long_term_metrics, short_term_metrics, context=context)
             
             # 5. 保存异动告警到历史记录
             self._save_anomaly_alerts(customer_id, context, date_str, tags)
@@ -222,6 +222,42 @@ class CharacteristicService:
                     avg_curve = np.mean(matrix, axis=0)
                     typical_load_series = avg_curve.tolist()
 
+        # C-2. Calculate Workday vs Weekend Baselines (New for Medium-Term Forecast)
+        typical_workday_series = []
+        typical_weekend_series = []
+        
+        if recent_curves:
+             workday_curves = []
+             weekend_curves = []
+             
+             for c in recent_curves:
+                 if not c.values or len(c.values) not in [48, 96]:
+                     continue
+                 
+                 # Normalize to 96 points first
+                 vals_96 = []
+                 if len(c.values) == 48:
+                     for v in c.values:
+                         vals_96.extend([v, v])
+                 else:
+                     vals_96 = c.values
+                 
+                 # Determine if weekend (Sat=5, Sun=6)
+                 # Note: c.date is string YYYY-MM-DD
+                 try:
+                     dt = datetime.strptime(c.date, "%Y-%m-%d")
+                     if dt.weekday() >= 5:
+                         weekend_curves.append(vals_96)
+                     else:
+                         workday_curves.append(vals_96)
+                 except:
+                     pass
+            
+             if workday_curves:
+                 typical_workday_series = np.mean(np.array(workday_curves), axis=0).tolist()
+             if weekend_curves:
+                 typical_weekend_series = np.mean(np.array(weekend_curves), axis=0).tolist()
+
         # Calculate TOU Info (Aggregate from recent 30 days)
         tou_info = None
         if recent_curves:
@@ -280,6 +316,8 @@ class CharacteristicService:
             long_term_dates=long_term_dates,
             long_term_values=long_term_values,
             typical_load_series=typical_load_series, 
+            typical_workday_series=typical_workday_series,
+            typical_weekend_series=typical_weekend_series,
             customer_info=cust_info, # Inject Customer Info
             weather_service=self.weather_service, # Inject Weather Service
             tou_info=tou_info # Inject TOU Info
@@ -497,7 +535,8 @@ class CharacteristicService:
             return None
 
     def _save_results(self, customer_id: str, date: datetime, tags: List[Tag], 
-                     long_term: Optional[LongTermMetrics], short_term: Optional[ShortTermMetrics]):
+                     long_term: Optional[LongTermMetrics], short_term: Optional[ShortTermMetrics],
+                     context: LabelingContext = None):
         """持久化结果：更新客户画像 + 写入历史日志 + 更新特征表"""
         from bson import ObjectId
         
@@ -537,6 +576,12 @@ class CharacteristicService:
             elif reg_score >= 50:
                 quality = "B"
         
+        # Helper to downsample 96 -> 48
+        def downsample_96_to_48(series_96):
+            if not series_96 or len(series_96) != 96:
+                return series_96
+            return [(series_96[i] + series_96[i+1])/2 for i in range(0, 96, 2)]
+
         # 3. 更新 customer_characteristics (不再存储标签副本)
         char_doc = CustomerCharacteristics(
             customer_id=customer_id,
@@ -548,7 +593,9 @@ class CharacteristicService:
             tags=[],  # 不再存储标签副本
             regularity_score=reg_score,
             quality_rating=quality,
-            baseline_curve=short_term.avg_curve if short_term else None
+            baseline_curve=short_term.avg_curve if short_term else None,
+            baseline_workday=downsample_96_to_48(context.typical_workday_series) if context else None,
+            baseline_weekend=downsample_96_to_48(context.typical_weekend_series) if context else None
         )
         
         self.char_collection.update_one(
