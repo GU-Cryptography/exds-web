@@ -61,11 +61,11 @@ def setup_scheduler(app):
         replace_existing=True
     )
 
-    # 预结算计算 (每30分钟检查数据完整性)
+    # 预结算计算 (每10分钟检查数据完整性)
     scheduler.add_job(
         event_driven_settlement_job,
         'interval',
-        minutes=30,
+        minutes=10,
         id='web_event_settlement_calc',
         replace_existing=True
     )

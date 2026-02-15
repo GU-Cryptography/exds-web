@@ -507,18 +507,30 @@ const PreSettlementOverviewPage: React.FC = () => {
                 })}
                 <Card variant="outlined" sx={{ mb: 2, backgroundColor: 'action.hover', borderRadius: 2 }}>
                     <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
-                        <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1 }}>月度累计</Typography>
-                        <Divider sx={{ mb: 1.5 }} />
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1, borderBottom: '1px solid', borderColor: 'divider', pb: 0.5 }}>
+                            <Typography variant="subtitle2" fontWeight="bold">月度累计</Typography>
+                            <Typography variant="body2" sx={{ color: profitColor(s.gross_profit), fontWeight: 'bold' }}>
+                                利: {formatYuan(s.gross_profit)}
+                            </Typography>
+                        </Box>
                         <Grid container spacing={1}>
                             <Grid size={{ xs: 6 }}>
-                                <Typography variant="caption" color="text.secondary">总电量</Typography>
-                                <Typography variant="body2" fontWeight="medium">{s.total_volume_mwh.toFixed(1)} MWh</Typography>
+                                <Typography variant="caption" color="text.secondary">总电量 (MWh)</Typography>
+                                <Typography variant="body2">{s.total_volume_mwh.toFixed(1)}</Typography>
                             </Grid>
                             <Grid size={{ xs: 6 }}>
-                                <Typography variant="caption" color="text.secondary">总毛利</Typography>
-                                <Typography variant="body2" sx={{ color: profitColor(s.gross_profit), fontWeight: 'bold' }}>
-                                    {formatYuan(s.gross_profit)}
+                                <Typography variant="caption" color="text.secondary">批零价差 (元/MWh)</Typography>
+                                <Typography variant="body2" sx={{ color: profitColor(s.price_spread), fontWeight: 'bold' }}>
+                                    {s.price_spread > 0 ? '+' : ''}{s.price_spread.toFixed(2)}
                                 </Typography>
+                            </Grid>
+                            <Grid size={{ xs: 6 }}>
+                                <Typography variant="caption" color="text.secondary">购电均价</Typography>
+                                <Typography variant="body2">{s.wholesale_avg_price.toFixed(2)}</Typography>
+                            </Grid>
+                            <Grid size={{ xs: 6 }}>
+                                <Typography variant="caption" color="text.secondary">售电均价</Typography>
+                                <Typography variant="body2">{s.retail_avg_price.toFixed(2)}</Typography>
                             </Grid>
                             <Grid size={{ xs: 6 }}>
                                 <Typography variant="caption" color="text.secondary">总成本</Typography>
