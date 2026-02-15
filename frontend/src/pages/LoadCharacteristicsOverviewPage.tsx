@@ -20,6 +20,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import PeopleIcon from '@mui/icons-material/People';
 
 import CloseIcon from '@mui/icons-material/Close';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -142,6 +143,8 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
     const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
     const { addTab } = useTabContext();
 
+    const [analysisLoading, setAnalysisLoading] = useState(false);
+
     // 数据状态
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -180,11 +183,33 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
             setDistribution(distRes.data);
             setTagChanges(changesRes.data);
             setScatterData(scatterRes.data.items);
+
+            // 刷新当前页面的客户列表
+            await fetchCustomers(page);
         } catch (err: any) {
             console.error(err);
             setError('加载数据失败');
         } finally {
             setLoading(false);
+        }
+    };
+
+    // 手动特征分析
+    const handleManualAnalyze = async () => {
+        if (!window.confirm('确定要手动触发全量客户特征分析吗？这可能需要一些时间。')) {
+            return;
+        }
+
+        setAnalysisLoading(true);
+        try {
+            await loadCharacteristicsApi.analyzeBatch();
+            // 分析完成后刷新所有数据
+            await fetchAllData();
+        } catch (err: any) {
+            console.error(err);
+            alert('接口调用失败: ' + (err.response?.data?.detail || err.message));
+        } finally {
+            setAnalysisLoading(false);
         }
     };
 
@@ -288,6 +313,14 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
             <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mb: 2 }}>
                 {[
                     {
+                        title: '特征分析日期',
+                        value: overviewData?.kpi.latest_data_date || '-',
+                        unit: '',
+                        icon: '📅',
+                        color: theme.palette.info.main,
+                        content: <Typography variant="caption" color="text.secondary">负荷数据截至日期</Typography>
+                    },
+                    {
                         title: '画像覆盖率',
                         value: overviewData ? `${(overviewData.kpi.coverage_rate * 100).toFixed(0)}%` : '-',
                         unit: `${overviewData?.kpi.coverage_count || 0}/${overviewData?.kpi.total_customers || 0}户`,
@@ -307,6 +340,14 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
                         unit: `占比 ${((overviewData?.kpi.dominant_tag_percentage || 0) * 100).toFixed(0)}%`,
                         icon: TAG_ICONS[overviewData?.kpi.dominant_tag || ''] || '🏷️',
                         color: '#7b1fa2',
+                    },
+                    {
+                        title: '规律评分',
+                        value: overviewData?.kpi.avg_regularity_score || 0,
+                        unit: '分',
+                        icon: '🎯',
+                        color: theme.palette.success.main,
+                        content: <Typography variant="caption" color="text.secondary">全网加权平均</Typography>
                     },
                     {
                         title: '今日异动',
@@ -344,7 +385,7 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
                         )
                     }
                 ].map((card, index) => (
-                    <Grid key={index} size={{ xs: 6, md: 3 }} sx={{ display: 'flex' }}>
+                    <Grid key={index} size={{ xs: 6, md: 2 }} sx={{ display: 'flex' }}>
                         <Card
                             variant="outlined"
                             sx={{
@@ -636,8 +677,14 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
 
             {/* 第三行：客户列表 */}
             <Paper variant="outlined" sx={{ width: '100%', mb: 2, p: { xs: 1, sm: 2 } }}>
-                <Box display="flex" justifyContent="space-between" alignItems="center" mb={2} flexWrap="wrap" gap={1}>
-                    <Box display="flex" gap={1} flexWrap="wrap" alignItems="center">
+                <Box display="flex" justifyContent="space-between" alignItems="center" mb={1} flexWrap="wrap" gap={2}>
+                    {/* 左侧：标题 + 搜索 + 筛选 */}
+                    <Box display="flex" alignItems="center" gap={2} flexWrap="wrap" sx={{ flexGrow: 1 }}>
+                        <Typography variant="h6" fontWeight="bold" sx={{ display: 'flex', alignItems: 'center' }}>
+                            <PeopleIcon sx={{ mr: 1, color: 'primary.main' }} />
+                            客户列表
+                        </Typography>
+
                         <TextField
                             size="small"
                             placeholder="搜索客户名称"
@@ -652,7 +699,8 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
                             }}
                             sx={{ width: { xs: '100%', sm: 180 } }}
                         />
-                        <FormControl size="small" sx={{ minWidth: { xs: 'calc(100% - 48px)', sm: 140 } }}>
+
+                        <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 140 } }}>
                             <InputLabel>特征筛选</InputLabel>
                             <Select
                                 value={filterTag}
@@ -679,20 +727,49 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
                                 ])}
                             </Select>
                         </FormControl>
-                        <Tooltip title="刷新数据">
-                            <IconButton
-                                onClick={fetchAllData}
-                                disabled={loading}
-                                size="small"
-                                sx={{
-                                    border: '1px solid',
-                                    borderColor: 'divider',
-                                    bgcolor: 'background.paper'
-                                }}
-                            >
-                                <RefreshIcon fontSize="small" />
-                            </IconButton>
-                        </Tooltip>
+                    </Box>
+
+                    {/* 右侧：操作按钮 */}
+                    <Box display="flex" gap={1} alignItems="center" sx={{ width: { xs: '100%', sm: 'auto' }, justifyContent: 'flex-end' }}>
+                        <Button
+                            variant="outlined"
+                            size="small"
+                            startIcon={analysisLoading ? <CircularProgress size={16} /> : <TrendingUpIcon />}
+                            onClick={handleManualAnalyze}
+                            disabled={loading || analysisLoading}
+                            sx={{
+                                height: 40,
+                                whiteSpace: 'nowrap',
+                                borderColor: 'divider',
+                                color: 'text.primary',
+                                '&:hover': {
+                                    borderColor: 'primary.main',
+                                    bgcolor: 'action.hover'
+                                }
+                            }}
+                        >
+                            {analysisLoading ? '执行中...' : '手动执行'}
+                        </Button>
+
+                        <Button
+                            variant="outlined"
+                            size="small"
+                            startIcon={loading ? <CircularProgress size={16} /> : <RefreshIcon />}
+                            onClick={fetchAllData}
+                            disabled={loading || analysisLoading}
+                            sx={{
+                                height: 40,
+                                whiteSpace: 'nowrap',
+                                borderColor: 'divider',
+                                color: 'text.primary',
+                                '&:hover': {
+                                    borderColor: 'primary.main',
+                                    bgcolor: 'action.hover'
+                                }
+                            }}
+                        >
+                            数据刷新
+                        </Button>
                     </Box>
                 </Box>
 

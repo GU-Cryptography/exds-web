@@ -11,7 +11,11 @@ import EditIcon from '@mui/icons-material/Edit';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { format, addDays, parseISO, startOfMonth } from 'date-fns';
+import { format, addDays, parseISO, startOfMonth, isSameDay, getMonth, getYear } from 'date-fns';
+import { LocalizationProvider, DateCalendar, PickersDay, PickersDayProps } from '@mui/x-date-pickers';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { zhCN } from 'date-fns/locale';
+import Badge from '@mui/material/Badge';
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer,
     Tooltip as RechartsTooltip, Legend,
@@ -508,12 +512,10 @@ const RiskControlPanel: React.FC<{ customerId: string }> = ({ customerId }) => {
 
     useEffect(() => {
         setLoading(true);
-        if (tab === 0) {
-            loadCharacteristicsApi.getCustomerAlerts(customerId).then(res => setAlerts(res.data.items)).finally(() => setLoading(false));
-        } else {
-            loadCharacteristicsApi.getCustomerHistory(customerId).then(res => setHistory(res.data.items)).finally(() => setLoading(false));
-        }
-    }, [customerId, tab]);
+        loadCharacteristicsApi.getCustomerAlerts(customerId)
+            .then(res => setAlerts(res.data.items))
+            .finally(() => setLoading(false));
+    }, [customerId]);
 
     const handleStatusChange = async (alertId: string, currentStatus: boolean, currentNotes: string | undefined) => {
         const newStatus = !currentStatus;
@@ -551,16 +553,6 @@ const RiskControlPanel: React.FC<{ customerId: string }> = ({ customerId }) => {
             <Box p={2} pb={0}>
                 <PanelHeader
                     title="风险管控"
-                    action={
-                        <Tabs
-                            value={tab}
-                            onChange={(e, v) => setTab(v)}
-                            sx={{ minHeight: 32, '& .MuiTab-root': { minHeight: 32, py: 0, fontSize: '0.8rem', px: 1 } }}
-                        >
-                            <Tab label={`异动(${alerts.length})`} />
-                            <Tab label="历史" />
-                        </Tabs>
-                    }
                 />
             </Box>
             <Divider sx={{ mt: 2 }} />
@@ -682,26 +674,7 @@ const RiskControlPanel: React.FC<{ customerId: string }> = ({ customerId }) => {
                                 );
                             })}
                         </Box>
-                    ) : (
-                        // History Tab (Keep simple list)
-                        <List dense>
-                            {history.length === 0 && (
-                                <Box display="flex" justifyContent="center" alignItems="center" height={200} color="text.secondary">
-                                    <Typography variant="caption">暂无分析历史</Typography>
-                                </Box>
-                            )}
-                            {history.map((item, idx) => (
-                                <ListItem key={idx} divider>
-                                    <ListItemText
-                                        primary={`分析时间: ${new Date(item.execution_time).toLocaleString()}`}
-                                        secondary={`生成标签: ${item.tags.join(', ') || '无'}`}
-                                        primaryTypographyProps={{ variant: 'body2' }}
-                                        secondaryTypographyProps={{ variant: 'caption', noWrap: true }}
-                                    />
-                                </ListItem>
-                            ))}
-                        </List>
-                    )
+                    ) : null
                 )}
             </Box>
         </Paper>
@@ -755,7 +728,7 @@ const DeepAnalysisPanel: React.FC<{ data: CustomerCharacteristics }> = ({ data }
                 })
                 .catch(console.error)
                 .finally(() => setLoading(false));
-        } else {
+        } else if (activeTab === 1) {
             // Short Term
             setCurrentSlope(null);
             if (data.short_term) {
@@ -781,6 +754,9 @@ const DeepAnalysisPanel: React.FC<{ data: CustomerCharacteristics }> = ({ data }
             } else {
                 setChartData([]);
             }
+            setLoading(false);
+        } else {
+            // History Tab
             setLoading(false);
         }
     }, [activeTab, data, touSummary]);
@@ -858,6 +834,7 @@ const DeepAnalysisPanel: React.FC<{ data: CustomerCharacteristics }> = ({ data }
                             >
                                 <Tab label="长周期" />
                                 <Tab label="短周期" />
+                                <Tab label="特征历史" />
                             </Tabs>
                         </Stack>
                     }
@@ -866,116 +843,397 @@ const DeepAnalysisPanel: React.FC<{ data: CustomerCharacteristics }> = ({ data }
             <Divider />
 
             <Box p={2}>
-                <Grid container spacing={2}>
-                    {/* Chart Section */}
-                    <Grid size={{ xs: 12 }}>
-                        <Box
-                            ref={chartRef}
-                            sx={{
-                                height: 350,
-                                position: 'relative',
-                                bgcolor: isFullscreen ? 'background.paper' : 'transparent',
-                                p: isFullscreen ? 2 : 0,
-                                ...(isFullscreen && { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1400 }),
-                                '& .recharts-wrapper:focus': {
-                                    outline: 'none'
-                                }
-                            }}
-                        >
-                            <FullscreenEnterButton />
-                            <FullscreenExitButton />
-                            <FullscreenTitle />
+                <Grid container spacing={2} sx={{ height: 420, overflow: 'hidden' }}>
+                    {activeTab === 2 ? (
+                        <Grid size={{ xs: 12 }} sx={{ height: '100%' }}>
                             {loading ? <Box display="flex" justifyContent="center" height="100%" alignItems="center"><CircularProgress /></Box> : (
-                                <ResponsiveContainer width="100%" height="100%">
-                                    {activeTab === 0 ? (
-                                        <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                                            <defs>
-                                                <linearGradient id="colorTrend" x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="5%" stopColor="#2e7d32" stopOpacity={0.15} />
-                                                    <stop offset="95%" stopColor="#2e7d32" stopOpacity={0} />
-                                                </linearGradient>
-                                            </defs>
-                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                                            <XAxis dataKey="date" tickFormatter={v => v?.slice(5)} interval={30} tick={{ fontSize: 12, fill: '#666' }} axisLine={{ stroke: '#e0e0e0' }} />
-                                            <YAxis tick={{ fontSize: 12, fill: '#666' }} axisLine={false} tickLine={false} />
-                                            <RechartsTooltip content={<CustomChartTooltip />} />
-                                            <Area type="monotone" dataKey="total" stroke="#2e7d32" fill="url(#colorTrend)" strokeWidth={2} name="日电量" />
-                                            <Line type="monotone" dataKey="trend" stroke="#d32f2f" strokeDasharray="5 5" strokeWidth={1.5} dot={false} name="趋势线" />
-                                            <Legend verticalAlign="top" height={36} />
-                                        </ComposedChart>
-                                    ) : (
-                                        <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                                            <defs>
-                                                <linearGradient id="colorAvg" x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="5%" stopColor="#1976d2" stopOpacity={0.15} />
-                                                    <stop offset="95%" stopColor="#1976d2" stopOpacity={0.01} />
-                                                </linearGradient>
-                                            </defs>
-                                            {TouPeriodAreas}
-                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                                            <XAxis
-                                                dataKey="time"
-                                                interval={11}
-                                                tick={{ fontSize: 12, fill: '#666' }}
-                                                axisLine={{ stroke: '#e0e0e0' }}
-                                                tickFormatter={(value, index) => {
-                                                    const totalPoints = chartData.length;
-                                                    if (index === 0) return '00:30';
-                                                    if (index === totalPoints - 1) return '24:00';
-                                                    return value;
-                                                }}
-                                            />
-                                            <YAxis tick={{ fontSize: 12, fill: '#666' }} axisLine={false} tickLine={false} />
-                                            <RechartsTooltip content={<CustomChartTooltip />} />
-                                            <Area type="monotone" dataKey="avg" stroke="#1976d2" fill="url(#colorAvg)" name="平均负荷" strokeWidth={2} />
-                                            <Line type="monotone" dataKey="upper" stroke="#ff9800" dot={false} strokeDasharray="3 3" strokeWidth={1} name="波动上限" />
-                                            <Line type="monotone" dataKey="lower" stroke="#ff9800" dot={false} strokeDasharray="3 3" strokeWidth={1} name="波动下限" />
-                                            <Legend verticalAlign="top" height={36} />
-                                        </ComposedChart>
-                                    )}
-                                </ResponsiveContainer>
+                                <CharacteristicHistoryCalendar customerId={data.customer_id} />
                             )}
-                        </Box>
-                    </Grid>
-
-                    {/* Metrics Section */}
-                    <Grid size={{ xs: 12 }}>
-                        <Typography variant="subtitle2" gutterBottom color="text.secondary" sx={{ mt: 1, fontWeight: 'bold' }}>关键指标统计</Typography>
-                        <Grid container spacing={1.5}>
-                            {activeTab === 0 && lMetrics && [
-                                { l: '日均电量', v: `${lMetrics.avg_daily_load} kWh` },
-                                { l: '年累计电量', v: `${(lMetrics.total_annual_load / 10000).toFixed(2)} 万kWh` },
-                                { l: '趋势斜率', v: lMetrics.trend_slope.toFixed(4) },
-                                { l: '近3月增长', v: lMetrics.recent_3m_growth ? `${(lMetrics.recent_3m_growth * 100).toFixed(1)}% ` : '-' },
-                                { l: '离散系数(CV)', v: lMetrics.cv },
-                                { l: '零电量天数', v: lMetrics.zero_days },
-                                { l: '气温相关性', v: lMetrics.temp_correlation ?? '-' },
-                                { l: '周末效应', v: lMetrics.weekend_ratio ?? '-' }
-                            ].map((item, i) => (
-                                <Grid size={{ xs: 6, sm: 3, md: 3 }} key={i}>
-                                    <MetricItem label={item.l} value={item.v} />
-                                </Grid>
-                            ))}
-
-                            {activeTab === 1 && sMetrics && [
-                                { l: '平均负荷率', v: `${(sMetrics.avg_load_rate * 100).toFixed(1)}% ` },
-                                { l: '峰谷比', v: sMetrics.min_max_ratio.toFixed(2) },
-                                { l: '曲线相似度', v: sMetrics.curve_similarity ? (sMetrics.curve_similarity * 100).toFixed(1) : '-' },
-                                { l: '峰值时刻', v: sMetrics.peak_hour ? `${Math.floor(sMetrics.peak_hour / 2)}:${sMetrics.peak_hour % 2 === 0 ? '00' : '30'} ` : '-' },
-                                { l: '谷值时刻', v: sMetrics.valley_hour ? `${Math.floor(sMetrics.valley_hour / 2)}:${sMetrics.valley_hour % 2 === 0 ? '00' : '30'} ` : '-' },
-                                { l: '尖峰占比', v: sMetrics.tip_ratio ? `${(sMetrics.tip_ratio * 100).toFixed(1)}% ` : '-' },
-                                { l: '低谷占比', v: sMetrics.valley_ratio ? `${(sMetrics.valley_ratio * 100).toFixed(1)}% ` : '-' },
-                                { l: '深谷占比', v: sMetrics.deep_ratio ? `${(sMetrics.deep_ratio * 100).toFixed(1)}% ` : '-' },
-                            ].map((item, i) => (
-                                <Grid size={{ xs: 6, sm: 3, md: 3 }} key={i}>
-                                    <MetricItem label={item.l} value={item.v} />
-                                </Grid>
-                            ))}
                         </Grid>
-                    </Grid>
+                    ) : (
+                        <>
+                            {/* Chart Section (Left) */}
+                            <Grid size={{ xs: 12, md: 8 }} sx={{ height: '100%' }}>
+                                <Box
+                                    ref={chartRef}
+                                    sx={{
+                                        height: '100%',
+                                        position: 'relative',
+                                        bgcolor: isFullscreen ? 'background.paper' : 'transparent',
+                                        p: isFullscreen ? 2 : 0,
+                                        ...(isFullscreen && { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1400 }),
+                                        '& .recharts-wrapper:focus': {
+                                            outline: 'none'
+                                        }
+                                    }}
+                                >
+                                    <FullscreenEnterButton />
+                                    <FullscreenExitButton />
+                                    <FullscreenTitle />
+                                    {loading ? <Box display="flex" justifyContent="center" height="100%" alignItems="center"><CircularProgress /></Box> : (
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            {activeTab === 0 ? (
+                                                <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                                    <defs>
+                                                        <linearGradient id="colorTrend" x1="0" y1="0" x2="0" y2="1">
+                                                            <stop offset="5%" stopColor="#2e7d32" stopOpacity={0.15} />
+                                                            <stop offset="95%" stopColor="#2e7d32" stopOpacity={0} />
+                                                        </linearGradient>
+                                                    </defs>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                                                    <XAxis dataKey="date" tickFormatter={v => v?.slice(5)} interval={30} tick={{ fontSize: 11, fill: '#666' }} axisLine={{ stroke: '#e0e0e0' }} />
+                                                    <YAxis tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
+                                                    <RechartsTooltip content={<CustomChartTooltip />} />
+                                                    <Area type="monotone" dataKey="total" stroke="#2e7d32" fill="url(#colorTrend)" strokeWidth={2} name="日电量" />
+                                                    <Line type="monotone" dataKey="trend" stroke="#d32f2f" strokeDasharray="5 5" strokeWidth={1.5} dot={false} name="趋势线" />
+                                                    <Legend verticalAlign="top" height={32} wrapperStyle={{ fontSize: '12px' }} />
+                                                </ComposedChart>
+                                            ) : (
+                                                <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                                    <defs>
+                                                        <linearGradient id="colorAvg" x1="0" y1="0" x2="0" y2="1">
+                                                            <stop offset="5%" stopColor="#1976d2" stopOpacity={0.15} />
+                                                            <stop offset="95%" stopColor="#1976d2" stopOpacity={0.01} />
+                                                        </linearGradient>
+                                                    </defs>
+                                                    {TouPeriodAreas}
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                                                    <XAxis
+                                                        dataKey="time"
+                                                        interval={11}
+                                                        tick={{ fontSize: 11, fill: '#666' }}
+                                                        axisLine={{ stroke: '#e0e0e0' }}
+                                                        tickFormatter={(value, index) => {
+                                                            const totalPoints = chartData.length;
+                                                            if (index === 0) return '00:30';
+                                                            if (index === totalPoints - 1) return '24:00';
+                                                            return value;
+                                                        }}
+                                                    />
+                                                    <YAxis tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
+                                                    <RechartsTooltip content={<CustomChartTooltip />} />
+                                                    <Area type="monotone" dataKey="avg" stroke="#1976d2" fill="url(#colorAvg)" name="平均负荷" strokeWidth={2} />
+                                                    <Line type="monotone" dataKey="upper" stroke="#ff9800" dot={false} strokeDasharray="3 3" strokeWidth={1} name="波动上限" />
+                                                    <Line type="monotone" dataKey="lower" stroke="#ff9800" dot={false} strokeDasharray="3 3" strokeWidth={1} name="波动下限" />
+                                                    <Legend verticalAlign="top" height={32} wrapperStyle={{ fontSize: '12px' }} />
+                                                </ComposedChart>
+                                            )}
+                                        </ResponsiveContainer>
+                                    )}
+                                </Box>
+                            </Grid>
+
+                            {/* Metrics Section (Right) */}
+                            <Grid size={{ xs: 12, md: 4 }} sx={{ height: '100%', display: 'flex', flexDirection: 'column', borderLeft: { md: '1px solid' }, borderColor: 'divider', pl: { md: 2 } }}>
+                                <Typography variant="subtitle2" gutterBottom color="text.secondary" sx={{ fontWeight: 'bold' }}>关键指标统计</Typography>
+                                <Box sx={{ flexGrow: 1, overflowY: 'auto', pr: 1, '&::-webkit-scrollbar': { width: 4 }, '&::-webkit-scrollbar-thumb': { bgcolor: '#eee', borderRadius: 2 } }}>
+                                    <Grid container spacing={1.5}>
+                                        {activeTab === 0 && lMetrics && [
+                                            { l: '日均电量', v: `${lMetrics.avg_daily_load} kWh` },
+                                            { l: '年累计电量', v: `${(lMetrics.total_annual_load / 10000).toFixed(2)} 万kWh` },
+                                            { l: '趋势斜率', v: lMetrics.trend_slope.toFixed(4) },
+                                            { l: '近3月增长', v: lMetrics.recent_3m_growth ? `${(lMetrics.recent_3m_growth * 100).toFixed(1)}% ` : '-' },
+                                            { l: '离散系数(CV)', v: lMetrics.cv },
+                                            { l: '零电量天数', v: lMetrics.zero_days },
+                                            { l: '气温相关性', v: lMetrics.temp_correlation ?? '-' },
+                                            { l: '周末效应', v: lMetrics.weekend_ratio ?? '-' }
+                                        ].map((item, i) => (
+                                            <Grid size={{ xs: 6 }} key={i}>
+                                                <MetricItem label={item.l} value={item.v} />
+                                            </Grid>
+                                        ))}
+
+                                        {activeTab === 1 && sMetrics && [
+                                            { l: '平均负荷率', v: `${(sMetrics.avg_load_rate * 100).toFixed(1)}% ` },
+                                            { l: '峰谷比', v: sMetrics.min_max_ratio.toFixed(2) },
+                                            { l: '曲线相似度', v: sMetrics.curve_similarity ? (sMetrics.curve_similarity * 100).toFixed(1) : '-' },
+                                            { l: '峰值时刻', v: sMetrics.peak_hour ? `${Math.floor(sMetrics.peak_hour / 2)}:${sMetrics.peak_hour % 2 === 0 ? '00' : '30'} ` : '-' },
+                                            { l: '谷值时刻', v: sMetrics.valley_hour ? `${Math.floor(sMetrics.valley_hour / 2)}:${sMetrics.valley_hour % 2 === 0 ? '00' : '30'} ` : '-' },
+                                            { l: '尖峰占比', v: sMetrics.tip_ratio ? `${(sMetrics.tip_ratio * 100).toFixed(1)}% ` : '-' },
+                                            { l: '低谷占比', v: sMetrics.valley_ratio ? `${(sMetrics.valley_ratio * 100).toFixed(1)}% ` : '-' },
+                                            { l: '深谷占比', v: sMetrics.deep_ratio ? `${(sMetrics.deep_ratio * 100).toFixed(1)}% ` : '-' },
+                                        ].map((item, i) => (
+                                            <Grid size={{ xs: 6 }} key={i}>
+                                                <MetricItem label={item.l} value={item.v} />
+                                            </Grid>
+                                        ))}
+                                    </Grid>
+                                </Box>
+                            </Grid>
+                        </>
+                    )}
                 </Grid>
             </Box>
         </Paper>
+    );
+};
+
+// --- 辅助组件：月度摘要 ---
+const MonthlySummaryWidget: React.FC<{ history: AnalysisHistoryItem[] }> = ({ history }) => {
+    const totalDays = history.length;
+    const changeDays = history.filter((item, idx) => {
+        if (idx === 0) return false;
+        const prev = history[idx - 1];
+        const tagsA = item.tags.map(t => t.name).sort();
+        const tagsB = prev.tags.map(t => t.name).sort();
+        return JSON.stringify(tagsA) !== JSON.stringify(tagsB);
+    }).length;
+
+    return (
+        <Paper variant="outlined" sx={{ p: 2, mt: 2, borderRadius: 2, bgcolor: 'grey.50' }}>
+            <Typography variant="caption" fontWeight="bold" color="text.secondary" gutterBottom display="block">
+                本月概览
+            </Typography>
+            <Grid container spacing={1}>
+                <Grid size={{ xs: 6 }}>
+                    <Typography variant="h5" color="primary.main" fontWeight="bold">{totalDays}</Typography>
+                    <Typography variant="caption" color="text.secondary">分析天数</Typography>
+                </Grid>
+                <Grid size={{ xs: 6 }}>
+                    <Typography variant="h5" color="warning.main" fontWeight="bold">{changeDays}</Typography>
+                    <Typography variant="caption" color="text.secondary">特征变动</Typography>
+                </Grid>
+            </Grid>
+        </Paper>
+    );
+};
+
+// --- Block 5: 特征历史日历视图 ---
+const CharacteristicHistoryCalendar: React.FC<{ customerId: string }> = ({ customerId }) => {
+    const [history, setHistory] = useState<AnalysisHistoryItem[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
+    const [selectedItem, setSelectedItem] = useState<AnalysisHistoryItem | null>(null);
+    const [subTab, setSubTab] = useState(0); // 0: 指标, 1: 曲线, 2: 溯源
+
+    // 获取当月数据
+    useEffect(() => {
+        setLoading(true);
+        const monthStr = format(currentMonth, 'yyyy-MM');
+        loadCharacteristicsApi.getCustomerHistory(customerId, 100, monthStr)
+            .then(res => {
+                const sorted = [...res.data.items].sort((a, b) => a.date.localeCompare(b.date));
+                setHistory(sorted);
+                // 默认选中最后一条记录
+                if (sorted.length > 0) {
+                    setSelectedItem(sorted[sorted.length - 1]);
+                } else {
+                    setSelectedItem(null);
+                }
+            })
+            .finally(() => setLoading(false));
+    }, [customerId, currentMonth]);
+
+    // 自定义日历天渲染
+    const ServerSideDay = (props: PickersDayProps & { history?: AnalysisHistoryItem[] }) => {
+        const { day, history = [], ...other } = props;
+        const dateStr = format(day, 'yyyy-MM-dd');
+        const item = history.find(h => h.date === dateStr);
+
+        const isSelected = selectedItem?.date === dateStr;
+        const hasData = !!item;
+
+        // 判断是否有标签变动
+        const hasChange = useMemo(() => {
+            if (!item) return false;
+            const idx = history.findIndex(h => h.date === item.date);
+            if (idx <= 0) return false;
+            const prev = history[idx - 1];
+            const tagsA = item.tags.map(t => t.name).sort();
+            const tagsB = prev.tags.map(t => t.name).sort();
+            return JSON.stringify(tagsA) !== JSON.stringify(tagsB);
+        }, [item, history]);
+
+        return (
+            <Badge
+                key={day.toString()}
+                overlap="circular"
+                badgeContent={hasChange ? '!' : undefined}
+                color="warning"
+                sx={{ '& .MuiBadge-badge': { fontSize: 10, height: 14, minWidth: 14, right: 3, top: 3 } }}
+            >
+                <PickersDay
+                    {...other}
+                    day={day}
+                    disabled={!hasData}
+                    sx={{
+                        width: 38,
+                        height: 38,
+                        fontSize: '0.875rem',
+                        ...(hasData && {
+                            bgcolor: isSelected ? 'primary.main' : 'primary.50',
+                            color: isSelected ? '#fff' : 'primary.main',
+                            fontWeight: 'bold',
+                            '&:hover': { bgcolor: isSelected ? 'primary.dark' : 'primary.100' }
+                        }),
+                        ...(hasChange && !isSelected && {
+                            border: '1px solid',
+                            borderColor: 'warning.main'
+                        })
+                    }}
+                    onClick={() => item && setSelectedItem(item)}
+                />
+            </Badge>
+        );
+    };
+
+    return (
+        <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
+            <Grid container spacing={1} sx={{ height: '100%', alignItems: 'stretch' }}>
+                {/* Left: Detail View with Sub-Tabs (Main Content) */}
+                <Grid size={{ xs: 12, md: 8 }} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                    {!selectedItem ? (
+                        <Box sx={{ p: 4, textAlign: 'center', bgcolor: 'grey.50', flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 2 }}>
+                            <Typography color="text.secondary">请从右侧日历选择特定日期查看分析档案</Typography>
+                        </Box>
+                    ) : (
+                        <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', pr: { md: 1 } }}>
+                            {/* Detail Header */}
+                            <Box sx={{ mb: 1, px: 2 }}>
+                                <Box display="flex" justifyContent="space-between" alignItems="baseline">
+                                    <Typography variant="subtitle1" fontWeight="bold" color="primary.main">
+                                        档案快照: {selectedItem.date}
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                        生成时间: {new Date(selectedItem.execution_time).toLocaleString()}
+                                    </Typography>
+                                </Box>
+                            </Box>
+
+                            {/* Sub Tabs */}
+                            <Tabs
+                                value={subTab}
+                                onChange={(_, v) => setSubTab(v)}
+                                sx={{ minHeight: 36, borderBottom: 1, borderColor: 'divider', mb: 1, '& .MuiTab-root': { minHeight: 36, py: 0.5, fontSize: '0.85rem' } }}
+                            >
+                                <Tab label="关键指标" />
+                                <Tab label="典型形态" />
+                                <Tab label="特征溯源" />
+                            </Tabs>
+
+                            {/* Tab Panels */}
+                            <Box sx={{ flexGrow: 1, overflowY: 'auto', '&::-webkit-scrollbar': { width: 4 }, '&::-webkit-scrollbar-thumb': { bgcolor: '#eee', borderRadius: 2 } }}>
+                                {subTab === 0 && selectedItem.metrics && (
+                                    <Box px={1}>
+                                        <Grid container spacing={1}>
+                                            {[
+                                                { l: '规律得分', v: selectedItem.metrics.regularity_score },
+                                                { l: '波动率(CV)', v: selectedItem.metrics.cv?.toFixed(3) },
+                                                { l: '平均负荷率', v: selectedItem.metrics.avg_load_rate ? (selectedItem.metrics.avg_load_rate * 100).toFixed(1) + '%' : '-' },
+                                                { l: '峰谷比', v: (selectedItem.metrics.min_max_ratio * 100).toFixed(1) + '%' },
+                                                { l: '日均电量', v: selectedItem.metrics.avg_daily_load + ' kWh' },
+                                                { l: '价格敏感性', v: selectedItem.metrics.price_sensitivity },
+                                            ].map((m, i) => (
+                                                <Grid key={i} size={{ xs: 6, sm: 4 }}>
+                                                    <Box sx={{ p: 1, bgcolor: '#f8f9fa', borderRadius: 1.5, border: '1px solid #edf2f7', textAlign: 'center' }}>
+                                                        <Typography variant="caption" color="text.secondary" display="block">{m.l}</Typography>
+                                                        <Typography variant="body2" fontWeight="bold" color="primary.main">{m.v ?? '-'}</Typography>
+                                                    </Box>
+                                                </Grid>
+                                            ))}
+                                        </Grid>
+                                    </Box>
+                                )}
+
+                                {subTab === 1 && selectedItem.baseline_curve && (
+                                    <Box px={1} sx={{ height: '240px' }}>
+                                        <Box sx={{ height: '100%', bgcolor: '#fcfcfc', p: 1, borderRadius: 2, border: '1px solid #f0f0f0' }}>
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <AreaChart data={selectedItem.baseline_curve.map((v, i) => ({ time: i, value: v }))}>
+                                                    <defs>
+                                                        <linearGradient id="colorBaseline" x1="0" y1="0" x2="0" y2="1">
+                                                            <stop offset="5%" stopColor="#1976d2" stopOpacity={0.2} />
+                                                            <stop offset="95%" stopColor="#1976d2" stopOpacity={0} />
+                                                        </linearGradient>
+                                                    </defs>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
+                                                    <XAxis dataKey="time" interval={23} tick={{ fontSize: 10 }} tickFormatter={(v) => `${Math.floor(v / 2)}:00`} />
+                                                    <YAxis domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+                                                    <RechartsTooltip />
+                                                    <Area type="monotone" dataKey="value" stroke="#1976d2" fill="url(#colorBaseline)" strokeWidth={2} />
+                                                </AreaChart>
+                                            </ResponsiveContainer>
+                                        </Box>
+                                    </Box>
+                                )}
+
+                                {subTab === 2 && (
+                                    <Box px={1}>
+                                        <TableContainer sx={{ border: '1px solid #f0f0f0', borderRadius: 2 }}>
+                                            <Table size="small">
+                                                <TableHead>
+                                                    <TableRow sx={{ bgcolor: '#f8f9fa' }}>
+                                                        <TableCell sx={{ fontWeight: 'bold', py: 0.5, fontSize: '0.75rem' }}>标签</TableCell>
+                                                        <TableCell sx={{ fontWeight: 'bold', fontSize: '0.75rem' }}>置信度</TableCell>
+                                                        <TableCell sx={{ fontWeight: 'bold', fontSize: '0.75rem' }}>触发原因</TableCell>
+                                                    </TableRow>
+                                                </TableHead>
+                                                <TableBody>
+                                                    {selectedItem.tags.map((tag, i) => (
+                                                        <TableRow key={i}>
+                                                            <TableCell sx={{ py: 0.5 }}>
+                                                                <Chip label={tag.name} size="small" color="primary" variant="outlined" sx={{ fontWeight: 'bold', height: 20, fontSize: '0.7rem' }} />
+                                                            </TableCell>
+                                                            <TableCell sx={{ fontSize: '0.75rem' }}>{(tag.confidence || 0).toFixed(2)}</TableCell>
+                                                            <TableCell sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>
+                                                                {tag.reason || (tag.rule_id ? `匹配: ${tag.rule_id}` : '-')}
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))}
+                                                </TableBody>
+                                            </Table>
+                                        </TableContainer>
+                                    </Box>
+                                )}
+                            </Box>
+                        </Box>
+                    )}
+                </Grid>
+
+                {/* Right: Calendar Navigation (Secondary) */}
+                <Grid size={{ xs: 12, md: 4 }} sx={{ borderLeft: { md: '1px solid' }, borderColor: 'divider', pl: { md: 2 } }}>
+                    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                        <Box sx={{ pb: 1, mb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Typography variant="subtitle2" fontWeight="bold" color="text.secondary">采样日历</Typography>
+                            <Box sx={{ display: 'flex', gap: 1 }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <Box sx={{ width: 8, height: 8, bgcolor: 'primary.50', borderRadius: '50%', border: '1px solid', borderColor: 'primary.light' }} />
+                                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '10px' }}>快照</Typography>
+                                </Box>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <Box sx={{ width: 8, height: 8, border: '1px solid', borderColor: 'warning.main', borderRadius: '50%', bgcolor: 'warning.50' }} />
+                                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '10px' }}>变动</Typography>
+                                </Box>
+                            </Box>
+                        </Box>
+                        <Divider sx={{ mb: 1 }} />
+                        {loading && history.length === 0 ? (
+                            <Box display="flex" justifyContent="center" p={8}><CircularProgress size={32} /></Box>
+                        ) : (
+                            <DateCalendar
+                                value={currentMonth}
+                                onChange={(newValue) => newValue && setCurrentMonth(newValue)}
+                                onMonthChange={(newMonth) => setCurrentMonth(newMonth)}
+                                slots={{ day: ServerSideDay }}
+                                slotProps={{ day: { history } as any }}
+                                sx={{
+                                    width: '100%',
+                                    maxWidth: '100%',
+                                    height: 'auto',
+                                    maxHeight: 'none',
+                                    '& .MuiPickersCalendarHeader-root': { px: 0, mb: 0, minHeight: 'unset' },
+                                    '& .MuiPickersCalendarHeader-labelContainer': { fontSize: '0.85rem' },
+                                    '& .MuiDayCalendar-header': { justifyContent: 'space-around', mb: 0 },
+                                    '& .MuiDayCalendar-weekContainer': { justifyContent: 'space-around', mb: 0 },
+                                    '& .MuiTypography-caption': { fontSize: '0.75rem', fontWeight: 'bold', width: 38 },
+                                    '& .MuiPickersDay-root': { width: 38, height: 38 }
+                                }}
+                            />
+                        )}
+                    </Box>
+                </Grid>
+            </Grid>
+        </LocalizationProvider>
     );
 };
 
@@ -1050,3 +1308,4 @@ const LoadCharacteristicsDetailPage: React.FC<{ customerId?: string }> = (props)
 };
 
 export default LoadCharacteristicsDetailPage;
+

@@ -130,6 +130,38 @@ class CharacteristicService:
             logger.error(f"Failed to analyze customer {customer_id}: {e}", exc_info=True)
             return None
 
+    def analyze_all_customers(self, date_str: str) -> Dict[str, Any]:
+        """
+        对所有活跃客户运行特征分析
+        :param date_str: 分析日期 (YYYY-MM-DD)
+        :return: 包含成功/失败计数的字典
+        """
+        # 获取所有客户 (这里遵循聚合任务的逻辑，查找所有 customer_archives)
+        customers = list(self.customers_col.find({}, {"_id": 1, "user_name": 1}))
+        
+        if not customers:
+            logger.warning("No customers found in customer_archives")
+            return {"success": 0, "failed": 0, "total": 0}
+            
+        logger.info(f"Starting batch characteristic analysis for {len(customers)} customers on {date_str}")
+        
+        results = {"success": 0, "failed": 0, "total": len(customers)}
+        for customer in customers:
+            customer_id = str(customer["_id"])
+            try:
+                # 传入分析日期
+                tags = self.analyze_customer(customer_id, date_str)
+                if tags is not None:
+                    results["success"] += 1
+                else:
+                    results["failed"] += 1
+            except Exception as e:
+                logger.error(f"Error in batch analysis for customer {customer_id}: {e}")
+                results["failed"] += 1
+                
+        logger.info(f"Batch analysis completed: {results['success']} success, {results['failed']} failed")
+        return results
+
     def _build_context(self, customer_id: str, date: datetime) -> Optional[LabelingContext]:
         """构建数据上下文，聚合多源数据"""
         date_str = date.strftime("%Y-%m-%d")
@@ -496,10 +528,13 @@ class CharacteristicService:
         reg_score = 0
         quality = "C"
         if short_term:
-            reg_score = min(100, int((short_term.curve_similarity or 0) * 100))
-            if reg_score > 90 and long_term and long_term.cv < 0.2:
+            # 采用指数映射放大差异：(相似度 ^ 10) * 100
+            reg_score = int(pow(short_term.curve_similarity or 0, 10) * 100)
+            reg_score = max(0, min(100, reg_score))
+            
+            if reg_score >= 80:
                 quality = "A"
-            elif reg_score > 80:
+            elif reg_score >= 50:
                 quality = "B"
         
         # 3. 更新 customer_characteristics (不再存储标签副本)
@@ -507,6 +542,7 @@ class CharacteristicService:
             customer_id=customer_id,
             customer_name=cust_name,
             updated_at=datetime.now(),
+            data_date=date.strftime("%Y-%m-%d"),
             long_term=long_term,
             short_term=short_term,
             tags=[],  # 不再存储标签副本
@@ -521,13 +557,34 @@ class CharacteristicService:
             upsert=True
         )
 
-        # 3. Append to History Log
+        # 3. Append to History Log (Enhanced with Metrics Snapshot)
+        metrics_snapshot = {}
+        if short_term:
+            metrics_snapshot.update({
+                "regularity_score": reg_score,
+                "cv": short_term.cv,
+                "avg_load_rate": short_term.avg_load_rate,
+                "min_max_ratio": short_term.min_max_ratio,
+                "peak_hour": short_term.peak_hour,
+                "valley_hour": short_term.valley_hour,
+                "price_sensitivity": short_term.price_sensitivity_score,
+                "curve_similarity": short_term.curve_similarity
+            })
+        if long_term:
+            metrics_snapshot.update({
+                "avg_daily_load": long_term.avg_daily_load,
+                "trend_slope": long_term.trend_slope,
+                "recent_3m_growth": long_term.recent_3m_growth
+            })
+
         log_entry = {
             "customer_id": customer_id,
             "date": date.strftime("%Y-%m-%d"),
             "execution_time": datetime.now(),
             "tags_snapshot": new_auto_tags_dicts,
-            "rule_ids": [t.rule_id for t in tags]
+            "rule_ids": [t.rule_id for t in tags],
+            "metrics": metrics_snapshot,
+            "baseline_curve": short_term.avg_curve if short_term else None
         }
         self.history_col.update_one(
             {

@@ -443,6 +443,7 @@ else:  # priority == "meter"，电表优先
 | `customer_id` | String | **[主键]** 客户ID |
 | `customer_name` | String | 客户名称 |
 | `updated_at` | ISODate | 最后更新时间 |
+| `data_date` | String | **特征分析日期** (负荷数据截至日期) YYYY-MM-DD |
 | `regularity_score` | Number | 规律性评分 (0-100) |
 | `quality_rating` | String | 质量评级: `A` (优) / `B` (良) / `C` (差) |
 | `baseline_curve` | Array[Number] | 基准负荷曲线 (48点，每点30分钟) |
@@ -518,6 +519,8 @@ else:  # priority == "meter"，电表优先
 | `execution_time` | ISODate | 执行时间 |
 | `rule_ids` | Array[String] | 触发的规则ID列表 |
 | `tags_snapshot` | Array[Object] | 生成的标签快照 |
+| `metrics` | Object | 定量指标快照 (规律性、电量、趋势等) |
+| `baseline_curve` | Array[Number] | 当日基准负荷曲线 (48点归一化) |
 
 #### 12.1.1 `tags_snapshot` 结构
 
@@ -528,6 +531,24 @@ else:  # priority == "meter"，电表优先
 | `confidence` | Number | 置信度 |
 | `rule_id` | String | 触发规则ID |
 | `reason` | String | 触发原因 |
+
+#### 12.1.2 `metrics` 结构
+
+包含分析时的关键量化指标：
+
+| 字段名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `regularity_score` | Number | 规律性评分 (0-100) |
+| `cv` | Number | 日内变异系数 / 日电量变异系数 |
+| `avg_load_rate` | Number | 平均负荷率 |
+| `min_max_ratio` | Number | 最小/最大负荷比 |
+| `peak_hour` | Number | 峰值时刻 (0-47) |
+| `valley_hour` | Number | 谷值时刻 (0-47) |
+| `price_sensitivity` | Number | 价格敏感度评分 |
+| `curve_similarity` | Number | 曲线相似度 |
+| `avg_daily_load` | Number | 日均电量 |
+| `trend_slope` | Number | 趋势线斜率 |
+| `recent_3m_growth` | Number | 近3月环比增长率 |
 
 ### 12.2. 索引
 

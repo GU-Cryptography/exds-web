@@ -18,6 +18,9 @@ from webapp.scheduler.jobs.accuracy_jobs import (
 from webapp.scheduler.jobs.settlement_jobs import (
     event_driven_settlement_job
 )
+from webapp.scheduler.jobs.characteristics_jobs import (
+    event_driven_characteristics_analysis_job
+)
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +70,15 @@ def setup_scheduler(app):
         'interval',
         minutes=10,
         id='web_event_settlement_calc',
+        replace_existing=True
+    )
+
+    # 客户特征画像分析 (每15分钟检查负荷聚合状态)
+    scheduler.add_job(
+        event_driven_characteristics_analysis_job,
+        'interval',
+        minutes=15,
+        id='web_event_characteristics_analysis',
         replace_existing=True
     )
     

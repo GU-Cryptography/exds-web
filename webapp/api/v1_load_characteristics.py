@@ -107,10 +107,31 @@ async def get_overview():
     # 覆盖率
     coverage_rate = (char_cust / total_cust) if total_cust > 0 else 0
     
-    # 平均规律性评分
-    pipeline_reg = [{"$group": {"_id": None, "avg": {"$avg": "$regularity_score"}}}]
+    # 1.1 最新特征分析日期
+    latest_char = db['customer_characteristics'].find_one(
+        {"data_date": {"$exists": True}}, 
+        sort=[("data_date", -1)]
+    )
+    latest_data_date = latest_char["data_date"] if latest_char else "-"
+    
+    # 1.2 全网规律性加权平均评分 (权重：long_term.avg_daily_load)
+    pipeline_reg = [
+        {
+            "$match": {
+                "regularity_score": {"$exists": True},
+                "long_term.avg_daily_load": {"$gt": 0}
+            }
+        },
+        {
+            "$group": {
+                "_id": None,
+                "total_weighted_score": {"$sum": {"$multiply": ["$regularity_score", "$long_term.avg_daily_load"]}},
+                "total_weight": {"$sum": "$long_term.avg_daily_load"}
+            }
+        }
+    ]
     res_reg = list(db['customer_characteristics'].aggregate(pipeline_reg))
-    avg_reg = res_reg[0]['avg'] if res_reg else 0.0
+    avg_reg = (res_reg[0]['total_weighted_score'] / res_reg[0]['total_weight']) if res_reg and res_reg[0]['total_weight'] > 0 else 0.0
     
     # 主力特征
     pipeline_dominant = [
@@ -158,8 +179,7 @@ async def get_overview():
             "doc": {"$first": "$$ROOT"}
         }},
         {"$replaceRoot": {"newRoot": "$doc"}},
-        {"$sort": {"alert_date": -1, "created_at": -1}},
-        {"$limit": 5}
+        {"$sort": {"alert_date": -1, "created_at": -1}}
     ]
     anoms = list(db['customer_anomaly_alerts'].aggregate(pipeline_anoms))
     
@@ -182,6 +202,7 @@ async def get_overview():
             total_customers=total_cust,
             dominant_tag=dominant_tag,
             dominant_tag_percentage=dominant_pct,
+            latest_data_date=latest_data_date,
             anomaly_count_today=anomaly_count,
             avg_regularity_score=round(avg_reg, 1) if avg_reg else 0,
             irregular_load_weight=0
@@ -469,22 +490,30 @@ async def get_customer_detail(customer_id: str):
 
 
 @router.get("/customer/{customer_id}/history", response_model=AnalysisHistoryResponse)
-async def get_customer_history(customer_id: str, limit: int = 30):
+async def get_customer_history(customer_id: str, limit: int = 30, month: Optional[str] = None):
     """获取客户分析历史"""
     db = DATABASE
     
-    cursor = db['analysis_history_log'].find(
-        {"customer_id": customer_id}
-    ).sort("date", -1).limit(limit)
+    query = {"customer_id": customer_id}
+    if month:
+        # 支持 YYYY-MM 格式
+        query["date"] = {"$regex": f"^{month}"}
+        # 如果是按月查询，通常需要该月所有数据，不设 limit or 设大一点
+        limit = 100 
+    
+    cursor = db['analysis_history_log'].find(query).sort("date", -1).limit(limit)
     
     items = []
     for doc in cursor:
-        tags = [t.get("name", "") for t in doc.get("tags_snapshot", [])]
+        tags_snapshot = doc.get("tags_snapshot", [])
+        
         items.append(AnalysisHistoryItem(
             date=doc.get("date", ""),
             execution_time=doc.get("execution_time", datetime.now()),
-            tags=tags,
-            rule_ids=doc.get("rule_ids", [])
+            tags=tags_snapshot,
+            rule_ids=doc.get("rule_ids", []),
+            metrics=doc.get("metrics"),
+            baseline_curve=doc.get("baseline_curve")
         ))
     
     return AnalysisHistoryResponse(customer_id=customer_id, items=items)

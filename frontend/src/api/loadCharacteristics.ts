@@ -8,6 +8,7 @@ export interface TagItem {
     confidence?: number;
     source?: string;
     reason?: string;
+    rule_id?: string;
 }
 
 export interface LongTermMetrics {
@@ -52,6 +53,7 @@ export interface CustomerCharacteristics {
     customer_name: string;
     short_name?: string;
     updated_at: string;
+    data_date?: string;
     long_term?: LongTermMetrics;
     short_term?: ShortTermMetrics;
     tags: TagItem[];
@@ -82,6 +84,7 @@ export interface OverviewKpi {
     total_customers: number;
     dominant_tag?: string;
     dominant_tag_percentage: number;
+    latest_data_date?: string;
     anomaly_count_today: number;
     avg_regularity_score: number;
 }
@@ -159,11 +162,15 @@ export interface ScatterDataResponse {
     items: ScatterDataItem[];
 }
 
+// ...
+
 export interface AnalysisHistoryItem {
     date: string;
     execution_time: string;
-    tags: string[];
+    tags: TagItem[];
     rule_ids: string[];
+    metrics?: Record<string, any>;
+    baseline_curve?: number[];
 }
 
 export interface AnalysisHistoryResponse {
@@ -224,9 +231,9 @@ export const loadCharacteristicsApi = {
         return apiClient.get<CustomerCharacteristics>(`/api/v1/load-characteristics/customer/${customerId}`);
     },
 
-    getCustomerHistory: (customerId: string, limit: number = 30) => {
+    getCustomerHistory: (customerId: string, limit: number = 30, month?: string) => {
         return apiClient.get<AnalysisHistoryResponse>(`/api/v1/load-characteristics/customer/${customerId}/history`, {
-            params: { limit }
+            params: { limit, month }
         });
     },
 
@@ -243,6 +250,12 @@ export const loadCharacteristicsApi = {
     getDailyTrend: (customerId: string, startDate: string, endDate: string) => {
         return apiClient.get<any[]>(`/api/v1/load-characteristics/customer/${customerId}/daily-trend`, {
             params: { start_date: startDate, end_date: endDate }
+        });
+    },
+
+    analyzeBatch: (date?: string) => {
+        return apiClient.post('/api/v1/load-characteristics/analyze/batch/all', null, {
+            params: date ? { date } : {}
         });
     },
 

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List, Literal, Any
+from typing import Optional, List, Literal, Any, Dict
 from datetime import datetime
 from bson import ObjectId
 
@@ -86,6 +86,15 @@ class TagItem(BaseModel):
     confidence: Optional[float] = 1.0
     source: Optional[str] = "AUTO"
 
+class AnalysisTagSnapshot(BaseModel):
+    """分析历史中的标签快照详情"""
+    name: str
+    category: Optional[str] = None
+    source: Optional[str] = "AUTO"
+    confidence: Optional[float] = 1.0
+    rule_id: Optional[str] = None
+    reason: Optional[str] = None
+
 # --- Collection Models ---
 
 class CustomerCharacteristics(BaseMongoModel):
@@ -94,6 +103,7 @@ class CustomerCharacteristics(BaseMongoModel):
     customer_name: str
     short_name: Optional[str] = None
     updated_at: datetime
+    data_date: Optional[str] = Field(None, description="分析所基于的负荷数据截止日期 YYYY-MM-DD")
     
     long_term: Optional[LongTermMetrics] = None
     short_term: Optional[ShortTermMetrics] = None
@@ -136,6 +146,7 @@ class OverviewKpi(BaseModel):
     total_customers: int
     dominant_tag: Optional[str]
     dominant_tag_percentage: float
+    latest_data_date: Optional[str] = None
     anomaly_count_today: int
     avg_regularity_score: float
     irregular_load_weight: float
@@ -217,11 +228,13 @@ class ScatterDataResponse(BaseModel):
 
 
 class AnalysisHistoryItem(BaseModel):
-    """分析历史记录"""
+    """分析历史记录项"""
     date: str
     execution_time: datetime
-    tags: List[str]
+    tags: List[AnalysisTagSnapshot]
     rule_ids: List[str]
+    metrics: Optional[Dict[str, Any]] = None  # 定量指标快照
+    baseline_curve: Optional[List[float]] = None  # 当日基准负荷曲线快照
 
 
 class AnalysisHistoryResponse(BaseModel):
