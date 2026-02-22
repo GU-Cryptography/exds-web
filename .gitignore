@@ -225,6 +225,8 @@ yarn-error.log
 demo.jpg
 errors.txt
 .claude/
+scripts/
+tests/
 tmp/
 .vscode/
 run.bat
