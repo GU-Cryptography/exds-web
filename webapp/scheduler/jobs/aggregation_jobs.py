@@ -11,7 +11,38 @@ from bson import ObjectId
 
 from webapp.tools.mongo import DATABASE, get_config
 from webapp.scheduler.logger import TaskLogger
+from webapp.services.contract_service import ContractService
 from webapp.services.load_aggregation_service import LoadAggregationService
+
+async def _get_active_customers(date_str: str) -> list:
+    """
+    获取指定日期所在月份的有效签约客户
+    
+    Args:
+        date_str: YYYY-MM-DD
+        
+    Returns:
+        [{"customer_id": str, "customer_name": str}, ...]
+    """
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        # 当月第一天
+        start_of_month = datetime(dt.year, dt.month, 1)
+        # 下个月第一天 (即当月结束时间点)
+        if dt.month == 12:
+            next_month = datetime(dt.year + 1, 1, 1)
+        else:
+            next_month = datetime(dt.year, dt.month + 1, 1)
+            
+        end_of_month = next_month - timedelta(seconds=1)
+        
+        contract_service = ContractService(DATABASE)
+        # 获取重叠的客户信息
+        return contract_service.get_signed_customers_in_range(start_of_month, end_of_month)
+        
+    except Exception as e:
+        logger.error(f"查询活跃客户失败: {e}")
+        return []
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +179,7 @@ async def event_driven_load_aggregation_job():
         result = await _aggregate_all_customers(today)
         
         # 5. 检查数据质量 (聚合客户数 < 签约客户数)
-        active_customers_count = await _get_active_customers_count()
+        active_customers_count = result.get('active_customers_count', 0)
         if result['customers_processed'] < active_customers_count:
             await _create_alert(
                 level="P1",
@@ -157,7 +188,7 @@ async def event_driven_load_aggregation_job():
                 content=f"仅成功聚合 {result['customers_processed']} 个客户,签约客户数为 {active_customers_count}"
             )
         
-        # 6. 记录成功
+    # 6. 记录成功
         await TaskLogger.log_task_end(
             task_id=task_id,
             status="SUCCESS",
@@ -202,44 +233,46 @@ async def event_driven_load_aggregation_job():
 
 async def _aggregate_all_customers(trigger_date: str) -> Dict[str, Any]:
     """
-    增量聚合所有客户的数据
+    增量聚合所有当月有效签约客户的数据
     
     逻辑:
-    1. 查找 raw_mp_data 和 raw_meter_data 中所有存在的日期
+    1. 查找当月有有效零售合同的所有客户
     2. 对每个客户,找出 unified_load_curve 中缺失的日期
     3. 调用 LoadAggregationService.upsert_unified_load_curve 进行聚合
     
     Args:
-        trigger_date: 触发日期 (用于日志,不影响聚合逻辑)
+        trigger_date: 触发日期 (用于确定"当月", YYYY-MM-DD)
     
     Returns:
         {
             "customers_processed": int,  # 成功聚合的客户数
             "dates_aggregated": int,     # 聚合的日期数
-            "records_aggregated": int    # 聚合的记录数
+            "records_aggregated": int,   # 聚合的记录数
+            "active_customers_count": int # 当月活跃客户总数
         }
     """
-    # 1. 获取所有客户
-    customers = list(DATABASE["customer_archives"].find({}, {"_id": 1, "user_name": 1}))
+    # 1. 获取当月有效签约客户
+    active_customers = await _get_active_customers(trigger_date)
     
-    if not customers:
-        logger.warning("没有找到任何客户")
+    if not active_customers:
+        logger.warning(f"没有找到 {trigger_date} 当月的有效签约客户")
         return {
             "customers_processed": 0,
             "dates_aggregated": 0,
-            "records_aggregated": 0
+            "records_aggregated": 0,
+            "active_customers_count": 0
         }
     
-    logger.info(f"开始执行增量聚合...")
+    logger.info(f"开始执行增量聚合 (当月活跃客户数: {len(active_customers)})...")
     
     customers_processed = 0
     dates_aggregated_set = set()
     records_aggregated = 0
     
     # 3. 对每个客户进行增量聚合
-    for customer in customers:
-        customer_id = str(customer["_id"])
-        customer_name = customer.get("user_name", "未知")
+    for customer in active_customers:
+        customer_id = str(customer["customer_id"])
+        customer_name = customer.get("customer_name", "未知")
         
         try:
             # 查找该客户待处理的日期 (包含缺失、不完整、过期)
@@ -247,7 +280,11 @@ async def _aggregate_all_customers(trigger_date: str) -> Dict[str, Any]:
             missing_dates = pending_tasks.get(customer_id, [])
             
             if not missing_dates:
-                continue  # 该客户所有日期都已聚合
+                # 虽然没有缺失日期，但也算作成功处理（因为数据已完整）
+                # 但为了 customers_processed 语义准确（成功聚合了数据），这里暂不计数
+                # 或者如果它是"检查通过"，也算 processed? 
+                # 通常 customers_processed 指的是发生变更。如果没变更，就不算。
+                continue 
             
             # 对每个缺失日期进行聚合
             customer_success = False
@@ -278,27 +315,32 @@ async def _aggregate_all_customers(trigger_date: str) -> Dict[str, Any]:
     return {
         "customers_processed": customers_processed,
         "dates_aggregated": len(dates_aggregated_set),
-        "records_aggregated": records_aggregated
+        "records_aggregated": records_aggregated,
+        "active_customers_count": len(active_customers)
     }
 
 
-async def _get_active_customers_count() -> int:
+
+
+
+async def _get_active_customers_count(date_str: str = None) -> int:
     """
-    获取当前签约客户数
-    
-    通过调用客户合同服务接口获取
+    [已弃用] 获取当前签约客户数
+    现在由 _aggregate_all_customers 直接返回准确的基数
     """
-    # TODO: 调用客户合同服务接口
-    # 临时实现: 查询 customer_archives 中的客户数
-    count = DATABASE["customer_archives"].count_documents({})
-    return count
+    if not date_str:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+    customers = await _get_active_customers(date_str)
+    return len(customers)
 
 
 async def _create_alert(level: str, category: str, title: str, content: str):
     """创建系统告警"""
     import uuid
     
-    alert_id = f"alert_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}"
+    # 使用本地时间作为ID部分 (虽然 uuid 足够唯一，但保留时间戳习惯)
+    now_local = datetime.now()
+    alert_id = f"alert_{now_local.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}"
     
     DATABASE["system_alerts"].insert_one({
         "alert_id": alert_id,
@@ -309,7 +351,7 @@ async def _create_alert(level: str, category: str, title: str, content: str):
         "service_type": "web",
         "task_type": "load_aggregation",
         "status": "ACTIVE",
-        "created_at": datetime.utcnow(),
+        "created_at": now_local, # 修正为本地时间
         "resolved_at": None
     })
     

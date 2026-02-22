@@ -92,13 +92,11 @@ async def event_driven_characteristics_analysis_job():
 
     # 4. 准备执行参数
     task_id = await TaskLogger.log_task_start(
+        service_type="analysis",
         task_type="characteristics_analysis",
+        task_name="客户特征分析",
         trigger_type="event",
-        params={
-            "execution_date": today, 
-            "analysis_date": analysis_date,
-            "trigger_source": "load_data_update"
-        }
+        trigger_source="load_data_update"
     )
     
     logger.info(f"🚀 Starting automated characteristic analysis: {task_id} for data date {analysis_date}")
