@@ -53,14 +53,7 @@ async def event_driven_settlement_job():
             logger.info(msg)
             return
 
-        # 2. 确实有数据需要补齐，此时才开始记录数据库日志
-        task_id = await TaskLogger.log_task_start(
-            service_type="settlement_service",
-            task_type="event_driven_settlement",
-            task_name="事件驱动结算补齐",
-            trigger_type="schedule"
-        )
-
+        # 2. 执行处理循环 (使用惰性日志策略，仅在有实际产出时记录数据库)
         processed_count = 0
         skipped_dates = []
         error_count = 0
@@ -83,21 +76,34 @@ async def event_driven_settlement_job():
                 retail_service.calculate_all_customers_daily(date_str)
                 
                 # B. 日前预结算
-                await settlement_service.calculate_daily_settlement(
+                res_prelim = await settlement_service.calculate_daily_settlement(
                     date_str=date_str, 
                     version=SettlementVersion.PRELIMINARY,
                     force=False
                 )
                 
                 # C. 平台日报结算
-                await settlement_service.calculate_daily_settlement(
+                res_platform = await settlement_service.calculate_daily_settlement(
                     date_str=date_str, 
                     version=SettlementVersion.PLATFORM_DAILY,
                     force=False
                 )
                 
-                processed_count += 1
-                logger.info(f"✅ {date_str} 结算补全完成")
+                # 判定本轮是否有效处理
+                # 如果任意一个版本跑通了(返回了对象)，或者零售跑通了(虽无法直接判断零售返回值增量)，都算处理
+                # 但为避免Platform卡死导致的无限循环日志，这里严格判定：
+                # 只有当 settlement_service 确实返回了结果(非None)且非EXISTING(如果是Existing，SettlementService返回对象)
+                # 现在的逻辑是 Existing 也返回对象。
+                # 根本问题是: PLATFORM 返回 None (缺数) -> processed_count + 1 -> Log Success -> Min(Date) 不变 -> 下次重跑
+                # 修复: 如果返回 None，说明没跑通。
+                
+                if res_prelim or res_platform:
+                    processed_count += 1
+                    logger.info(f"✅ {date_str} 结算补全完成 (Prelim: {'OK' if res_prelim else 'Skip'}, Platform: {'OK' if res_platform else 'Skip'})")
+                else:
+                    logger.warning(f"⏩ {date_str} 结算未产生有效结果 (两版本均缺数)")
+                    skipped_dates.append(f"{date_str}(缺量价)")
+
                 
             except Exception as ex:
                 logger.error(f"❌ {date_str} 结算执行过程中出错: {ex}")
@@ -105,30 +111,42 @@ async def event_driven_settlement_job():
                 
             curr_dt += timedelta(days=1)
             
-        # 3. 汇总并结束任务日志
-        summary = f"执行完成。处理: {processed_count}天"
-        if skipped_dates:
-            summary += f", 跳过: {len(skipped_dates)}天 ({', '.join(skipped_dates[:3])}...)"
-        if error_count:
-            summary += f", 失败: {error_count}天"
-            
-        await TaskLogger.log_task_end(
-            task_id, 
-            "success" if error_count == 0 else "failed",
-            summary=summary,
-            details={
-                "processed_days": processed_count,
-                "skipped_days": len(skipped_dates),
-                "error_days": error_count,
-                "skipped_list": skipped_dates,
-                "range": f"{start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}"
-            }
-        )
+        # 3. 根据执行结果决定是否记录任务日志
+        if processed_count > 0 or error_count > 0:
+            # 有实际处理或错误，记录到数据库
+            task_id = await TaskLogger.log_task_start(
+                service_type="settlement_service",
+                task_type="event_driven_settlement",
+                task_name="事件驱动结算补齐",
+                trigger_type="schedule"
+            )
+
+            summary = f"执行完成。处理: {processed_count}天"
+            if skipped_dates:
+                summary += f", 跳过: {len(skipped_dates)}天"
+            if error_count:
+                summary += f", 失败: {error_count}天"
+                
+            await TaskLogger.log_task_end(
+                task_id, 
+                "SUCCESS" if error_count == 0 else "FAILED",
+                summary=summary,
+                details={
+                    "processed_days": processed_count,
+                    "skipped_days": len(skipped_dates),
+                    "error_days": error_count,
+                    "skipped_list": skipped_dates[:10],  # 限制长度
+                    "range": f"{start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}"
+                }
+            )
+        else:
+            # 纯跳过情况，仅记录文件日志
+            if skipped_dates:
+                logger.info(f"⏩ 结算扫描完成: {len(skipped_dates)}天被跳过 (无有效工作), 不写入DB日志")
         
     except Exception as e:
         logger.error(f"💥 结算调度逻辑发生致命故障: {e}")
-        # 如果已经开始了任务记录，则需要闭环
-        if 'task_id' in locals():
-            await TaskLogger.log_task_end(task_id, "failed", error={"message": str(e)})
+        # 尝试记录异常 (如果能获得 task_id 的话，这里因为是延迟创建，可能没有 task_id)
+        # 只有在非常严重的逻辑错误时才会到这里
 
     logger.info("🏁 结算间隙补全调度任务结束")
