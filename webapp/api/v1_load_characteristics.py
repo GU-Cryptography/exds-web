@@ -590,7 +590,7 @@ async def acknowledge_alert(
 # --- Chart Data Endpoints ---
 
 from webapp.services.load_query_service import LoadQueryService
-from webapp.schemas.load_structs import DailyTotal, MonthlyTotal
+from webapp.models.load_models import DailyTotal, MonthlyTotal
 
 
 @router.get("/customer/{customer_id}/daily-trend", response_model=List[DailyTotal])

@@ -13,7 +13,7 @@ from bson import ObjectId
 from webapp.tools.mongo import DATABASE
 from webapp.models.load_enums import FusionStrategy
 from webapp.services.contract_service import ContractService
-from webapp.schemas.load_structs import (
+from webapp.models.load_models import (
     DailyCurve, DailyTotal, MonthlyTotal, CustomerLoadData, TouUsage
 )
 

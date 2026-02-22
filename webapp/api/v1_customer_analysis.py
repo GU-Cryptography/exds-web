@@ -9,7 +9,7 @@ from webapp.tools.security import User, get_current_active_user
 from webapp.services.customer_service import CustomerService
 from webapp.services.load_query_service import LoadQueryService, FusionStrategy
 from webapp.services.tou_service import get_tou_rule_by_date
-from webapp.schemas.load_structs import TouUsage
+from webapp.models.load_models import TouUsage
 from webapp.tools.mongo import DATABASE
 
 router = APIRouter()
