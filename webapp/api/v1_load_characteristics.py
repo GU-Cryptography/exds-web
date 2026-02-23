@@ -14,6 +14,7 @@ from webapp.models.characteristic_models import (
     AnomalyAlertItem, AnomalyAlertListResponse, AcknowledgeRequest
 )
 from webapp.services.characteristics.service import CharacteristicService
+from webapp.services.load_query_service import LoadQueryService
 
 # --- Security Dependency ---
 from webapp.tools.security import get_current_active_user
@@ -65,7 +66,9 @@ async def analyze_customer_manual(customer_id: str, date: Optional[str] = None):
     """
     service = CharacteristicService()
     if not date:
-        date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        date = LoadQueryService.get_latest_data_date()
+        if not date:
+            date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
         
     tags = service.analyze_customer(customer_id, date)
     return {"status": "success", "customer_id": customer_id, "tags_generated": len(tags) if tags else 0}
@@ -78,7 +81,9 @@ async def analyze_batch_manual(date: Optional[str] = None):
     """
     service = CharacteristicService()
     if not date:
-        date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        date = LoadQueryService.get_latest_data_date()
+        if not date:
+            date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
         
     result = service.analyze_all_active_customers(date)
     return result

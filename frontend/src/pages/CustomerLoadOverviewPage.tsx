@@ -175,7 +175,7 @@ export const CustomerLoadOverviewPage: React.FC = () => {
         return null;
     };
 
-    const [month, setMonth] = useState<number>(() => getInitialParam('month', 1));
+    const [month, setMonth] = useState<number>(() => getInitialParam('month', new Date().getMonth() + 1));
     const [viewMode, setViewMode] = useState<ViewMode>(() => getInitialParam('viewMode', 'monthly'));
     const [search, setSearch] = useState(() => getInitialParam('search', ''));
     const [page, setPage] = useState(() => getInitialParam('page', 0));
