@@ -150,6 +150,7 @@ const menuItems: MenuItem[] = [
             { text: '时段电价分布', path: '/basic-data/tou-definition', icon: <StyleOutlined /> },
             { text: '天气预测数据', path: '/basic-data/weather-data', icon: <AnalyticsOutlined /> },
             { text: '负荷数据诊断', path: '/basic-data/load-validation', icon: <VerifiedUserOutlined /> },
+            { text: '零售套餐价格', path: '/basic-data/retail-prices', icon: <PriceChangeIcon /> },
         ],
     },
     {

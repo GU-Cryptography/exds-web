@@ -2,6 +2,7 @@ import React from 'react';
 import { Control, Controller } from 'react-hook-form';
 import { Typography, Paper, TextField, Grid, Alert, AlertTitle, MenuItem, FormHelperText } from '@mui/material';
 import { PackageFormData } from '../../../hooks/usePackageForm';
+import { getReferenceOptions } from '../../../config/pricingConstants';
 
 interface SingleComprehensiveReferenceFormProps {
   control: Control<PackageFormData>;
@@ -11,14 +12,8 @@ interface SingleComprehensiveReferenceFormProps {
  * 单一综合价_参考价 表单 (仅分时)
  */
 export const SingleComprehensiveReferenceForm: React.FC<SingleComprehensiveReferenceFormProps> = ({ control }) => {
-
-  const referenceOptions = [
-    { value: 'grid_agency_price', label: '电网代理购电价格' },
-    { value: 'market_monthly_avg', label: '电力市场月度交易均价(当月平均上网电价)' },
-    { value: 'annual_longterm_avg', label: '售电侧年度中长期交易均价' },
-    { value: 'monthly_settlement_weighted_price', label: '售电侧月度结算加权价' },
-    { value: 'term_time_price', label: '售电侧中长期交易均价' },
-  ];
+  // 参考价选项（该组件强制为分时模式）
+  const referenceTypeOptions = getReferenceOptions(true);
 
   return (
     <Grid container spacing={2}>
@@ -41,7 +36,7 @@ export const SingleComprehensiveReferenceForm: React.FC<SingleComprehensiveRefer
                     error={!!fieldState.error}
                     helperText={fieldState.error?.message || '选择计算基准'}
                   >
-                    {referenceOptions.map(option => (
+                    {referenceTypeOptions.map(option => (
                       <MenuItem key={option.value} value={option.value}>
                         {option.label}
                       </MenuItem>
@@ -70,7 +65,7 @@ export const SingleComprehensiveReferenceForm: React.FC<SingleComprehensiveRefer
               />
             </Grid>
           </Grid>
-          <FormHelperText sx={{mt: 1}}>
+          <FormHelperText sx={{ mt: 1 }}>
             平段结算价 = 参考价(平段) * 平段浮动比例
           </FormHelperText>
         </Paper>

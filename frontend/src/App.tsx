@@ -36,6 +36,7 @@ import { WeatherDataPage } from './pages/WeatherDataPage';
 import { LoadDataDiagnosisPage } from './pages/LoadDataDiagnosisPage';
 import { LoadForecastWorkbench } from './pages/LoadForecastWorkbench';
 import PreSettlementOverviewPage from './pages/PreSettlementOverviewPage';
+import RetailSettlementPricePage from './pages/RetailSettlementPricePage';
 import { TabProvider } from './contexts/TabContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { DesktopTabLayout } from './layouts/DesktopTabLayout';
@@ -123,6 +124,7 @@ const ResponsiveLayout: React.FC = () => {
                     <Route path="basic-data/tou-definition" element={<TouRulesPage />} />
                     <Route path="basic-data/weather-data" element={<WeatherDataPage />} />
                     <Route path="basic-data/load-validation" element={<LoadDataDiagnosisPage />} />
+                    <Route path="basic-data/retail-prices" element={<RetailSettlementPricePage />} />
 
                     {/* 系统管理 */}
                     <Route path="system-settings/user-permissions" element={<PlaceholderPage />} />

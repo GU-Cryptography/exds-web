@@ -2,6 +2,7 @@ import React from 'react';
 import { Control, Controller } from 'react-hook-form';
 import { Typography, Paper, TextField, Grid, MenuItem } from '@mui/material';
 import { PackageFormData } from '../../../hooks/usePackageForm';
+import { getReferenceOptions } from '../../../config/pricingConstants';
 
 interface PriceSpreadSimpleFeeFormProps {
   control: Control<PackageFormData>;
@@ -12,22 +13,8 @@ interface PriceSpreadSimpleFeeFormProps {
  * 价差分成+浮动费用 表单
  */
 export const PriceSpreadSimpleFeeForm: React.FC<PriceSpreadSimpleFeeFormProps> = ({ control, isTimeBased }) => {
-  const referenceTypeOptions = isTimeBased ? [
-    { value: 'day_ahead_avg', label: '日前市场均价（分时）' },
-    { value: 'real_time_avg', label: '实时市场均价（分时）' },
-    { value: 'market_monthly_avg', label: '电力市场月度交易均价(当月平均上网电价)（分时）' },
-    { value: 'grid_agency_price', label: '电网代理购电价格（分时）' },
-    { value: 'upper_limit_price', label: '上限价（分时）' },
-    { value: 'annual_term_time_price', label: '售电侧年度中长期分时交易价格' },
-    { value: 'monthly_settlement_weighted_price', label: '售电侧月度结算加权价（不分时）' },
-    { value: 'term_time_price', label: '售电侧中长期分时交易价格' },
-  ] : [
-    { value: 'day_ahead_avg', label: '日前市场均价' },
-    { value: 'real_time_avg', label: '实时市场均价' },
-    { value: 'market_monthly_avg', label: '电力市场月度交易均价(当月平均上网电价)' },
-    { value: 'grid_agency_price', label: '电网代理购电价格' },
-    { value: 'upper_limit_price', label: '上限价' },
-  ];
+  // 参考价选项（使用共享常量）
+  const referenceTypeOptions = getReferenceOptions(isTimeBased);
 
   return (
     <Grid container spacing={2}>

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Paper, Typography, Grid, Box, Chip, Alert, Divider } from '@mui/material';
 import { PricingModel } from '../../../types/pricing';
+import { getReferenceLabel } from '../../../config/pricingConstants';
 
 interface PricingDetailsProps {
     model: PricingModel | undefined;
@@ -8,65 +9,6 @@ interface PricingDetailsProps {
     packageType: 'time_based' | 'non_time_based';
     isGreenPower?: boolean;
 }
-
-// 参考价类型映射
-const getReferenceTypeLabel = (value: string, isTimeBased: boolean): string => {
-    const map: Record<string, { timeBased: string; nonTimeBased: string }> = {
-        'day_ahead_avg': {
-            timeBased: '日前市场均价（分时）',
-            nonTimeBased: '日前市场均价'
-        },
-        'real_time_avg': {
-            timeBased: '实时市场均价（分时）',
-            nonTimeBased: '实时市场均价'
-        },
-        'market_monthly_avg': {
-            timeBased: '电力市场月度交易均价(当月平均上网电价)（分时）',
-            nonTimeBased: '电力市场月度交易均价(当月平均上网电价)'
-        },
-        'grid_agency_price': {
-            timeBased: '电网代理购电价格（分时）',
-            nonTimeBased: '电网代理购电价格'
-        },
-        'ceiling_price': {
-            timeBased: '上限价',
-            nonTimeBased: '上限价'
-        },
-        'upper_limit_price': {
-            timeBased: '上限价',
-            nonTimeBased: '上限价'
-        },
-        'annual_longterm_time': {
-            timeBased: '售电侧年度中长期分时交易价格',
-            nonTimeBased: '售电侧年度中长期分时交易价格'
-        },
-        'annual_term_time_price': {
-            timeBased: '售电侧年度中长期分时交易价格',
-            nonTimeBased: '售电侧年度中长期分时交易价格'
-        },
-        'monthly_settlement_avg': {
-            timeBased: '售电侧月度结算加权价（不分时）',
-            nonTimeBased: '售电侧月度结算加权价（不分时）'
-        },
-        'monthly_settlement_weighted_price': {
-            timeBased: '售电侧月度结算加权价（不分时）',
-            nonTimeBased: '售电侧月度结算加权价（不分时）'
-        },
-        'longterm_time': {
-            timeBased: '售电侧中长期分时交易价格',
-            nonTimeBased: '售电侧中长期分时交易价格'
-        },
-        'term_time_price': {
-            timeBased: '售电侧中长期分时交易价格',
-            nonTimeBased: '售电侧中长期分时交易价格'
-        }
-    };
-
-    if (map[value]) {
-        return isTimeBased ? map[value].timeBased : map[value].nonTimeBased;
-    }
-    return value; // 如果找不到映射，返回原值
-};
 
 // 联动标的映射
 const getLinkedTargetLabel = (value: string, isTimeBased: boolean): string => {
@@ -176,7 +118,7 @@ export const PricingDetails: React.FC<PricingDetailsProps> = ({ model, pricingCo
             <>
                 {pricingConfig.reference_type && renderConfigItem(
                     '参考价类型',
-                    getReferenceTypeLabel(pricingConfig.reference_type, isTimeBased)
+                    getReferenceLabel(pricingConfig.reference_type, isTimeBased)
                 )}
             </>
         );
@@ -187,7 +129,7 @@ export const PricingDetails: React.FC<PricingDetailsProps> = ({ model, pricingCo
                 {/* 价差简单模式需要显示参考价 */}
                 {pricing_mode === 'price_spread_simple' && pricingConfig.reference_type && renderConfigItem(
                     '参考价类型',
-                    getReferenceTypeLabel(pricingConfig.reference_type, isTimeBased)
+                    getReferenceLabel(pricingConfig.reference_type, isTimeBased)
                 )}
                 {/* 约定价差仅在简单模式显示 */}
                 {pricing_mode === 'price_spread_simple' && renderConfigItem('约定价差', formatNumber(pricingConfig.agreed_price_spread), '元/kWh')}
@@ -196,15 +138,15 @@ export const PricingDetails: React.FC<PricingDetailsProps> = ({ model, pricingCo
                     <>
                         {pricingConfig.reference_1_type && renderConfigItem(
                             '参考价1',
-                            getReferenceTypeLabel(pricingConfig.reference_1_type, isTimeBased)
+                            getReferenceLabel(pricingConfig.reference_1_type, isTimeBased)
                         )}
                         {pricingConfig.reference_2_type && renderConfigItem(
                             '参考价2',
-                            getReferenceTypeLabel(pricingConfig.reference_2_type, isTimeBased)
+                            getReferenceLabel(pricingConfig.reference_2_type, isTimeBased)
                         )}
                         {pricingConfig.reference_3_type && renderConfigItem(
                             '参考价3',
-                            getReferenceTypeLabel(pricingConfig.reference_3_type, isTimeBased)
+                            getReferenceLabel(pricingConfig.reference_3_type, isTimeBased)
                         )}
                     </>
                 )}

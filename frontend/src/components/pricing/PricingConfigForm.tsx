@@ -27,7 +27,8 @@ interface PricingConfigFormProps {
  */
 export const PricingConfigForm: React.FC<PricingConfigFormProps> = ({ modelCode, control }) => {
   // 从 modelCode 推导是否为分时套餐
-  const isTimeBased = modelCode.endsWith('_time');
+  // 注意：此处必须同时排除 _non_time，因为 _non_time 也包含了 _time 后缀
+  const isTimeBased = modelCode.endsWith('_time') && !modelCode.endsWith('_non_time');
 
   // 根据 modelCode 渲染不同的表单组件
   switch (modelCode) {

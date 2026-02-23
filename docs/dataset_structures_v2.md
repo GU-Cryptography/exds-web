@@ -732,3 +732,78 @@ critical_alerts = db.customer_anomaly_alerts.find({
 - `operating_date`
 
 ---
+
+## 16. `retail_settlement_prices` - 零售结算价格定义
+
+该集合存储平台每月发布的零售侧结算价格定义数据（对应每月发布的"现货市场零售侧结算价格定义"Excel文件），为零售套餐结算时的各类参考价提供数据支撑。
+
+### 16.1. 字段说明
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `_id` | `String` | 月份字符串（`YYYY-MM`），作为唯一主键 |
+| `month` | `String` | 月份（冗余，便于查询），格式 `YYYY-MM` |
+| `imported_at` | `DateTime` | 导入时间 |
+| `imported_by` | `String` | 导入人 |
+| `regular_prices` | `Array` | 常规价格列表（不分时，每月约14种价格类型） |
+| `period_prices` | `Array` | 分时价格列表（48个时段，每时段含多种价格） |
+
+#### `regular_prices` 子元素结构
+
+每条记录对应一种价格类型。
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `price_type` | `String` | 价格类型原始中文名称 |
+| `price_type_key` | `String` | 价格类型英文键名（与零售套餐 `reference_type` 保持一致） |
+| `value` | `Number` | 价格数值（元/MWh） |
+| `definition` | `String` | 价格定义说明文字 |
+
+**`price_type_key` 枚举值说明**（与 `retail_packages.pricing_config.reference_type` / `linked_target` 命名一致）：
+
+| `price_type_key` | 中文含义 |
+| :--- | :--- |
+| `market_monthly_avg` | 中长期市场月度交易均价（不分时） |
+| `market_annual_avg` | 中长期市场年度交易均价（不分时） |
+| `market_avg` | 中长期市场交易均价（不分时） |
+| `market_monthly_on_grid` | 中长期市场当月平均上网电价 |
+| `retailer_monthly_settle_weighted` | 售电公司月度结算加权价 |
+| `retailer_monthly_avg` | 售电公司月度交易均价（不分时） |
+| `retailer_annual_avg` | 售电公司年度交易均价（不分时） |
+| `retailer_avg` | 售电公司交易均价（不分时） |
+| `retailer_side_settle_weighted` | 售电侧月度结算加权价（含批发用户） |
+| `real_time_avg` | 省内现货实时市场加权平均价 |
+| `coal_capacity_discount` | 煤电容量电费折价 |
+| `genside_annual_bilateral` | 发电侧火电年度中长期双边协商交易合同分月平段价 |
+| `grid_agency_price` | 电网代理购电价格 |
+| `market_longterm_flat_avg` | 市场化用户中长期交易平段合同加权平均价 |
+
+#### `period_prices` 子元素结构
+
+每条记录对应一个时段（1-48），字段名与零售套餐 `reference_type` / `linked_target` 保持一致。
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `period` | `Integer` | 时段编号（1-48） |
+| `period_type` | `String` | 时段类型：`谷段` / `平段` / `峰段` / `尖峰` |
+| `float_ratio` | `Number` | 时段浮动比例（谷0.4 / 平1 / 峰1.6 / 尖峰1.8） |
+| `upper_limit_price` | `Number` | 上限价（分时）（元/MWh） |
+| `market_monthly_avg` | `Number` | 中长期市场月度交易均价（分时） |
+| `market_annual_avg` | `Number` | 中长期市场年度交易均价（分时） |
+| `market_avg` | `Number` | 中长期市场交易均价（分时） |
+| `market_monthly_on_grid` | `Number` | 中长期市场当月平均上网电价（分时） |
+| `retailer_monthly_avg` | `Number` | 售电公司月度交易均价（分时） |
+| `retailer_annual_avg` | `Number` | 售电公司年度交易均价（分时） |
+| `retailer_avg` | `Number` | 售电公司交易均价（分时） |
+| `real_time_avg` | `Number` | 实时市场均价（分时） |
+| `day_ahead_avg` | `Number` | 日前市场均价（分时） |
+| `genside_annual_bilateral` | `Number` | 发电侧火电年度中长期双边协商交易合同分月平段价（分时） |
+| `grid_agency_price` | `Number` | 电网代理购电价格（分时） |
+
+### 16.2. 索引信息
+
+- `_id_`（默认，即月份字符串的唯一主键）
+- `month`（唯一索引）
+- `imported_at`（时间倒序查询）
+
+---

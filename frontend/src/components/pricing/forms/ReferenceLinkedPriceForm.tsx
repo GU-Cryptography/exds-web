@@ -1,7 +1,8 @@
 import React from 'react';
 import { Control, Controller } from 'react-hook-form';
-import { Typography, Paper, TextField, Grid, MenuItem, FormHelperText, Alert } from '@mui/material';
+import { Typography, Paper, TextField, Grid, MenuItem, FormHelperText } from '@mui/material';
 import { PackageFormData } from '../../../hooks/usePackageForm';
+import { getReferenceOptions } from '../../../config/pricingConstants';
 
 interface ReferenceLinkedPriceFormProps {
   control: Control<PackageFormData>;
@@ -12,18 +13,8 @@ interface ReferenceLinkedPriceFormProps {
  * 参考价+联动价格+浮动价 表单组件
  */
 export const ReferenceLinkedPriceForm: React.FC<ReferenceLinkedPriceFormProps> = ({ control, isTimeBased }) => {
-  // 参考价选项（根据分时/不分时区分）
-  const referenceTypeOptions = isTimeBased ? [
-    { value: 'market_monthly_avg', label: '电力市场月度交易均价(当月平均上网电价)（分时）' },
-    { value: 'grid_agency_price', label: '电网代理购电价格（分时）' },
-    { value: 'annual_longterm_time', label: '售电侧年度中长期分时交易价格' },
-    { value: 'monthly_settlement_avg', label: '售电侧月度结算加权价（不分时）' },
-    { value: 'longterm_time', label: '售电侧中长期分时交易价格' }
-  ] : [
-    { value: 'market_monthly_avg', label: '电力市场月度交易均价(当月平均上网电价)' },
-    { value: 'grid_agency_price', label: '电网代理购电价格' },
-    { value: 'ceiling_price', label: '上限价' }
-  ];
+  // 参考价选项（使用共享常量）
+  const referenceTypeOptions = getReferenceOptions(isTimeBased);
 
   return (
     <Grid container spacing={2}>
