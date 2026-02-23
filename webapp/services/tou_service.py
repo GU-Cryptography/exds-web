@@ -57,26 +57,29 @@ def get_tou_rule_by_date(date: datetime, collection=None) -> Dict[str, str]:
     for patch in patch_cursor:
         if "patch_intervals" in patch:
             for interval in patch["patch_intervals"]:
-                start_str = interval.get("start")
-                end_str = interval.get("end")
-                val = interval.get("value")
-                
+                start_str, end_str, val = interval.get("start"), interval.get("end"), interval.get("value")
                 if not (start_str and end_str and val):
                     continue
                     
                 h_start, m_start = map(int, start_str.split(':'))
                 start_idx = (h_start * 60 + m_start) // 15
-                
-                if end_str == '24:00':
-                    end_idx = 96
-                else:
-                    h_end, m_end = map(int, end_str.split(':'))
-                    end_idx = (h_end * 60 + m_end) // 15
+                end_idx = 96 if end_str == '24:00' else (int(end_str.split(':')[0]) * 60 + int(end_str.split(':')[1])) // 15
                 
                 for i in range(start_idx, min(end_idx, 96)):
                     timeline[i] = val
 
-    # 3. 转换为 Dict[str, str] 映射 (00:00, 00:15, ... 23:45)
+    # 3. 动态节假日补丁 (江西 2024-05 之后政策)
+    # 针对重大节假日 (春节, 劳动节, 国庆节) 自动应用 12:00-14:00 深谷电价
+    if base_activation_date and base_activation_date >= datetime(2024, 5, 1):
+        from webapp.services.holiday_service import get_holiday_service
+        hs = get_holiday_service()
+        h_name = hs.get_holiday_name(date.date())
+        if h_name in ["春节", "劳动节", "国庆节", "中秋国庆节"]:
+            # 12:00 (index 48) - 14:00 (index 56)
+            for i in range(48, 56):
+                timeline[i] = "深谷"
+
+    # 4. 转换为 Dict[str, str] 映射
     time_to_period_map = {}
     for i in range(96):
         time_obj = datetime(2000, 1, 1) + timedelta(minutes=15 * i)
