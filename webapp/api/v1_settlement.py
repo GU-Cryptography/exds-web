@@ -2,13 +2,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional, Any
 from pydantic import BaseModel
 from datetime import datetime
+from fastapi.responses import StreamingResponse
 
 from webapp.services.settlement_service import SettlementService
+from webapp.services.export_service import ExportService
 from webapp.models.settlement import SettlementDaily, SettlementVersion
 
 router = APIRouter(prefix="/settlement", tags=["Settlement"])
 
 service = SettlementService()
+export_service = ExportService()
 
 class CalculationRequest(BaseModel):
     date: str
@@ -255,3 +258,74 @@ async def get_settlement_overview(
         import traceback
         traceback.print_exc()
         return ResponseModel(code=500, message=str(e), data=None)
+
+@router.get("/detail", response_model=ResponseModel)
+async def get_settlement_detail(
+    date: str = Query(..., regex=r"^\d{4}-\d{2}-\d{2}$", description="结算日期 YYYY-MM-DD"),
+    version: SettlementVersion = Query(SettlementVersion.PRELIMINARY, description="结算版本"),
+):
+    """
+    获取指定日期的结算详情（包含批发侧和零售侧列表）
+    """
+    try:
+        data = await service.get_settlement_detail(date, version)
+        if not data:
+            return ResponseModel(code=404, message="No settlement data found for this date/version", data=None)
+        
+        return ResponseModel(code=200, data=data)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return ResponseModel(code=500, message=str(e), data=None)
+
+@router.get("/customer-detail", response_model=ResponseModel)
+async def get_settlement_customer_detail(
+    date: str = Query(..., regex=r"^\d{4}-\d{2}-\d{2}$", description="结算日期 YYYY-MM-DD"),
+    customer_id: str = Query(..., description="客户ID"),
+):
+    """
+    获取单个客户在指定日期的零售详情数据
+    """
+    try:
+        data = await service.get_settlement_customer_detail(date, customer_id)
+        if not data:
+            return ResponseModel(code=404, message="No retail settlement data found for this customer/date", data=None)
+        
+        return ResponseModel(code=200, data=data)
+    except Exception as e:
+        return ResponseModel(code=500, message=str(e), data=None)
+
+@router.get("/export/wholesale")
+async def export_wholesale_settlement(
+    date: str = Query(..., regex=r"^\d{4}-\d{2}-\d{2}$", description="结算日期 YYYY-MM-DD"),
+    version: SettlementVersion = Query(SettlementVersion.PRELIMINARY, description="结算版本"),
+):
+    """
+    导出指定日期的批发侧结算 Excel (保留公式)
+    """
+    try:
+        data = await service.get_settlement_detail(date, version)
+        if not data:
+            raise HTTPException(status_code=404, detail="No settlement data found")
+        
+        version_label = "预结算" if version == SettlementVersion.PRELIMINARY else "确权版"
+        excel_stream = export_service.export_wholesale_to_excel(date, version_label, data)
+        
+        filename = f"批发侧结算_{date}_{version_label}.xlsx"
+        # 兼容中文文件名
+        from urllib.parse import quote
+        encoded_filename = quote(filename)
+        
+        headers = {
+            'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}"
+        }
+        
+        return StreamingResponse(
+            excel_stream,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers=headers
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

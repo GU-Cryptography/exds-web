@@ -409,16 +409,6 @@ export const SystemLogsPage: React.FC = () => {
         }
     };
 
-    // 移动端排序选择处理
-    const handleMobileSortChange = (value: string) => {
-        const [field, order] = value.split('-') as [string, 'asc' | 'desc'];
-        switch (currentTab) {
-            case 'alerts': setAlertSort({ field, order }); break;
-            case 'logs': setLogSort({ field, order }); break;
-            case 'commands': setCommandSort({ field, order }); break;
-        }
-    };
-
     // ========== 渲染告警表格 ==========
     const renderAlertsTable = () => (
         <>

@@ -36,6 +36,7 @@ import { WeatherDataPage } from './pages/WeatherDataPage';
 import { LoadDataDiagnosisPage } from './pages/LoadDataDiagnosisPage';
 import { LoadForecastWorkbench } from './pages/LoadForecastWorkbench';
 import PreSettlementOverviewPage from './pages/PreSettlementOverviewPage';
+import PreSettlementDetailPage from './pages/PreSettlementDetailPage';
 import RetailSettlementPricePage from './pages/RetailSettlementPricePage';
 import { TabProvider } from './contexts/TabContext';
 import { AuthProvider } from './contexts/AuthContext';
@@ -115,6 +116,7 @@ const ResponsiveLayout: React.FC = () => {
 
                     {/* 结算管理 */}
                     <Route path="settlement/pre-settlement-overview" element={<PreSettlementOverviewPage />} />
+                    <Route path="settlement/pre-settlement-detail" element={<PreSettlementDetailPage />} />
                     <Route path="settlement/bill-review" element={<PlaceholderPage />} />
                     <Route path="settlement/retail-settlement" element={<PlaceholderPage />} />
                     <Route path="settlement/profit-analysis" element={<PlaceholderPage />} />

@@ -528,3 +528,130 @@ class SettlementService:
             {"$set": data},
             upsert=True
         )
+    async def get_settlement_detail(self, date_str: str, version: SettlementVersion) -> Optional[Dict]:
+        """
+        获取指定日期和版本的结算详情数据
+        包括：批发侧日摘要、批发侧48点明细、零售侧客户汇总列表
+        """
+        # 1. 获取批发侧数据
+        wholesale_doc = self.db.settlement_daily.find_one({
+            "operating_date": date_str,
+            "version": version
+        })
+        if not wholesale_doc:
+            return None
+        
+        # 转换为 Pydantic 以便于属性访问并序列化
+        wholesale = SettlementDaily(**wholesale_doc)
+        wholesale_data = wholesale.model_dump() if hasattr(wholesale, 'model_dump') else wholesale.dict()
+
+        # 2. 获取零售侧数据并聚合
+        retail_cursor = self.db.retail_settlement_daily.find({"date": date_str})
+        retail_docs = list(retail_cursor)
+        
+        # 计算批发均价 (用于分摊成本简化计算)
+        # 注意：这里按元/kWh计算，批发侧 predicted_wholesale_price 是 元/MWh
+        wholesale_avg_price_kwh = wholesale.predicted_wholesale_price / 1000.0
+
+        customer_list = []
+        total_retail_revenue = 0.0
+        total_retail_load = 0.0
+
+        for r in retail_docs:
+            total_load_mwh = r.get("total_load_mwh", 0) or 0
+            total_fee = r.get("total_fee", 0) or 0
+            # 数据库存储为元/kWh, 需转换为元/MWh
+            capped_avg_price = (r.get("avg_price", 0) or 0) * 1000.0
+            nominal_avg_price = (r.get("nominal_avg_price", 0) or 0) * 1000.0
+            cap_price = (r.get("cap_price", 0) or 0) * 1000.0
+            
+            # 简化版分摊成本逻辑：客户日电量 * 当日系统批发加权平均价
+            allocated_cost = total_load_mwh * wholesale.predicted_wholesale_price
+            daily_profit = total_fee - allocated_cost
+            price_spread = capped_avg_price - wholesale.predicted_wholesale_price
+            
+            total_retail_revenue += total_fee
+            total_retail_load += total_load_mwh
+            
+            customer_list.append({
+                "customer_id": r.get("customer_id"),
+                "customer_name": r.get("customer_name"),
+                "package_name": r.get("package_name"),
+                "pricing_model": r.get("package_name"), 
+                "daily_load": self._round(total_load_mwh, 3),
+                "total_fee": self._round(total_fee, 2),
+                "capped_avg_price": self._round(capped_avg_price, 3),
+                "allocated_cost": self._round(allocated_cost, 2),
+                "daily_profit": self._round(daily_profit, 2),
+                "price_spread": self._round(price_spread, 3),
+                "nominal_avg_price": self._round(nominal_avg_price, 3),
+                "cap_price": self._round(cap_price, 3)
+            })
+
+        # 3. 构造汇总信息
+        summary = {
+            "wholesale_cost": wholesale.predicted_wholesale_cost,
+            "retail_revenue": self._round(total_retail_revenue, 2),
+            "daily_profit": self._round(total_retail_revenue - wholesale.predicted_wholesale_cost, 2),
+            "total_volume_mwh": wholesale.real_time_volume,
+            "wholesale_avg_price": wholesale.predicted_wholesale_price,
+            "retail_avg_price": self._round((total_retail_revenue / total_retail_load) if total_retail_load > 0 else 0, 3),
+            "price_spread": self._round((total_retail_revenue / total_retail_load - wholesale.predicted_wholesale_price) if total_retail_load > 0 else 0, 3),
+            "profit_margin": self._round((total_retail_revenue - wholesale.predicted_wholesale_cost) / wholesale.predicted_wholesale_cost * 100 if wholesale.predicted_wholesale_cost > 0 else 0, 2),
+            "deviation_recovery_fee": wholesale.deviation_recovery_fee
+        }
+
+        return {
+            "date": date_str,
+            "version": version.value,
+            "summary": summary,
+            "wholesale_period_details": wholesale_data.get("period_details", []),
+            "customer_list": customer_list
+        }
+
+    async def get_settlement_customer_detail(self, date_str: str, customer_id: str) -> Optional[Dict]:
+        """
+        获取指定日期和客户的零售侧结算详情
+        """
+        doc = self.db.retail_settlement_daily.find_one({
+            "date": date_str,
+            "customer_id": customer_id
+        })
+        if "_id" in doc: del doc["_id"]
+        
+        # 补充收益计算 (对齐概览列表逻辑)
+        # 需要当天的批发均价
+        wholesale_price = 0.0
+        ws_doc = self.db.settlement_daily.find_one({
+            "operating_date": date_str,
+            "version": SettlementVersion.PLATFORM_DAILY # 默认取确权版
+        })
+        if not ws_doc:
+             ws_doc = self.db.settlement_daily.find_one({"operating_date": date_str})
+        
+        if ws_doc:
+             wholesale_price = ws_doc.get("predicted_wholesale_price", 0)
+        
+        total_load = doc.get("total_load_mwh", 0)
+        total_fee = doc.get("total_fee", 0)
+        allocated_cost = total_load * wholesale_price
+        doc["allocated_cost"] = self._round(allocated_cost, 2)
+        doc["daily_profit"] = self._round(total_fee - allocated_cost, 2)
+        doc["pricing_model"] = doc.get("package_name")
+        doc["avg_price"] = (doc.get("avg_price", 0) or 0) * 1000.0 # 元/kWh -> 元/MWh
+        doc["nominal_avg_price"] = (doc.get("nominal_avg_price", 0) or 0) * 1000.0
+        doc["cap_price"] = (doc.get("cap_price", 0) or 0) * 1000.0
+        
+        # 处理分时明细价格单位 (元/kWh -> 元/MWh)
+        if "period_details" in doc:
+             for p in doc["period_details"]:
+                  if "unit_price" in p:
+                       p["unit_price"] = (p["unit_price"] or 0) * 1000.0
+        
+        # 处理可能的 datetime 字段
+        if "created_at" in doc and hasattr(doc["created_at"], "isoformat"):
+            doc["created_at"] = doc["created_at"].isoformat()
+        if "updated_at" in doc and hasattr(doc["updated_at"], "isoformat"):
+            doc["updated_at"] = doc["updated_at"].isoformat()
+            
+        return doc

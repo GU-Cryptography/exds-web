@@ -22,6 +22,7 @@ import LoadCharacteristicsOverviewPage from '../pages/LoadCharacteristicsOvervie
 import LoadCharacteristicsDetailPage from '../pages/LoadCharacteristicsDetailPage';
 import { SystemLogsPage } from '../pages/SystemLogsPage';
 import PreSettlementOverviewPage from '../pages/PreSettlementOverviewPage';
+import PreSettlementDetailPage from '../pages/PreSettlementDetailPage';
 import RetailSettlementPricePage from '../pages/RetailSettlementPricePage';
 
 // 路由配置接口
@@ -75,6 +76,7 @@ export const routeConfigs: RouteConfig[] = [
 
     // 结算管理
     { path: '/settlement/pre-settlement-overview', title: '预结算总览', component: PreSettlementOverviewPage },
+    { path: '/settlement/pre-settlement-detail', title: '结算日明细', component: PreSettlementDetailPage },
     { path: '/settlement/bill-review', title: '平台账单复核', component: PlaceholderPage },
     { path: '/settlement/retail-settlement', title: '零售用户结算', component: PlaceholderPage },
     { path: '/settlement/profit-analysis', title: '经营利润分析', component: PlaceholderPage },

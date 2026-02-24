@@ -1,0 +1,1107 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+    Box, Grid, Paper, Typography, CircularProgress, Alert, IconButton,
+    Select, MenuItem, FormControl, InputLabel, SelectChangeEvent,
+    useMediaQuery, Theme, Tabs, Tab, Button, Divider,
+    Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+    Drawer
+} from '@mui/material';
+import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { zhCN } from 'date-fns/locale';
+import {
+    ArrowLeft as ArrowLeftIcon,
+    ArrowRight as ArrowRightIcon,
+    Fullscreen as FullscreenIcon,
+    FullscreenExit as FullscreenExitIcon,
+    Refresh as RefreshIcon,
+    FileDownload as FileDownloadIcon,
+    Close as CloseIcon
+} from '@mui/icons-material';
+import { format, addDays, parseISO } from 'date-fns';
+import { useSearchParams } from 'react-router-dom';
+import apiClient from '../api/client';
+import { useChartFullscreen } from '../hooks/useChartFullscreen';
+import { useTabContext } from '../contexts/TabContext';
+
+// ====== 图标组件导入 ======
+import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
+import MonetizationOnOutlinedIcon from '@mui/icons-material/MonetizationOnOutlined';
+import TrendingUpOutlinedIcon from '@mui/icons-material/TrendingUpOutlined';
+import PriceChangeOutlinedIcon from '@mui/icons-material/PriceChangeOutlined';
+import CompareArrowsOutlinedIcon from '@mui/icons-material/CompareArrowsOutlined';
+import BarChartOutlinedIcon from '@mui/icons-material/BarChartOutlined';
+import LocalOfferOutlinedIcon from '@mui/icons-material/LocalOfferOutlined';
+import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
+import BarChartIcon from '@mui/icons-material/BarChart';
+import LocalOfferIcon from '@mui/icons-material/LocalOffer';
+import InsightsIcon from '@mui/icons-material/Insights';
+
+import {
+    ComposedChart, Line, Bar, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+    ResponsiveContainer, ScatterChart, Scatter, ZAxis, Cell, ReferenceLine
+} from 'recharts';
+
+// ====== 类型定义 ======
+interface Summary {
+    wholesale_cost: number;
+    retail_revenue: number;
+    daily_profit: number;
+    total_volume_mwh: number;
+    wholesale_avg_price: number;
+    retail_avg_price: number;
+    price_spread: number;
+    profit_margin: number;
+    deviation_recovery_fee: number;
+}
+
+interface DetailData {
+    date: string;
+    version: string;
+    summary: Summary;
+    wholesale_period_details: any[];
+    customer_list: any[];
+}
+
+const VERSION_OPTIONS = [
+    { value: 'PLATFORM_DAILY', label: '平台日清数据' },
+    { value: 'PRELIMINARY', label: '原始数据计算' },
+];
+
+// ====== StatCard ======
+const StatCard: React.FC<{
+    title: string;
+    value: string;
+    subtitle?: string;
+    icon: React.ReactNode;
+    color?: string;
+    valueColor?: string;
+}> = ({ title, value, subtitle, icon, color = 'primary.main', valueColor }) => (
+    <Paper sx={{ p: { xs: 1.5, sm: 2 }, display: 'flex', alignItems: 'center', height: '100%' }} elevation={2}>
+        <Box sx={{ fontSize: { xs: 30, sm: 40 }, color, mr: { xs: 1, sm: 2 }, display: 'flex', alignItems: 'center' }}>
+            {icon}
+        </Box>
+        <Box sx={{ minWidth: 0 }}>
+            <Typography variant="body2" color="text.secondary" noWrap>{title}</Typography>
+            <Typography
+                variant="h6" component="div" fontWeight="bold" noWrap
+                sx={{ fontSize: { xs: '1rem', sm: '1.25rem' }, color: valueColor || 'text.primary' }}
+            >
+                {value}
+            </Typography>
+            {subtitle && (
+                <Typography variant="caption" color="text.secondary" noWrap>{subtitle}</Typography>
+            )}
+        </Box>
+    </Paper>
+);
+
+const formatYuan = (val: number): string => val.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const profitColor = (val: number): string => val >= 0 ? '#4caf50' : '#f44336';
+
+const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?: string }> = ({ initialDate, initialVersion }) => {
+    const [searchParams, setSearchParams] = useSearchParams();
+    const isTablet = useMediaQuery((t: Theme) => t.breakpoints.down('md'));
+    const isMobile = useMediaQuery((t: Theme) => t.breakpoints.down('sm'));
+    const { setActiveTab } = useTabContext();
+
+    // ====== 关键：区分 Tab 嵌入模式 vs 路由模式 ======
+    // Tab 模式：有 initialDate props，此时 useSearchParams 读取的是浏览器实际 URL（总览页），不可靠
+    // 路由模式：无 initialDate props，走 /settlement/pre-settlement-detail?date=xxx 路由，searchParams 可靠
+    const isEmbeddedMode = !!initialDate;
+
+    // Tab 模式使用内部状态管理日期和版本
+    const [internalDate, setInternalDate] = useState<Date>(
+        initialDate ? parseISO(initialDate) : addDays(new Date(), -1)
+    );
+    const [internalVersion, setInternalVersion] = useState<string>(
+        initialVersion || 'PLATFORM_DAILY'
+    );
+
+    // 根据模式选择数据源
+    const selectedDate = isEmbeddedMode
+        ? internalDate
+        : (searchParams.get('date') ? parseISO(searchParams.get('date')!) : addDays(new Date(), -1));
+    const version = isEmbeddedMode
+        ? internalVersion
+        : (searchParams.get('version') || 'PLATFORM_DAILY');
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [data, setData] = useState<DetailData | null>(null);
+    const [activeTabIdx, setActiveTabIdx] = useState(0);
+    const [refreshCount, setRefreshCount] = useState(0);
+    const [exporting, setExporting] = useState(false);
+
+    const chartRef1 = useRef<HTMLDivElement>(null);
+    const chartRef2 = useRef<HTMLDivElement>(null);
+
+    // 移动端表格抽屉状态
+    const [selectedWholesaleRow, setSelectedWholesaleRow] = useState<any | null>(null);
+
+    // 数据获取：监听派生的 dateStr 和 version 变化
+    useEffect(() => {
+        const fetchCurrentData = async () => {
+            if (!dateStr) return;
+            setLoading(true);
+            setError(null);
+            try {
+                const res = await apiClient.get('/api/v1/settlement/detail', {
+                    params: { date: dateStr, version },
+                });
+                if (res.data.code === 200) {
+                    setData(res.data.data);
+                } else {
+                    setError(res.data.message || '加载失败');
+                }
+            } catch (err: any) {
+                setError(err.response?.data?.detail || err.message || '请求失败');
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchCurrentData();
+    }, [dateStr, version, refreshCount]);
+
+    // 统一的日期/版本更新方法：根据模式选择更新方式
+    const handleShiftDate = (days: number) => {
+        const newDate = addDays(selectedDate, days);
+        if (isEmbeddedMode) {
+            setInternalDate(newDate);
+        } else {
+            setSearchParams({ date: format(newDate, 'yyyy-MM-dd'), version });
+        }
+    };
+
+    const handleDateChange = (date: Date | null) => {
+        if (!date) return;
+        if (isEmbeddedMode) {
+            setInternalDate(date);
+        } else {
+            const nextParams = new URLSearchParams(searchParams);
+            nextParams.set('date', format(date, 'yyyy-MM-dd'));
+            nextParams.set('version', version);
+            setSearchParams(nextParams, { replace: true });
+        }
+    };
+
+    const handleVersionChange = (e: SelectChangeEvent) => {
+        const newVersion = e.target.value;
+        if (isEmbeddedMode) {
+            setInternalVersion(newVersion);
+        } else {
+            const nextParams = new URLSearchParams(searchParams);
+            nextParams.set('date', dateStr);
+            nextParams.set('version', newVersion);
+            setSearchParams(nextParams, { replace: true });
+        }
+    };
+
+    const handleReSettle = async () => {
+        if (!selectedDate) return;
+        setLoading(true);
+        try {
+            await apiClient.post('/api/v1/settlement/calculate', {
+                date: dateStr,
+                version: version,
+                force: true
+            });
+            setRefreshCount((prev: number) => prev + 1);
+        } catch (err: any) {
+            setError(err.response?.data?.detail || '重算失败');
+            setLoading(false);
+        }
+    };
+
+    const handleExportExcel = async () => {
+        if (!dateStr) return;
+        setExporting(true);
+        try {
+            const response = await apiClient.get('/api/v1/settlement/export/wholesale', {
+                params: { date: dateStr, version },
+                responseType: 'blob'
+            });
+
+            // 从 header 获取文件名
+            const disposition = response.headers['content-disposition'];
+            let filename = `批发结算_${dateStr}.xlsx`;
+            if (disposition && disposition.indexOf('filename*=UTF-8\'\'') !== -1) {
+                filename = decodeURIComponent(disposition.split('filename*=UTF-8\'\'')[1]);
+            }
+
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', filename);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+        } catch (err: any) {
+            console.error('导出失败:', err);
+            alert('导出失败，请重试');
+        } finally {
+            setExporting(false);
+        }
+    };
+
+    const jumpToCustomerDetail = (customerId: string) => {
+        if (!isEmbeddedMode) {
+            setSearchParams({ date: dateStr, version, customer_id: customerId });
+        }
+        setActiveTabIdx(2);
+    };
+
+    const { isFullscreen: isFs1, FullscreenEnterButton: Enter1, FullscreenExitButton: Exit1, FullscreenTitle: Title1 } = useChartFullscreen({
+        chartRef: chartRef1, title: `批发侧盈亏归因 (${dateStr})`
+    });
+
+    const { isFullscreen: isFs2, FullscreenEnterButton: Enter2, FullscreenExitButton: Exit2, FullscreenTitle: Title2 } = useChartFullscreen({
+        chartRef: chartRef2, title: `客户收益矩阵 (${dateStr})`
+    });
+
+    const renderSummaryCards = () => {
+        if (!data) return null;
+        const { summary: s } = data;
+        return (
+            <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mt: 2 }}>
+                <Grid size={{ xs: 6, sm: 4, md: 2 }}>
+                    <StatCard title="批发成本(元)" value={`${formatYuan(s.wholesale_cost)}`}
+                        subtitle={`含偏差回收 ${formatYuan(s.deviation_recovery_fee)}`}
+                        icon={<AccountBalanceWalletOutlinedIcon />} color="#1976d2" />
+                </Grid>
+                <Grid size={{ xs: 6, sm: 4, md: 2 }}>
+                    <StatCard title="零售收入(元)" value={`${formatYuan(s.retail_revenue)}`}
+                        icon={<MonetizationOnOutlinedIcon />} color="#2e7d32" />
+                </Grid>
+                <Grid size={{ xs: 6, sm: 4, md: 2 }}>
+                    <StatCard title="日毛利(元)" value={`${formatYuan(s.daily_profit)}`}
+                        subtitle={`利润率 ${(s.profit_margin || 0).toFixed(2)}%`}
+                        icon={<TrendingUpOutlinedIcon />}
+                        color={profitColor(s.daily_profit)} valueColor={profitColor(s.daily_profit)} />
+                </Grid>
+                <Grid size={{ xs: 6, sm: 4, md: 2 }}>
+                    <StatCard title="购电均价" value={`${(s.wholesale_avg_price || 0).toFixed(2)}`}
+                        subtitle="元/MWh" icon={<PriceChangeOutlinedIcon />} color="#1976d2" />
+                </Grid>
+                <Grid size={{ xs: 6, sm: 4, md: 2 }}>
+                    <StatCard title="售电均价" value={`${(s.retail_avg_price || 0).toFixed(2)}`}
+                        subtitle="元/MWh" icon={<LocalOfferOutlinedIcon />} color="#2e7d32" />
+                </Grid>
+                <Grid size={{ xs: 6, sm: 4, md: 2 }}>
+                    <StatCard title="价差" value={`${(s.price_spread || 0) > 0 ? '+' : ''}${(s.price_spread || 0).toFixed(2)}`}
+                        subtitle="元/MWh" icon={<CompareArrowsOutlinedIcon />}
+                        color={profitColor(s.price_spread)} valueColor={profitColor(s.price_spread)} />
+                </Grid>
+            </Grid>
+        );
+    };
+
+
+
+    // ====== 盈亏归因图 自定义 Tooltip ======
+    const WholesalePLTooltip = ({ active, payload, label }: any) => {
+        if (!active || !payload || payload.length === 0) return null;
+        const d = payload[0]?.payload;
+        if (!d) return null;
+
+        const contractPL = d.contractPL ?? 0;
+        const dayAheadPL = d.dayAheadPL ?? 0;
+        const cumPL = d.cumPL ?? 0;
+        const totalFee = d.totalFee ?? 0;
+        const rtFee = d.rtFee ?? 0;
+        const contractVol = d.contractVol ?? 0;
+        const mechanismVol = d.mechanismVol ?? 0;
+        const dayAheadVol = d.dayAheadVol ?? 0;
+        const realTimeVol = d.realTimeVol ?? 0;
+        const hedgeVol = contractVol + mechanismVol;
+        const coverageRate = realTimeVol > 0 ? (hedgeVol / realTimeVol * 100) : 0;
+
+        return (
+            <Paper sx={{ p: 1.5, minWidth: 220, fontSize: '0.8rem' }} elevation={3}>
+                <Typography variant="subtitle2" fontWeight="bold" gutterBottom>时段 {label}</Typography>
+                {/* 盈亏分项 */}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.3 }}>
+                    <span style={{ color: '#1565c0' }}>合同差价电费 ③</span>
+                    <span style={{ color: contractPL >= 0 ? '#4caf50' : '#f44336', fontWeight: 600 }}>
+                        {contractPL >= 0 ? '+' : ''}{contractPL.toFixed(2)}
+                    </span>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.3 }}>
+                    <span style={{ color: '#ef6c00' }}>日前差价电费 ⑥</span>
+                    <span style={{ color: dayAheadPL >= 0 ? '#4caf50' : '#f44336', fontWeight: 600 }}>
+                        {dayAheadPL >= 0 ? '+' : ''}{dayAheadPL.toFixed(2)}
+                    </span>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5, fontWeight: 'bold' }}>
+                    <span>累计盈亏</span>
+                    <span style={{ color: cumPL >= 0 ? '#4caf50' : '#f44336' }}>
+                        {cumPL >= 0 ? '+' : ''}{cumPL.toFixed(2)}
+                    </span>
+                </Box>
+                <Divider sx={{ my: 0.5 }} />
+                {/* 电费汇总 */}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.3 }}>
+                    <span style={{ color: '#90caf9' }}>全量电费 ⑨</span>
+                    <span>{rtFee.toFixed(2)}</span>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.3, fontWeight: 'bold' }}>
+                    <span style={{ color: '#00897b' }}>电费合计 ⑩</span>
+                    <span>{totalFee.toFixed(2)}</span>
+                </Box>
+                <Divider sx={{ my: 0.5 }} />
+                {/* 电量覆盖（方案A） */}
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.3 }}>
+                    电量覆盖
+                </Typography>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.2 }}>
+                    <span>合同①+机制⑫</span>
+                    <span>{hedgeVol.toFixed(3)} MWh</span>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.2 }}>
+                    <span>日前补充 ④</span>
+                    <span>{dayAheadVol.toFixed(3)} MWh</span>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.2 }}>
+                    <span>实际用量 ⑦</span>
+                    <span>{realTimeVol.toFixed(3)} MWh</span>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+                    <span>覆盖率</span>
+                    <span style={{ color: coverageRate >= 95 ? '#4caf50' : coverageRate >= 80 ? '#ff9800' : '#f44336' }}>
+                        {coverageRate.toFixed(1)}%
+                    </span>
+                </Box>
+            </Paper>
+        );
+    };
+
+    const renderWholesaleChart = () => {
+        if (!data || !data.wholesale_period_details) return null;
+
+        // 数据预处理：计算盈亏分项和累计值
+        let cumSum = 0;
+        const chartData = data.wholesale_period_details.map((p: any) => {
+            const contractPL = p.contract?.fee ?? 0;
+            const dayAheadPL = p.day_ahead?.fee ?? 0;
+            cumSum += contractPL + dayAheadPL;
+            return {
+                period: p.period,
+                contractPL,
+                dayAheadPL,
+                cumPL: cumSum,
+                totalFee: p.total_energy_fee ?? 0,
+                rtFee: p.real_time?.fee ?? 0,
+                contractVol: p.contract?.volume ?? 0,
+                dayAheadVol: p.day_ahead?.volume ?? 0,
+                realTimeVol: p.real_time?.volume ?? 0,
+                mechanismVol: p.mechanism_volume ?? 0,
+            };
+        });
+
+        return (
+            <Box ref={chartRef1} sx={{
+                height: { xs: 300, sm: 360 }, position: 'relative',
+                bgcolor: isFs1 ? 'background.paper' : 'transparent',
+                p: isFs1 ? 2 : 0,
+                ...(isFs1 && { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1400 }),
+                '& .recharts-wrapper:focus': { outline: 'none' }
+            }}>
+                <Enter1 /><Exit1 /><Title1 />
+                <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="period" tick={{ fontSize: 11 }} />
+                        <YAxis
+                            yAxisId="left"
+                            label={{ value: '时段盈亏 (元)', angle: -90, position: 'insideLeft', style: { fontSize: 12 } }}
+                            tick={{ fontSize: 11 }}
+                        />
+                        <YAxis
+                            yAxisId="right"
+                            orientation="right"
+                            label={{ value: '累计盈亏 (元)', angle: 90, position: 'insideRight', style: { fontSize: 12 } }}
+                            tick={{ fontSize: 11 }}
+                        />
+                        <Tooltip content={<WholesalePLTooltip />} />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        <ReferenceLine yAxisId="left" y={0} stroke="#999" strokeDasharray="3 3" />
+                        {/* 全量电费背景面积图 */}
+                        <Area yAxisId="left" type="monotone" dataKey="rtFee" name="全量电费⑨" fill="#90caf9" stroke="none" fillOpacity={0.15} />
+                        {/* 正负堆叠柱状图 */}
+                        <Bar yAxisId="left" dataKey="contractPL" name="合同差价电费" fill="#1565c0" stackId="pl" />
+                        <Bar yAxisId="left" dataKey="dayAheadPL" name="日前差价电费" fill="#ef6c00" stackId="pl" />
+                        {/* 电费合计折线 */}
+                        <Line
+                            yAxisId="left"
+                            type="monotone"
+                            dataKey="totalFee"
+                            name="电费合计⑩"
+                            stroke="#00897b"
+                            strokeWidth={1.5}
+                            strokeDasharray="4 3"
+                            dot={false}
+                        />
+                        {/* 累计盈亏折线 */}
+                        <Line
+                            yAxisId="right"
+                            type="monotone"
+                            dataKey="cumPL"
+                            name="累计盈亏"
+                            stroke="#7b1fa2"
+                            strokeWidth={2}
+                            dot={false}
+                        />
+                    </ComposedChart>
+                </ResponsiveContainer>
+            </Box>
+        );
+    };
+
+    const renderCustomerProfitChart = () => {
+        if (!data || !data.customer_list) return null;
+        const chartData = data.customer_list.map(c => ({
+            name: c.customer_name,
+            spread: c.price_spread,
+            load: c.daily_load,
+            profit: c.daily_profit
+        }));
+
+        return (
+            <Box ref={chartRef2} sx={{
+                height: { xs: 300, sm: 350 }, position: 'relative',
+                bgcolor: isFs2 ? 'background.paper' : 'transparent',
+                p: isFs2 ? 2 : 0,
+                ...(isFs2 && { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1400 }),
+                '& .recharts-wrapper:focus': { outline: 'none' }
+            }}>
+                <Enter2 /><Exit2 /><Title2 />
+                <ResponsiveContainer width="100%" height="100%">
+                    <ScatterChart margin={{ top: 20, right: 30, bottom: 20, left: 20 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" dataKey="spread" name="均价差" unit="元" label={{ value: '批零价差 (元/MWh)', position: 'bottom' }} />
+                        <YAxis type="number" dataKey="load" name="负荷" unit="MWh" label={{ value: '量 (MWh)', angle: -90, position: 'insideLeft' }} />
+                        <ZAxis type="number" dataKey="profit" range={[50, 400]} name="利润" />
+                        <Tooltip cursor={{ strokeDasharray: '3 3' }} />
+                        <Scatter name="客户分布" data={chartData}>
+                            {chartData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.profit >= 0 ? '#4caf50' : '#f44336'} fillOpacity={0.6} />
+                            ))}
+                        </Scatter>
+                        <ReferenceLine x={0} stroke="#999" />
+                    </ScatterChart>
+                </ResponsiveContainer>
+            </Box>
+        );
+    };
+
+    const renderWholesaleTable = () => {
+        if (!data || !data.wholesale_period_details) return null;
+
+        // 计算合计行
+        const totals = data.wholesale_period_details.reduce((acc: any, p: any) => {
+            acc.contractVol += p.contract?.volume ?? 0;
+            acc.contractFee += p.contract?.fee ?? 0;
+            acc.daVol += p.day_ahead?.volume ?? 0;
+            acc.daFee += p.day_ahead?.fee ?? 0;
+            acc.rtVol += p.real_time?.volume ?? 0;
+            acc.rtFee += p.real_time?.fee ?? 0;
+            acc.totalFee += p.total_energy_fee ?? 0;
+            acc.mechanismVol += p.mechanism_volume ?? 0;
+            acc.stdCost += p.standard_value_cost ?? 0;
+            return acc;
+        }, { contractVol: 0, contractFee: 0, daVol: 0, daFee: 0, rtVol: 0, rtFee: 0, totalFee: 0, mechanismVol: 0, stdCost: 0 });
+
+        // 合计均价
+        const totalContractAvgPrice = totals.contractVol > 0 ? (totals.contractFee / totals.contractVol) : 0;
+        const totalDaAvgPrice = totals.daVol > 0 ? (totals.daFee / totals.daVol) : 0;
+        const totalRtAvgPrice = totals.rtVol > 0 ? (totals.rtFee / totals.rtVol) : 0;
+        const totalAvgPrice = totals.rtVol > 0 ? (totals.totalFee / totals.rtVol) : 0;
+
+        const headerGroupSx = {
+            fontWeight: 'bold',
+            textAlign: 'center' as const,
+            borderBottom: '2px solid',
+            borderColor: 'divider',
+            py: 0.5,
+        };
+
+        // 辅助函数：渲染抽屉行项
+        const renderDetailItem = (label: string, value: string | number, formula?: string) => (
+            <Box sx={{ mb: 1.5 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <Box>
+                        <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.75rem' }}>{label}</Typography>
+                        {formula && <Typography variant="caption" sx={{ color: 'primary.main', opacity: 0.8, display: 'block' }}>{formula}</Typography>}
+                    </Box>
+                    <Typography variant="body1" fontWeight="bold">{value}</Typography>
+                </Box>
+            </Box>
+        );
+
+        return (
+            <>
+                <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto' }}>
+                    <Table size="small" stickyHeader sx={{
+                        '& .MuiTableCell-root': {
+                            fontSize: { xs: '0.7rem', sm: '0.8rem' },
+                            px: { xs: 0.3, sm: 0.8 }, whiteSpace: 'nowrap', py: 0.3,
+                        },
+                        '& .MuiTableCell-head': {
+                            backgroundColor: 'background.paper',
+                        },
+                    }}>
+                        <TableHead>
+                            {/* 第一级表头：大分组 */}
+                            <TableRow>
+                                <TableCell rowSpan={2} sx={{ ...headerGroupSx, position: 'sticky', left: 0, zIndex: 3, backgroundColor: 'background.paper' }}>
+                                    时段
+                                </TableCell>
+                                <TableCell colSpan={3} sx={{ ...headerGroupSx, color: '#1565c0', borderBottomColor: '#1565c0', bgcolor: '#f0f7ff', display: { xs: 'none', lg: 'table-cell' } }}>
+                                    中长期合约电费
+                                </TableCell>
+                                <TableCell colSpan={3} sx={{ ...headerGroupSx, color: '#ef6c00', borderBottomColor: '#ef6c00', bgcolor: '#fff9f0', display: { xs: 'none', lg: 'table-cell' } }}>
+                                    日前市场偏差
+                                </TableCell>
+                                <TableCell colSpan={3} sx={{ ...headerGroupSx, color: '#2e7d32', borderBottomColor: '#2e7d32', bgcolor: '#f5fff5', display: { xs: 'none', md: 'table-cell' } }}>
+                                    实时市场偏差
+                                </TableCell>
+                                <TableCell colSpan={2} sx={{ ...headerGroupSx, color: '#c62828', borderBottomColor: '#c62828', bgcolor: '#fff5f5' }}>
+                                    电能量
+                                </TableCell>
+                                <TableCell colSpan={4} sx={{ ...headerGroupSx, color: '#6a1b9a', borderBottomColor: '#6a1b9a', bgcolor: '#fdf5ff', display: { xs: 'none', md: 'table-cell' } }}>
+                                    标准值
+                                </TableCell>
+                            </TableRow>
+                            {/* 第二级表头：子列 */}
+                            <TableRow>
+                                {/* 中长期 */}
+                                <TableCell align="right" sx={{ fontWeight: 500, color: '#1565c0', bgcolor: '#f0f7ff', display: { xs: 'none', lg: 'table-cell' } }}>合同电量<br /><Box component="span" sx={{ fontSize: '0.6rem', opacity: 0.75 }}>①</Box></TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 500, color: '#1565c0', bgcolor: '#f0f7ff', display: { xs: 'none', lg: 'table-cell' } }}>合同均价<br /><Box component="span" sx={{ fontSize: '0.6rem', opacity: 0.75 }}>②</Box></TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 500, color: '#1565c0', bgcolor: '#f0f7ff', display: { xs: 'none', lg: 'table-cell' } }}>差价电费<br /><Box component="span" sx={{ fontSize: '0.6rem', opacity: 0.75 }}>③=①×(②-⑤)</Box></TableCell>
+                                {/* 日前 */}
+                                <TableCell align="right" sx={{ fontWeight: 500, color: '#ef6c00', bgcolor: '#fff9f0', display: { xs: 'none', lg: 'table-cell' } }}>出清电量<br /><Box component="span" sx={{ fontSize: '0.6rem', opacity: 0.75 }}>④</Box></TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 500, color: '#ef6c00', bgcolor: '#fff9f0', display: { xs: 'none', lg: 'table-cell' } }}>市场均价<br /><Box component="span" sx={{ fontSize: '0.6rem', opacity: 0.75 }}>⑤</Box></TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 500, color: '#ef6c00', bgcolor: '#fff9f0', display: { xs: 'none', lg: 'table-cell' } }}>差价电费<br /><Box component="span" sx={{ fontSize: '0.6rem', opacity: 0.75 }}>⑥=④×(⑤-⑧)</Box></TableCell>
+                                {/* 实时 */}
+                                <TableCell align="right" sx={{ fontWeight: 500, color: '#2e7d32', bgcolor: '#f5fff5', display: { xs: 'none', md: 'table-cell' } }}>实际用量<br /><Box component="span" sx={{ fontSize: '0.6rem', opacity: 0.75 }}>⑦</Box></TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 500, color: '#2e7d32', bgcolor: '#f5fff5', display: { xs: 'none', lg: 'table-cell' } }}>市场均价<br /><Box component="span" sx={{ fontSize: '0.6rem', opacity: 0.75 }}>⑧</Box></TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 500, color: '#2e7d32', bgcolor: '#f5fff5', display: { xs: 'none', md: 'table-cell' } }}>全量电费<br /><Box component="span" sx={{ fontSize: '0.6rem', opacity: 0.75 }}>⑨=⑦×⑧</Box></TableCell>
+                                {/* 电能量 */}
+                                <TableCell align="right" sx={{ fontWeight: 500, color: '#c62828', bgcolor: '#fff5f5' }}>
+                                    电费合计<br /><Box component="span" sx={{ fontSize: '0.6rem', opacity: 0.75 }}>⑩=③+⑥+⑨</Box>
+                                </TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 500, color: '#c62828', bgcolor: '#fff5f5' }}>
+                                    结算均价<br /><Box component="span" sx={{ fontSize: '0.6rem', opacity: 0.75 }}>⑪=⑩÷⑦</Box>
+                                </TableCell>
+                                {/* 标准值 */}
+                                <TableCell align="right" sx={{ fontWeight: 500, color: '#6a1b9a', bgcolor: '#fdf5ff', display: { xs: 'none', md: 'table-cell' } }}>
+                                    机制电量<br /><Box component="span" sx={{ fontSize: '0.6rem', opacity: 0.75 }}>⑫</Box>
+                                </TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 500, color: '#6a1b9a', bgcolor: '#fdf5ff', display: { xs: 'none', md: 'table-cell' } }}>
+                                    签约比例<br /><Box component="span" sx={{ fontSize: '0.6rem', opacity: 0.75 }}>⑬=(①+⑫)÷⑦</Box>
+                                </TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 500, color: '#6a1b9a', bgcolor: '#fdf5ff', display: { xs: 'none', md: 'table-cell' } }}>
+                                    电费合计<br /><Box component="span" sx={{ fontSize: '0.6rem', opacity: 0.75 }}>⑭</Box>
+                                </TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 500, color: '#6a1b9a', bgcolor: '#fdf5ff', display: { xs: 'none', md: 'table-cell' } }}>
+                                    结算均价<br /><Box component="span" sx={{ fontSize: '0.6rem', opacity: 0.75 }}>⑮=⑭÷⑦</Box>
+                                </TableCell>
+                            </TableRow>
+                        </TableHead>
+                        <TableBody>
+                            {data.wholesale_period_details.map((p: any) => {
+                                const cVol = p.contract?.volume ?? 0;
+                                const cPrice = p.contract?.price ?? 0;
+                                const cFee = p.contract?.fee ?? 0;
+
+                                const daVol = p.day_ahead?.volume ?? 0;
+                                const daPrice = p.day_ahead?.price ?? 0;
+                                const daFee = p.day_ahead?.fee ?? 0;
+
+                                const rtVol = p.real_time?.volume ?? 0;
+                                const rtPrice = p.real_time?.price ?? 0;
+                                const rtFee = p.real_time?.fee ?? 0;
+
+                                const totalFee = p.total_energy_fee ?? 0;
+                                const avgPrice = p.energy_avg_price ?? 0;
+                                const ratio = p.contract_ratio ?? 0;
+                                const mechanismVol = p.mechanism_volume ?? 0;
+                                const stdCost = p.standard_value_cost ?? 0;
+                                const stdAvgPrice = rtVol > 0 ? (stdCost / rtVol) : 0;
+
+                                return (
+                                    <TableRow
+                                        key={p.period}
+                                        hover
+                                        sx={{ cursor: 'pointer' }}
+                                        onClick={() => isMobile && setSelectedWholesaleRow(p)}
+                                    >
+                                        <TableCell sx={{ position: 'sticky', left: 0, backgroundColor: 'background.paper', zIndex: 1, fontWeight: 500 }}>
+                                            {p.period}
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ bgcolor: '#f0f7ff', display: { xs: 'none', lg: 'table-cell' } }}>{cVol.toFixed(3)}</TableCell>
+                                        <TableCell align="right" sx={{ bgcolor: '#f0f7ff', display: { xs: 'none', lg: 'table-cell' } }}>{cPrice.toFixed(2)}</TableCell>
+                                        <TableCell align="right" sx={{ bgcolor: '#f0f7ff', display: { xs: 'none', lg: 'table-cell' } }}>{cFee.toFixed(2)}</TableCell>
+                                        <TableCell align="right" sx={{ bgcolor: '#fff9f0', display: { xs: 'none', lg: 'table-cell' } }}>{daVol.toFixed(3)}</TableCell>
+                                        <TableCell align="right" sx={{ bgcolor: '#fff9f0', display: { xs: 'none', lg: 'table-cell' } }}>{daPrice.toFixed(2)}</TableCell>
+                                        <TableCell align="right" sx={{ bgcolor: '#fff9f0', display: { xs: 'none', lg: 'table-cell' } }}>{daFee.toFixed(2)}</TableCell>
+                                        <TableCell align="right" sx={{ bgcolor: '#f5fff5', display: { xs: 'none', md: 'table-cell' } }}>{rtVol.toFixed(3)}</TableCell>
+                                        <TableCell align="right" sx={{ bgcolor: '#f5fff5', display: { xs: 'none', lg: 'table-cell' } }}>{rtPrice.toFixed(2)}</TableCell>
+                                        <TableCell align="right" sx={{ bgcolor: '#f5fff5', display: { xs: 'none', md: 'table-cell' } }}>{rtFee.toFixed(2)}</TableCell>
+                                        <TableCell align="right" sx={{ bgcolor: '#fff5f5', fontWeight: 'bold' }}>{totalFee.toFixed(2)}</TableCell>
+                                        <TableCell align="right" sx={{ bgcolor: '#fff5f5', fontWeight: 'bold' }}>{avgPrice.toFixed(2)}</TableCell>
+                                        <TableCell align="right" sx={{ bgcolor: '#fdf5ff', display: { xs: 'none', md: 'table-cell' } }}>{mechanismVol.toFixed(3)}</TableCell>
+                                        <TableCell align="right" sx={{ bgcolor: '#fdf5ff', display: { xs: 'none', md: 'table-cell' } }}>{ratio.toFixed(2)}%</TableCell>
+                                        <TableCell align="right" sx={{ bgcolor: '#fdf5ff', display: { xs: 'none', md: 'table-cell' } }}>{stdCost.toFixed(2)}</TableCell>
+                                        <TableCell align="right" sx={{ bgcolor: '#fdf5ff', display: { xs: 'none', md: 'table-cell' } }}>{stdAvgPrice.toFixed(2)}</TableCell>
+                                    </TableRow>
+                                );
+                            })}
+                            {/* 合计行 */}
+                            {(() => {
+                                const maxFee = Math.max(totals.totalFee, totals.stdCost);
+                                const settlementAvgPrice = totals.rtVol > 0 ? (totals.totalFee / totals.rtVol) : 0;
+                                const feeIsMax = totals.totalFee >= totals.stdCost;
+                                const stdIsMax = totals.stdCost >= totals.totalFee;
+                                const stdAvgPrice = totals.rtVol > 0 ? (totals.stdCost / totals.rtVol) : 0;
+                                return (
+                                    <TableRow
+                                        sx={{
+                                            backgroundColor: '#eeeeee',
+                                            '& .MuiTableCell-root': { fontWeight: 'bold' },
+                                            cursor: 'pointer'
+                                        }}
+                                        onClick={() => isMobile && setSelectedWholesaleRow({
+                                            period: '合计',
+                                            contract: { volume: totals.contractVol, price: 0, fee: totals.contractFee },
+                                            day_ahead: { volume: totals.daVol, price: 0, fee: totals.daFee },
+                                            real_time: { volume: totals.rtVol, price: 0, fee: totals.rtFee },
+                                            total_energy_fee: totals.totalFee,
+                                            energy_avg_price: settlementAvgPrice,
+                                            mechanism_volume: totals.mechanismVol,
+                                            contract_ratio: totals.rtVol > 0 ? (((totals.contractVol + totals.mechanismVol) / totals.rtVol) * 100) : 0,
+                                            standard_value_cost: totals.stdCost
+                                        })}
+                                    >
+                                        <TableCell sx={{ position: 'sticky', left: 0, backgroundColor: '#eeeeee', zIndex: 1 }}>合计</TableCell>
+                                        <TableCell align="right" sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{totals.contractVol.toFixed(3)}</TableCell>
+                                        <TableCell align="right" sx={{ display: { xs: 'none', lg: 'table-cell' } }}>-</TableCell>
+                                        <TableCell align="right" sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{totals.contractFee.toFixed(2)}</TableCell>
+                                        <TableCell align="right" sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{totals.daVol.toFixed(3)}</TableCell>
+                                        <TableCell align="right" sx={{ display: { xs: 'none', lg: 'table-cell' } }}>-</TableCell>
+                                        <TableCell align="right" sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{totals.daFee.toFixed(2)}</TableCell>
+                                        <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' } }}>{totals.rtVol.toFixed(3)}</TableCell>
+                                        <TableCell align="right" sx={{ display: { xs: 'none', lg: 'table-cell' } }}>-</TableCell>
+                                        <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' } }}>{totals.rtFee.toFixed(2)}</TableCell>
+                                        <TableCell align="right" sx={{ color: feeIsMax ? '#c62828' : undefined }}>{totals.totalFee.toFixed(2)}</TableCell>
+                                        <TableCell align="right" sx={{ color: feeIsMax ? '#c62828' : undefined }}>{settlementAvgPrice.toFixed(2)}</TableCell>
+                                        <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' } }}>{totals.mechanismVol.toFixed(3)}</TableCell>
+                                        <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' } }}>{totals.rtVol > 0 ? (((totals.contractVol + totals.mechanismVol) / totals.rtVol) * 100).toFixed(1) : '0.0'}%</TableCell>
+                                        <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' }, color: stdIsMax ? '#c62828' : undefined }}>{totals.stdCost.toFixed(2)}</TableCell>
+                                        <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' }, color: stdIsMax ? '#c62828' : undefined }}>{stdAvgPrice.toFixed(2)}</TableCell>
+                                    </TableRow>
+                                );
+                            })()}
+                        </TableBody>
+                    </Table>
+                </TableContainer>
+
+                <Box sx={{ mt: 1, p: { xs: 1, sm: 1.5 }, backgroundColor: '#fdfdfd', border: '1px solid #eeeeee', borderRadius: 1 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.5 }}>
+                        备注：合计栏中，当“标准值”电费⑭大于“电能量”电费⑩时，标准值电费⑭及均价⑮标红，表示最终采用该组数据；
+                        若“电能量”电费⑩更高，则电能量电费⑩和均价⑪标红，表示采用电能量这组数据。
+                        {isMobile && " (提示：点击表格行可查看全量明细及推导公式)"}
+                    </Typography>
+                </Box>
+
+                <Drawer
+                    anchor="bottom"
+                    open={!!selectedWholesaleRow}
+                    onClose={() => setSelectedWholesaleRow(null)}
+                    PaperProps={{
+                        sx: {
+                            borderTopLeftRadius: 16,
+                            borderTopRightRadius: 16,
+                            maxHeight: '85vh',
+                            p: 2
+                        }
+                    }}
+                >
+                    {selectedWholesaleRow && (
+                        <Box>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                                <Typography variant="h6">时段 {selectedWholesaleRow.period} 结算详情</Typography>
+                                <IconButton onClick={() => setSelectedWholesaleRow(null)} size="small">
+                                    <CloseIcon />
+                                </IconButton>
+                            </Box>
+
+                            <Divider sx={{ mb: 2 }} />
+
+                            <Grid container spacing={2}>
+                                <Grid size={{ xs: 12 }}>
+                                    <Typography variant="subtitle2" color="primary" sx={{ mb: 1, fontWeight: 'bold' }}>中长期合约 (Section 1)</Typography>
+                                    {renderDetailItem("合同电量", (selectedWholesaleRow.contract?.volume ?? 0).toFixed(3), "①")}
+                                    {renderDetailItem("合同均价", (selectedWholesaleRow.contract?.price ?? 0).toFixed(2), "②")}
+                                    {renderDetailItem("差价电费", (selectedWholesaleRow.contract?.fee ?? 0).toFixed(2), "③ = ① × (② - ⑤)")}
+                                </Grid>
+
+                                <Grid size={{ xs: 12 }}>
+                                    <Divider sx={{ my: 1 }} />
+                                    <Typography variant="subtitle2" color="warning.main" sx={{ mb: 1, fontWeight: 'bold' }}>日前市场 (Section 2)</Typography>
+                                    {renderDetailItem("出清电量", (selectedWholesaleRow.day_ahead?.volume ?? 0).toFixed(3), "④")}
+                                    {renderDetailItem("市场均价", (selectedWholesaleRow.day_ahead?.price ?? 0).toFixed(2), "⑤")}
+                                    {renderDetailItem("差价电费", (selectedWholesaleRow.day_ahead?.fee ?? 0).toFixed(2), "⑥ = ④ × (⑤ - ⑧)")}
+                                </Grid>
+
+                                <Grid size={{ xs: 12 }}>
+                                    <Divider sx={{ my: 1 }} />
+                                    <Typography variant="subtitle2" color="success.main" sx={{ mb: 1, fontWeight: 'bold' }}>实时市场 (Section 3)</Typography>
+                                    {renderDetailItem("实际用量", (selectedWholesaleRow.real_time?.volume ?? 0).toFixed(3), "⑦")}
+                                    {renderDetailItem("市场均价", (selectedWholesaleRow.real_time?.price ?? 0).toFixed(2), "⑧")}
+                                    {renderDetailItem("全量电费", (selectedWholesaleRow.real_time?.fee ?? 0).toFixed(2), "⑨ = ⑦ × ⑧")}
+                                </Grid>
+
+                                <Grid size={{ xs: 12 }}>
+                                    <Divider sx={{ my: 1 }} />
+                                    <Typography variant="subtitle2" color="error.main" sx={{ mb: 1, fontWeight: 'bold' }}>电能量汇总</Typography>
+                                    {renderDetailItem("电费合计", (selectedWholesaleRow.total_energy_fee ?? 0).toFixed(2), "⑩ = ③ + ⑥ + ⑨")}
+                                    {renderDetailItem("结算均价", (selectedWholesaleRow.energy_avg_price ?? 0).toFixed(2), "⑪ = ⑩ ÷ ⑦")}
+                                </Grid>
+
+                                <Grid size={{ xs: 12 }}>
+                                    <Divider sx={{ my: 1 }} />
+                                    <Typography variant="subtitle2" color="secondary.main" sx={{ mb: 1, fontWeight: 'bold' }}>标准值对照</Typography>
+                                    {renderDetailItem("机制电量", (selectedWholesaleRow.mechanism_volume ?? 0).toFixed(3), "⑫")}
+                                    {renderDetailItem("签约比例", (selectedWholesaleRow.contract_ratio ?? 0).toFixed(2) + "%", "⑬ = (① + ⑫) ÷ ⑦")}
+                                    {renderDetailItem("电费合计", (selectedWholesaleRow.standard_value_cost ?? 0).toFixed(2), "⑭")}
+                                    {renderDetailItem("结算均价", (selectedWholesaleRow.real_time?.volume > 0 ? (selectedWholesaleRow.standard_value_cost / selectedWholesaleRow.real_time.volume) : 0).toFixed(2), "⑮ = ⑭ ÷ ⑦")}
+                                </Grid>
+                            </Grid>
+
+                            <Box sx={{ mt: 3, mb: 1 }}>
+                                <Button
+                                    fullWidth
+                                    variant="contained"
+                                    onClick={() => setSelectedWholesaleRow(null)}
+                                    sx={{ py: 1.2, borderRadius: 2 }}
+                                >
+                                    关闭
+                                </Button>
+                            </Box>
+                        </Box>
+                    )}
+                </Drawer>
+            </>
+        );
+    };
+
+    const renderCustomerTable = () => {
+        if (!data || !data.customer_list) return null;
+        return (
+            <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto' }}>
+                <Table size="small" sx={{
+                    '& .MuiTableCell-root': {
+                        fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                        px: { xs: 0.5, sm: 1.5 }, whiteSpace: 'nowrap',
+                    },
+                }}>
+                    <TableHead>
+                        <TableRow sx={{ backgroundColor: 'action.hover' }}>
+                            <TableCell>客户名称</TableCell>
+                            <TableCell>套餐名称</TableCell>
+                            <TableCell align="right">名义均价</TableCell>
+                            <TableCell align="right">封顶均价</TableCell>
+                            <TableCell align="right">结算均价</TableCell>
+                            <TableCell align="right">日电量(MWh)</TableCell>
+                            <TableCell align="right">分摊成本(元)</TableCell>
+                            <TableCell align="right">当日利润(元)</TableCell>
+                            <TableCell align="center">操作</TableCell>
+                        </TableRow>
+                    </TableHead>
+                    <TableBody>
+                        {data.customer_list.map((c: any) => {
+                            const profit = c.daily_profit || 0;
+                            // 价格后端已转换为 元/MWh 显示
+                            const nominalP = c.nominal_avg_price || 0;
+                            const capP = c.cap_price || 0;
+                            const settledP = c.capped_avg_price || 0;
+
+                            return (
+                                <TableRow key={c.customer_id} hover>
+                                    <TableCell sx={{ fontWeight: '500' }}>{c.customer_name}</TableCell>
+                                    <TableCell>{c.package_name || c.pricing_model || '-'}</TableCell>
+                                    <TableCell align="right">{nominalP.toFixed(2)}</TableCell>
+                                    <TableCell align="right">{capP.toFixed(2)}</TableCell>
+                                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>{settledP.toFixed(2)}</TableCell>
+                                    <TableCell align="right">{c.daily_load.toFixed(3)}</TableCell>
+                                    <TableCell align="right">{formatYuan(c.allocated_cost)}</TableCell>
+                                    <TableCell align="right" sx={{ color: profitColor(profit), fontWeight: 'bold' }}>
+                                        {formatYuan(profit)}
+                                    </TableCell>
+                                    <TableCell align="center">
+                                        <Button size="small" variant="text" onClick={() => jumpToCustomerDetail(c.customer_id)}>
+                                            查看明细
+                                        </Button>
+                                    </TableCell>
+                                </TableRow>
+                            );
+                        })}
+                    </TableBody>
+                </Table>
+            </TableContainer>
+        );
+    };
+
+    const [customerLoading, setCustomerLoading] = useState(false);
+    const [customerData, setCustomerData] = useState<any>(null);
+
+    const fetchCustomerDetail = async () => {
+        const customerId = searchParams.get('customer_id');
+        if (!customerId || !selectedDate) return;
+        setCustomerLoading(true);
+        try {
+            const res = await apiClient.get('/api/v1/settlement/customer-detail', {
+                params: { date: dateStr, version, customer_id: customerId }
+            });
+            if (res.data.code === 200) {
+                setCustomerData(res.data.data);
+            }
+        } catch (err) {
+            console.error('Fetch customer detail failed', err);
+        } finally {
+            setCustomerLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (activeTabIdx === 2) {
+            fetchCustomerDetail();
+        }
+    }, [activeTabIdx, searchParams.get('customer_id'), dateStr, version]);
+
+    const renderCustomerDetailTab = () => {
+        if (customerLoading) return <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}><CircularProgress /></Box>;
+        if (!customerData) return <Alert severity="info">请从“客户结算列表”中选择一个客户查看详情</Alert>;
+
+        return (
+            <Box>
+                <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: 'action.hover' }}>
+                    <Grid container spacing={2}>
+                        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                            <Typography variant="caption" color="text.secondary">客户名称</Typography>
+                            <Typography variant="subtitle1" fontWeight="bold">{customerData.customer_name}</Typography>
+                        </Grid>
+                        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                            <Typography variant="caption" color="text.secondary">定价模式</Typography>
+                            <Typography variant="subtitle1">{customerData.pricing_model}</Typography>
+                        </Grid>
+                        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                            <Typography variant="caption" color="text.secondary">当日均价</Typography>
+                            <Typography variant="subtitle1" fontWeight="bold">{customerData.avg_price.toFixed(2)} 元/MWh</Typography>
+                        </Grid>
+                        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                            <Typography variant="caption" color="text.secondary">当日收益</Typography>
+                            <Typography variant="subtitle1" fontWeight="bold" sx={{ color: profitColor(customerData.daily_profit) }}>
+                                {formatYuan(customerData.daily_profit)} 元
+                            </Typography>
+                        </Grid>
+                    </Grid>
+                </Paper>
+
+                <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto' }}>
+                    <Table size="small" stickyHeader sx={{
+                        '& .MuiTableCell-root': { fontSize: '0.8rem', px: 1, whiteSpace: 'nowrap' }
+                    }}>
+                        <TableHead>
+                            <TableRow sx={{ bgcolor: 'action.hover' }}>
+                                <TableCell>时段</TableCell>
+                                <TableCell align="right">负荷(MWh)</TableCell>
+                                <TableCell align="right">名义价</TableCell>
+                                <TableCell align="right">封顶价</TableCell>
+                                <TableCell align="right">结算价</TableCell>
+                                <TableCell align="right">时段电费</TableCell>
+                            </TableRow>
+                        </TableHead>
+                        <TableBody>
+                            {customerData.period_details.map((p: any) => {
+                                const load = p.load_mwh || 0;
+                                const settlePrice = p.unit_price || 0; // 后端已转换为 元/MWh
+                                const fee = p.fee || 0;
+
+                                return (
+                                    <TableRow key={p.period} hover>
+                                        <TableCell>{p.period}</TableCell>
+                                        <TableCell align="right">{load.toFixed(4)}</TableCell>
+                                        <TableCell align="right">{(customerData.nominal_avg_price || 0).toFixed(2)}</TableCell>
+                                        <TableCell align="right">{(customerData.cap_price || 0).toFixed(2)}</TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>{settlePrice.toFixed(2)}</TableCell>
+                                        <TableCell align="right">{formatYuan(fee)}</TableCell>
+                                    </TableRow>
+                                );
+                            })}
+                        </TableBody>
+                    </Table>
+                </TableContainer>
+            </Box>
+        );
+    };
+
+    return (
+        <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
+            <Box sx={{ width: '100%', pb: 4 }}>
+                {isTablet && (
+                    <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold' }}>
+                        结算管理 / 预结算详情
+                    </Typography>
+                )}
+
+                {/* 顶部控制面板 */}
+                <Paper variant="outlined" sx={{ p: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <IconButton onClick={() => handleShiftDate(-1)} disabled={loading}>
+                        <ArrowLeftIcon />
+                    </IconButton>
+                    <DatePicker
+                        label="选择日期"
+                        value={selectedDate}
+                        onChange={(date) => handleDateChange(date)}
+                        disabled={loading}
+                        slotProps={{ textField: { sx: { width: { xs: '150px', sm: '200px' } } } }}
+                    />
+                    <IconButton onClick={() => handleShiftDate(1)} disabled={loading}>
+                        <ArrowRightIcon />
+                    </IconButton>
+
+                    <Box sx={{ flexGrow: 1 }} />
+                    <FormControl size="small" sx={{ minWidth: 150 }}>
+                        <InputLabel>版本</InputLabel>
+                        <Select value={version} label="版本" onChange={handleVersionChange} disabled={loading}>
+                            {VERSION_OPTIONS.map(opt => (
+                                <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
+                    <Button
+                        variant="contained"
+                        startIcon={<RefreshIcon />}
+                        onClick={handleReSettle}
+                        disabled={loading}
+                        color="primary"
+                    >
+                        重新结算
+                    </Button>
+                </Paper>
+
+                {loading && !data ? (
+                    <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+                        <CircularProgress />
+                    </Box>
+                ) : error ? (
+                    <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>
+                ) : data ? (
+                    <Box sx={{ position: 'relative' }}>
+                        {loading && (
+                            <Box sx={{
+                                position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                backgroundColor: 'rgba(255, 255, 255, 0.7)', zIndex: 1000,
+                            }}>
+                                <CircularProgress />
+                            </Box>
+                        )}
+                        {renderSummaryCards()}
+
+                        {/* 主页签切换：批发 vs 零售 */}
+                        <Box sx={{ borderBottom: 1, borderColor: 'divider', mt: 3 }}>
+                            <Tabs
+                                value={activeTabIdx === 2 ? 1 : activeTabIdx} // 单客户详情归属于零售侧
+                                onChange={(_, val) => setActiveTabIdx(val)}
+                            >
+                                <Tab label="批发侧结算分析" />
+                                <Tab label="零售侧结算分析" />
+                            </Tabs>
+                        </Box>
+
+                        {/* 批发侧内容 */}
+                        {activeTabIdx === 0 && (
+                            <Box sx={{ mt: 2 }}>
+                                <Paper variant="outlined" sx={{ p: { xs: 1, sm: 1.5 } }}>
+                                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ px: 1, pt: 0.5 }}>批发侧盈亏归因分析</Typography>
+                                    <Box sx={{ height: { xs: 300, sm: 360 } }}>
+                                        {renderWholesaleChart()}
+                                    </Box>
+                                </Paper>
+
+                                <Paper variant="outlined" sx={{ mt: 2, p: { xs: 1, sm: 2 } }}>
+                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, px: 1, pt: 1 }}>
+                                        <Typography variant="subtitle1" fontWeight="bold" gutterBottom>时段结算平衡表</Typography>
+                                        <Button
+                                            variant="outlined"
+                                            size="small"
+                                            startIcon={exporting ? <CircularProgress size={16} /> : <FileDownloadIcon />}
+                                            onClick={handleExportExcel}
+                                            disabled={loading || exporting || !data}
+                                        >
+                                            {exporting ? '导出中...' : '导出 Excel'}
+                                        </Button>
+                                    </Box>
+                                    {renderWholesaleTable()}
+                                </Paper>
+                            </Box>
+                        )}
+
+                        {/* 零售侧内容 */}
+                        {(activeTabIdx === 1 || activeTabIdx === 2) && (
+                            <Box sx={{ mt: 2 }}>
+                                {activeTabIdx === 2 && searchParams.get('customer_id') ? (
+                                    <Box>
+                                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                                            <Button
+                                                variant="outlined"
+                                                size="small"
+                                                onClick={() => {
+                                                    setActiveTabIdx(1);
+                                                    const nextParams = new URLSearchParams(searchParams);
+                                                    nextParams.delete('customer_id');
+                                                    setSearchParams(nextParams, { replace: true });
+                                                }}
+                                                sx={{ mr: 2 }}
+                                            >
+                                                返回列表
+                                            </Button>
+                                            <Typography variant="h6">单客户结算明细</Typography>
+                                        </Box>
+                                        {renderCustomerDetailTab()}
+                                    </Box>
+                                ) : (
+                                    <Grid container spacing={2}>
+                                        <Grid size={{ xs: 12, lg: 5 }}>
+                                            <Paper variant="outlined" sx={{ p: 2, height: '100%', minHeight: 450 }}>
+                                                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>客户收益矩阵 (盈亏 vs 电量)</Typography>
+                                                <Box sx={{ height: { xs: 350, lg: 400 } }}>
+                                                    {renderCustomerProfitChart()}
+                                                </Box>
+                                            </Paper>
+                                        </Grid>
+                                        <Grid size={{ xs: 12, lg: 7 }}>
+                                            <Paper variant="outlined" sx={{ p: 2 }}>
+                                                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>客户结算明细列表</Typography>
+                                                {renderCustomerTable()}
+                                            </Paper>
+                                        </Grid>
+                                    </Grid>
+                                )}
+                            </Box>
+                        )}
+                    </Box>
+                ) : null}
+            </Box>
+        </LocalizationProvider >
+    );
+};
+
+export default PreSettlementDetailPage;
+

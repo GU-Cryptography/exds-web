@@ -25,6 +25,10 @@ import {
 import apiClient from '../api/client';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
 import { useSelectableSeries } from '../hooks/useSelectableSeries';
+import { useNavigate } from 'react-router-dom';
+import { useTabContext } from '../contexts/TabContext';
+import PreSettlementDetailPage from './PreSettlementDetailPage';
+import Link from '@mui/material/Link';
 
 // ====== 类型定义 ======
 interface DailyDetail {
@@ -171,6 +175,8 @@ const PreSettlementOverviewPage: React.FC = () => {
 
     const leftChartRef = useRef<HTMLDivElement>(null);
     const rightChartRef = useRef<HTMLDivElement>(null);
+    const navigate = useNavigate();
+    const tabContext = useTabContext();
 
     const monthStr = selectedMonth ? format(selectedMonth, 'yyyy-MM') : '';
 
@@ -273,6 +279,20 @@ const PreSettlementOverviewPage: React.FC = () => {
             setLoading(false);
         }
     }, [selectedMonth, version]);
+
+    const navigateToDetail = (date: string) => {
+        const path = `/settlement/pre-settlement-detail?date=${date}&version=${version}`;
+        if (isMobile) {
+            navigate(path);
+        } else if (tabContext) {
+            tabContext.addTab({
+                key: path, // Use full path with params as key for unique tabs per date/version
+                title: `结算明细 ${date}`,
+                path: path,
+                component: <PreSettlementDetailPage initialDate={date} initialVersion={version} />,
+            });
+        }
+    };
 
     useEffect(() => {
         fetchMetadataAndInit();
@@ -476,7 +496,14 @@ const PreSettlementOverviewPage: React.FC = () => {
                         <Card key={d.date} variant="outlined" sx={{ mb: 1.5, borderRadius: 2 }}>
                             <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
                                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1, borderBottom: '1px solid', borderColor: 'divider', pb: 0.5 }}>
-                                    <Typography variant="subtitle2" fontWeight="bold">{d.date}</Typography>
+                                    <Link
+                                        component="button"
+                                        variant="subtitle2"
+                                        onClick={() => navigateToDetail(d.date)}
+                                        sx={{ fontWeight: 'bold', textAlign: 'left', textDecoration: 'none' }}
+                                    >
+                                        {d.date}
+                                    </Link>
                                     <Typography variant="body2" sx={{ color: hasRowData ? profitColor(d.daily_profit) : 'text.disabled', fontWeight: 'bold' }}>
                                         {hasRowData ? `利: ${formatYuan(d.daily_profit)}` : '-'}
                                     </Typography>
@@ -577,7 +604,15 @@ const PreSettlementOverviewPage: React.FC = () => {
                             const hasRowData = d.volume_mwh > 0 || d.wholesale_cost > 0;
                             return (
                                 <TableRow key={d.date} hover>
-                                    <TableCell>{d.date.substring(5)}</TableCell>
+                                    <TableCell>
+                                        <Link
+                                            component="button"
+                                            onClick={() => navigateToDetail(d.date)}
+                                            sx={{ cursor: 'pointer', textDecoration: 'none' }}
+                                        >
+                                            {d.date.substring(5)}
+                                        </Link>
+                                    </TableCell>
                                     <TableCell align="right">{hasRowData ? d.volume_mwh.toFixed(1) : '-'}</TableCell>
                                     <TableCell align="right">{hasRowData ? formatYuan(d.wholesale_cost) : '-'}</TableCell>
                                     <TableCell align="right">{hasRowData ? formatYuan(d.deviation_recovery_fee) : '-'}</TableCell>
