@@ -185,20 +185,29 @@ async def get_settlement_overview(
         max_customer_count = 0
 
         for d in all_dates:
+            w_exists = d in wholesale_by_date
             w = wholesale_by_date.get(d, {"volume_mwh": 0, "wholesale_cost": 0, "deviation_recovery_fee": 0, "wholesale_avg_price": 0})
             r = retail_by_date.get(d, {"retail_revenue": 0, "retail_load": 0, "customer_count": 0})
 
             retail_avg_price = round(r["retail_revenue"] / r["retail_load"], 3) if r["retail_load"] > 0 else 0
-            price_spread = round(retail_avg_price - w["wholesale_avg_price"], 3)
-            daily_profit = round(r["retail_revenue"] - w["wholesale_cost"], 2)
-            cumulative_profit = round(cumulative_profit + daily_profit, 2)
+            
+            # 核心改进：仅在批发侧数据（对应版本）存在时，才计入汇总指标，以保证结算口径一致
+            if w_exists:
+                price_spread = round(retail_avg_price - w["wholesale_avg_price"], 3)
+                daily_profit = round(r["retail_revenue"] - w["wholesale_cost"], 2)
+                cumulative_profit = round(cumulative_profit + daily_profit, 2)
 
-            total_wholesale_cost += w["wholesale_cost"]
-            total_retail_revenue += r["retail_revenue"]
-            total_volume += w["volume_mwh"]
-            total_deviation_recovery += w["deviation_recovery_fee"]
-            total_retail_load += r["retail_load"]
-            max_customer_count = max(max_customer_count, r["customer_count"])
+                total_wholesale_cost += w["wholesale_cost"]
+                total_retail_revenue += r["retail_revenue"]
+                total_volume += w["volume_mwh"]
+                total_deviation_recovery += w["deviation_recovery_fee"]
+                total_retail_load += r["retail_load"]
+                max_customer_count = max(max_customer_count, r["customer_count"])
+            else:
+                # 缺失批发侧版本数据时，不参与汇总，明细中也不计入当日盈亏
+                price_spread = 0
+                daily_profit = 0
+                # cumulative_profit 保持上一日值
 
             daily_details.append({
                 "date": d,
@@ -211,6 +220,7 @@ async def get_settlement_overview(
                 "price_spread": price_spread,
                 "daily_profit": daily_profit,
                 "cumulative_profit": cumulative_profit,
+                "data_status": "complete" if w_exists else "wholesale_missing"
             })
 
         # ====== 汇总 ======
