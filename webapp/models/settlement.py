@@ -100,6 +100,7 @@ class SettlementDaily(BaseMongoModel):
     data_source: Optional[str] = Field("Raw", description="数据来源说明")
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
+    is_new_calculation: bool = Field(False, exclude=True, description="内部标记：是否为本次全量计算产生")
     
     # C. 日汇总数据 (由 Period Details 聚合)
     # 中长期

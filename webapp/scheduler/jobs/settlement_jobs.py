@@ -33,28 +33,51 @@ async def event_driven_settlement_job():
         # 获取已结算的最新日期 (综合考虑所有版本，取进度最慢的作为补完起点)
         latest_prelim_date = await settlement_service.get_latest_results_date(SettlementVersion.PRELIMINARY)
         latest_platform_date = await settlement_service.get_latest_results_date(SettlementVersion.PLATFORM_DAILY)
+        latest_retail_date = await retail_service.get_latest_results_date()
         
-        # 解析日期并取最小值
+        # 解析日期并确定各版本的“下一个待处理日期”
         dates_to_compare = []
-        if latest_prelim_date: dates_to_compare.append(datetime.strptime(latest_prelim_date, "%Y-%m-%d"))
-        if latest_platform_date: dates_to_compare.append(datetime.strptime(latest_platform_date, "%Y-%m-%d"))
+        
+        # 批发-初步结算
+        if latest_prelim_date:
+            dates_to_compare.append(datetime.strptime(latest_prelim_date, "%Y-%m-%d") + timedelta(days=1))
+        
+        # 批发-平台日报
+        if latest_platform_date:
+            dates_to_compare.append(datetime.strptime(latest_platform_date, "%Y-%m-%d") + timedelta(days=1))
+        
+        # 零售结算 (包含完成度精密判定)
+        if latest_retail_date:
+            expected_customers = retail_service.contract_service.get_active_customers(latest_retail_date, latest_retail_date)
+            expected_count = len(expected_customers)
+            actual_count = await retail_service.get_settled_count(latest_retail_date)
+            
+            if actual_count < expected_count:
+                # 还有漏算的客户，进度停留在此处（重试当日）
+                retail_next_dt = datetime.strptime(latest_retail_date, "%Y-%m-%d")
+                logger.info(f"🚩 零售结算进度未完成: {latest_retail_date} ({actual_count}/{expected_count})，将重试补齐")
+            else:
+                # 当日已全量完成，进度向后推一天
+                retail_next_dt = datetime.strptime(latest_retail_date, "%Y-%m-%d") + timedelta(days=1)
+            
+            dates_to_compare.append(retail_next_dt)
         
         if not dates_to_compare:
             # 如果从未结算过，默认补齐最近7天
             start_dt = datetime.strptime(sync_limit, "%Y-%m-%d") - timedelta(days=7)
         else:
-            # 补齐起点 = 进度最慢的版本日期 + 1天
-            start_dt = min(dates_to_compare) + timedelta(days=1)
+            # 补齐起点 = 各版本中最慢的那个“下一个待处理日期”
+            start_dt = min(dates_to_compare)
             
         end_dt = datetime.strptime(sync_limit, "%Y-%m-%d")
         
         if start_dt > end_dt:
-            msg = f"⏩ 结算跳过: 数据已是最新 (PRELIMINARY: {latest_prelim_date or '无'}, PLATFORM_DAILY: {latest_platform_date or '无'})"
-            logger.info(msg)
+            # 数据已是最新，仅输出巡检日志
+            logger.info(f"⏩ 结算巡检: 数据已是最新 (Start: {start_dt.strftime('%Y-%m-%d')} > End: {sync_limit})")
             return
 
-        # 2. 执行处理循环 (使用惰性日志策略，仅在有实际产出时记录数据库)
-        processed_count = 0
+        # 2. 执行处理循环
+        newly_processed_count = 0  # 真正产生了新记录的天数
         skipped_dates = []
         error_count = 0
         
@@ -64,16 +87,20 @@ async def event_driven_settlement_job():
             logger.info(f"⏳ 正在检查 {date_str} 结算基础数据...")
             
             try:
-                # 检查批发侧数据完整性 (价格/负荷/合同)
+                # 检查基础数据完整性
                 basis_data = await settlement_service._fetch_basis_data_preliminary(date_str)
                 if not basis_data:
-                    logger.warning(f"⏩ 跳过 {date_str}: 基础数据缺失或格式异常")
+                    logger.warning(f"⏩ 跳过 {date_str}: 基础数据缺失")
                     skipped_dates.append(f"{date_str}(数据不全)")
                     curr_dt += timedelta(days=1)
                     continue
 
-                # A. 零售侧结算
-                retail_service.calculate_all_customers_daily(date_str)
+                day_has_new_work = False
+
+                # A. 零售侧结算 (内部已实现增量跳过)
+                res_retail = retail_service.calculate_all_customers_daily(date_str)
+                if res_retail.get("new_processed", 0) > 0:
+                    day_has_new_work = True
                 
                 # B. 日前预结算
                 res_prelim = await settlement_service.calculate_daily_settlement(
@@ -81,6 +108,8 @@ async def event_driven_settlement_job():
                     version=SettlementVersion.PRELIMINARY,
                     force=False
                 )
+                if res_prelim and res_prelim.is_new_calculation:
+                    day_has_new_work = True
                 
                 # C. 平台日报结算
                 res_platform = await settlement_service.calculate_daily_settlement(
@@ -88,32 +117,23 @@ async def event_driven_settlement_job():
                     version=SettlementVersion.PLATFORM_DAILY,
                     force=False
                 )
+                if res_platform and res_platform.is_new_calculation:
+                    day_has_new_work = True
                 
-                # 判定本轮是否有效处理
-                # 如果任意一个版本跑通了(返回了对象)，或者零售跑通了(虽无法直接判断零售返回值增量)，都算处理
-                # 但为避免Platform卡死导致的无限循环日志，这里严格判定：
-                # 只有当 settlement_service 确实返回了结果(非None)且非EXISTING(如果是Existing，SettlementService返回对象)
-                # 现在的逻辑是 Existing 也返回对象。
-                # 根本问题是: PLATFORM 返回 None (缺数) -> processed_count + 1 -> Log Success -> Min(Date) 不变 -> 下次重跑
-                # 修复: 如果返回 None，说明没跑通。
-                
-                if res_prelim or res_platform:
-                    processed_count += 1
-                    logger.info(f"✅ {date_str} 结算补全完成 (Prelim: {'OK' if res_prelim else 'Skip'}, Platform: {'OK' if res_platform else 'Skip'})")
+                if day_has_new_work:
+                    newly_processed_count += 1
+                    logger.info(f"✅ {date_str} 结算有新进度更新")
                 else:
-                    logger.warning(f"⏩ {date_str} 结算未产生有效结果 (两版本均缺数)")
-                    skipped_dates.append(f"{date_str}(缺量价)")
+                    logger.info(f"⏭️ {date_str} 数据均已存在，无新增变动")
 
-                
             except Exception as ex:
                 logger.error(f"❌ {date_str} 结算执行过程中出错: {ex}")
                 error_count += 1
                 
             curr_dt += timedelta(days=1)
             
-        # 3. 根据执行结果决定是否记录任务日志
-        if processed_count > 0 or error_count > 0:
-            # 有实际处理或错误，记录到数据库
+        # 3. 结果记录策略：仅在有实际产出或报错时写入数据库任务日志
+        if newly_processed_count > 0 or error_count > 0:
             task_id = await TaskLogger.log_task_start(
                 service_type="settlement_service",
                 task_type="event_driven_settlement",
@@ -121,28 +141,25 @@ async def event_driven_settlement_job():
                 trigger_type="schedule"
             )
 
-            summary = f"执行完成。处理: {processed_count}天"
+            summary = f"执行完成。有效产出: {newly_processed_count}天"
+            if error_count:
+                summary += f", 故障: {error_count}天"
             if skipped_dates:
                 summary += f", 跳过: {len(skipped_dates)}天"
-            if error_count:
-                summary += f", 失败: {error_count}天"
                 
             await TaskLogger.log_task_end(
                 task_id, 
                 "SUCCESS" if error_count == 0 else "FAILED",
                 summary=summary,
                 details={
-                    "processed_days": processed_count,
-                    "skipped_days": len(skipped_dates),
+                    "newly_processed_days": newly_processed_count,
                     "error_days": error_count,
-                    "skipped_list": skipped_dates[:10],  # 限制长度
+                    "skipped_list": skipped_dates[:10],
                     "range": f"{start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}"
                 }
             )
         else:
-            # 纯跳过情况，仅记录文件日志
-            if skipped_dates:
-                logger.info(f"⏩ 结算扫描完成: {len(skipped_dates)}天被跳过 (无有效工作), 不写入DB日志")
+            logger.info("🏁 结算巡检完成: 本轮无新增结算数据，未写入数据库日志。")
         
     except Exception as e:
         logger.error(f"💥 结算调度逻辑发生致命故障: {e}")

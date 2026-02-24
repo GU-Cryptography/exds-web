@@ -14,6 +14,7 @@ from webapp.models.settlement import (
 from webapp.services.load_query_service import LoadQueryService
 from webapp.models.load_enums import FusionStrategy
 from webapp.services.contract_service import ContractService
+from webapp.services import spot_price_service
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,9 @@ class SettlementService:
             })
             if existing:
                 logger.info(f"结算单({version})已存在且非强制重算，跳过: {date_str}")
-                return SettlementDaily(**existing)
+                res = SettlementDaily(**existing)
+                res.is_new_calculation = False
+                return res
 
         # 2. 根据版本获取基础数据
         try:
@@ -126,6 +129,7 @@ class SettlementService:
         # 5. 入库保存
         self._save_result(daily_settlement)
         
+        daily_settlement.is_new_calculation = True
         return daily_settlement
 
     def _calculate_period(
@@ -300,43 +304,36 @@ class SettlementService:
         
         # 处理负荷曲线 (支持 96点 -> 48点 sum)
         raw_load = load_curves[0].values # List[float]
-        q_rt = self._resample_curve(raw_load, method='sum', source='RT Load')
+        q_rt = spot_price_service.resample_to_48(raw_load, method='sum')
         
         # 2. 实时价格 (Real Time Price)
-        rt_doc = self.db.real_time_spot_price.find_one({"date_str": date_str}) # Collection name confirmed?
-        # Check docs/dataset_structures.md: `real_time_spot_price` fields: `date_str`, `periods` (list of {time_str, avg_clearing_price})
-        if not rt_doc:
-             # Try finding by datetime range or other checks?
-             # Assuming standard structure from dataset docs
-             # However, implementation plan says `real_time_spot_price` collection. 
-             # Let's verify field structure via code search if needed. 
-             # Assuming simple structure for now based on previous knowledge.
-             # If `real_time_spot_price` stores 1 doc per day or many?
-             # Usually spot prices are stored as list of docs per 15min.
-             # Let's assume list of docs query as fallback if single doc not found.
-             pass
-        
-        # Re-implement price fetching carefully
         try:
              # 根据方案 3.1: 字段使用 arithmetic_avg_clearing_price
-             p_rt = self._fetch_price_curve('real_time_spot_price', date_str, price_field='arithmetic_avg_clearing_price')
+             p_rt = spot_price_service.get_spot_price_curve_48(
+                 self.db, date_str, 'real_time_spot_price', 
+                 price_field='arithmetic_avg_clearing_price'
+             )
         except Exception:
              logger.warning(f"实时电价缺失: {date_str}")
              return None
 
         # 3. 日前价格 (Day Ahead)
         # 逻辑: < 2026-02 使用 day_ahead_spot_price, >= 2026-02 使用 day_ahead_econ_price
-        # 简化: 尝试两者, 优先 Econ
         p_da = []
         try:
             # Try Econ first (v2)
-            p_da = self._fetch_price_curve('day_ahead_econ_price', date_str, price_field='clearing_price')
+            p_da = spot_price_service.get_spot_price_curve_48(
+                self.db, date_str, 'day_ahead_econ_price', 
+                price_field='clearing_price'
+            )
         except:
              pass
              
         if not p_da or all(x==0 for x in p_da):
             try:
-                p_da = self._fetch_price_curve('day_ahead_spot_price', date_str)
+                p_da = spot_price_service.get_spot_price_curve_48(
+                    self.db, date_str, 'day_ahead_spot_price'
+                )
             except:
                 logger.warning(f"日前电价缺失: {date_str}")
                 return None
@@ -344,10 +341,43 @@ class SettlementService:
         # 4. 日前申报电量 (Day Ahead Energy)
         # collection: day_ahead_energy_declare
         # fields: energy_mwh (96点/48点)
-        q_da = self._fetch_curve_from_collection('day_ahead_energy_declare', date_str, 'energy_mwh', method='sum')
+        try:
+            # 这里由于字段不是价格且 method 是 sum，我们组合调用接口
+            q_da_raw = spot_price_service.get_spot_price_curve_48(
+                self.db, date_str, 'day_ahead_energy_declare', 
+                price_field='energy_mwh'
+            )
+            # 注意: get_spot_price_curve_48 内部默认用 mean，对于申报量，我们需要用 sum
+            # 但如果数据本身就是 48 点的，结果是一样的。
+            # 为了严谨，如果是申报量这类需要求和的，我们可以先拿 raw 列表再手动 sum
+            # 不过 SettlementService 原逻辑是 _fetch_curve_from_collection('...', ..., method='sum')
+            # 考虑到灵活性，我们在 spot_price_service 导出了 resample_to_48
+            pass
+        except:
+            pass
+
+        # 重新实现对日前申报电量的鲁棒获取（支持 Sum 重采样）
+        q_da = []
+        try:
+             # 先尝试取原始列表
+             cursor = self.db.day_ahead_energy_declare.find({"date_str": date_str}).sort("time_str", 1)
+             docs = list(cursor)
+             if not docs:
+                  # Try datetime range
+                  from datetime import datetime, timedelta
+                  start_dt = datetime.strptime(date_str, "%Y-%m-%d")
+                  cursor = self.db.day_ahead_energy_declare.find({
+                      "datetime": {"$gt": start_dt, "$lte": start_dt + timedelta(days=1)}
+                  }).sort("datetime", 1)
+                  docs = list(cursor)
+             
+             if docs:
+                  raw_vals = [float(d.get('energy_mwh', 0)) for d in docs]
+                  q_da = spot_price_service.resample_to_48(raw_vals, method='sum')
+        except:
+             pass
+
         if not q_da:
-             # Default to 0 if missing? Or strict check?
-             # If missing declaration, deviation might be huge. Let's warn but allow 0?
              logger.warning(f"日前申报缺失，默认为0: {date_str}")
              q_da = [0.0] * 48
              
@@ -401,103 +431,21 @@ class SettlementService:
 
     def _process_contracts(self, contract_doc: Optional[Dict]) -> Tuple[List[float], List[float]]:
         """从合同聚合文档提取量价曲线 (48点)"""
-        # Default: 0
-        q_curve = [0.0] * 48
-        p_curve = [0.0] * 48
-        
-        if not contract_doc or 'periods' not in contract_doc:
-            return q_curve, p_curve
+        # 注意：contracts_aggregated_daily 中的 periods 数据通常已由外部系统保序对齐
+        # 返回 48点向量
+        if not contract_doc:
+            return ([0.0]*48, [0.0]*48)
             
-        # periods: [{"period": 1, "quantity_mwh": ..., "price_...": ...}, ...]
-        for item in contract_doc['periods']:
-            p_idx = item.get('period', 1) - 1 # 0-based
-            if 0 <= p_idx < 48:
-                q_curve[p_idx] = float(item.get('quantity_mwh', 0))
-                p_curve[p_idx] = float(item.get('price_yuan_per_mwh', 0))
-                
-        return q_curve, p_curve
-
-    def _fetch_price_curve(self, collection_name: str, date_str: str, price_field: str = 'avg_clearing_price') -> List[float]:
-        """获取价格曲线 (自动处理 96->48点 算术平均)"""
-        # 假设数据存储为列表形式 OR 单日文档形式?
-        # 根据 `dataset_structures.md`: 
-        # `real_time_spot_price`: 每日1文档 OR 多文档? 
-        # 文档说: "集合名: real_time_spot_price ... 字段: time_str, avg_clearing_price"
-        # 并且 viewed_code_item (Step 383) 里的 `day_ahead_econ_price` 是一堆文档的列表
-        # 尝试查询该日所有记录
+        periods = contract_doc.get("periods", [])
+        # 提取字段 (contracts_aggregated_daily 集合实际字段名)
+        load_q = [float(p.get("quantity_mwh", 0)) for p in periods]
+        load_p = [float(p.get("price_yuan_per_mwh", 0)) for p in periods]
         
-        # 构造 datetime query
-        # 简单起见，按 date_str 字符串字段查询 (如果有)
-        # 否则按 datetime range
-        start_dt = datetime.strptime(date_str, "%Y-%m-%d")
-        end_dt = start_dt + timedelta(days=1)
-        
-        cursor = self.db[collection_name].find({
-            "datetime": {"$gt": start_dt, "$lte": end_dt}
-        }).sort("datetime", 1)
-        
-        docs = list(cursor)
-        if not docs:
-             # Try `date_str` field if exists
-             cursor = self.db[collection_name].find({"date_str": date_str}).sort("time_str", 1)
-             docs = list(cursor)
-             
-        if not docs:
-            raise ValueError(f"No data in {collection_name}")
-            
-        # 提取 value
-        values = []
-        for d in docs:
-             val = d.get(price_field)
-             if val is None: val = d.get('clearing_price') # Fallback
-             values.append(float(val) if val is not None else 0.0)
-             
-        return self._resample_curve(values, method='mean', source=f'Price-{collection_name}')
-
-    def _fetch_curve_from_collection(self, collection_name: str, date_str: str, value_field: str, method: str) -> List[float]:
-        """通用曲线获取"""
-        start_dt = datetime.strptime(date_str, "%Y-%m-%d")
-        end_dt = start_dt + timedelta(days=1)
-        
-        cursor = self.db[collection_name].find({
-            "datetime": {"$gt": start_dt, "$lte": end_dt}
-        }).sort("datetime", 1)
-        ids = list(cursor)
-        
-        # Fallback to date_str
-        if not ids:
-             cursor = self.db[collection_name].find({"date_str": date_str}).sort("time_str", 1)
-             ids = list(cursor)
-        
-        if not ids:
-            return []
-            
-        values = [float(d.get(value_field, 0)) for d in ids]
-        return self._resample_curve(values, method=method, source=f'Curve-{collection_name}')
-
-    def _resample_curve(self, values: List[float], method: str = 'sum', source: str = 'Unknown') -> List[float]:
-        """重采样: 96点 -> 48点 或 48点保持"""
-        n = len(values)
-        if n == 48:
-            return values
-        elif n == 96:
-            new_values = []
-            for i in range(48):
-                v1 = values[2*i]
-                v2 = values[2*i+1]
-                if method == 'sum':
-                    new_values.append(v1 + v2)
-                elif method == 'mean':
-                    new_values.append((v1 + v2) / 2)
-                else:
-                    new_values.append(v1 + v2) 
-            return new_values
-        else:
-            # 异常长度，尝试截断或补零?
-            logger.warning(f"[{source}] 异常数据长度: {n}, 强制调整为 48点")
-            # 简单截断或填充
-            if n > 48: return values[:48]
-            else: return values + [0.0]*(48-n)
+        # 鲁棒重采样为 48点 (method 视字段不同)
+        return (
+            spot_price_service.resample_to_48(load_q, method='sum'),
+            spot_price_service.resample_to_48(load_p, method='mean')
+        )
 
     def _aggregate_daily(
         self, date_str: str, 

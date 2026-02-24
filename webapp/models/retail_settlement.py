@@ -33,7 +33,8 @@ class LinkedConfigInfo(BaseModel):
     """联动配置信息 (仅固定+联动模式)"""
     ratio: float = Field(..., description="联动比例 (%)")
     target: str = Field(..., description="联动标的: real_time_avg / day_ahead_avg")
-    target_prices: Dict[str, float] = Field(default_factory=dict, description="联动标的时段价格")
+    target_prices: Dict[str, float] = Field(default_factory=dict, description="联动标的时段价格 (5时段)")
+    target_prices_48: Optional[List[float]] = Field(None, description="联动标的48点价格向量")
 
 
 class RetailSettlementDaily(BaseModel):
@@ -57,7 +58,8 @@ class RetailSettlementDaily(BaseModel):
 
     # 最终价格
     final_prices: Dict[str, float] = Field(default_factory=dict, description="最终时段价格 {tip, peak, flat, valley, deep}")
-    price_ratio_adjusted: bool = Field(False, description="是否经过463号文比例调节")
+    price_ratio_adjusted: bool = Field(False, description="是否经过463号文比例调节 (最终价)")
+    price_ratio_adjusted_base: bool = Field(False, description="是否经过463号文比例调节 (固定价/基准价部分)")
 
     # 封顶信息
     is_capped: bool = Field(False, description="是否触发了封顶保护")
