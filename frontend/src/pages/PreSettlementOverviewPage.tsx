@@ -110,7 +110,7 @@ const StatCard: React.FC<{
 );
 
 // ====== 工具函数 ======
-const formatWanYuan = (val: number): string => `${(val / 10000).toFixed(1)}万`;
+const formatWanYuan = (val: number): string => `${(val / 10000).toFixed(2)}万`;
 
 const formatYuan = (val: number): string => val.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -346,20 +346,20 @@ const PreSettlementOverviewPage: React.FC = () => {
                 </Grid>
                 <Grid size={{ xs: 6, md: 2 }}>
                     <StatCard title="当月毛利" value={hasData ? `${formatWanYuan(s.gross_profit)}元` : '-'}
-                        subtitle={hasData ? `利润率 ${s.profit_margin}%` : ''}
+                        subtitle={hasData ? `利润率 ${(s.profit_margin || 0).toFixed(2)}%` : ''}
                         icon={<TrendingUpOutlinedIcon />}
                         color={hasData ? profitColor(s.gross_profit) : 'text.disabled'} valueColor={hasData ? profitColor(s.gross_profit) : 'text.disabled'} />
                 </Grid>
                 <Grid size={{ xs: 6, md: 2 }}>
-                    <StatCard title="购电均价" value={hasData ? `${s.wholesale_avg_price.toFixed(1)}` : '-'}
+                    <StatCard title="购电均价" value={hasData ? `${s.wholesale_avg_price.toFixed(2)}` : '-'}
                         subtitle={hasData ? "元/MWh" : ""} icon={<PriceChangeOutlinedIcon />} color="#1976d2" />
                 </Grid>
                 <Grid size={{ xs: 6, md: 2 }}>
-                    <StatCard title="售电均价" value={hasData ? `${s.retail_avg_price.toFixed(1)}` : '-'}
+                    <StatCard title="售电均价" value={hasData ? `${s.retail_avg_price.toFixed(2)}` : '-'}
                         subtitle={hasData ? "元/MWh" : ""} icon={<StorefrontOutlinedIcon />} color="#2e7d32" />
                 </Grid>
                 <Grid size={{ xs: 6, md: 2 }}>
-                    <StatCard title="批零价差" value={hasData ? `${s.price_spread > 0 ? '+' : ''}${s.price_spread.toFixed(1)}` : '-'}
+                    <StatCard title="批零价差" value={hasData ? `${s.price_spread > 0 ? '+' : ''}${s.price_spread.toFixed(2)}` : '-'}
                         subtitle={hasData ? "元/MWh" : ""} icon={<CompareArrowsOutlinedIcon />}
                         color={hasData ? profitColor(s.price_spread) : 'text.disabled'} valueColor={hasData ? profitColor(s.price_spread) : 'text.disabled'} />
                 </Grid>

@@ -3,7 +3,7 @@ import {
     Box, Grid, Paper, Typography, CircularProgress, Alert, IconButton,
     Select, MenuItem, FormControl, InputLabel, SelectChangeEvent,
     useMediaQuery, Theme, Tabs, Tab, Button, Divider,
-    Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel,
     Drawer
 } from '@mui/material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
@@ -136,9 +136,14 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
 
     const chartRef1 = useRef<HTMLDivElement>(null);
     const chartRef2 = useRef<HTMLDivElement>(null);
+    const chartRef3 = useRef<HTMLDivElement>(null);
 
     // 移动端表格抽屉状态
     const [selectedWholesaleRow, setSelectedWholesaleRow] = useState<any | null>(null);
+
+    // 零售侧表格排序状态
+    const [retailOrder, setRetailOrder] = useState<'asc' | 'desc'>('desc');
+    const [retailOrderBy, setRetailOrderBy] = useState<string>('profit');
 
     // 数据获取：监听派生的 dateStr 和 version 变化
     useEffect(() => {
@@ -265,7 +270,11 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
     });
 
     const { isFullscreen: isFs2, FullscreenEnterButton: Enter2, FullscreenExitButton: Exit2, FullscreenTitle: Title2 } = useChartFullscreen({
-        chartRef: chartRef2, title: `客户收益矩阵 (${dateStr})`
+        chartRef: chartRef2, title: `客户收益多维气泡图 (${dateStr})`
+    });
+
+    const { isFullscreen: isFs3, FullscreenEnterButton: Enter3, FullscreenExitButton: Exit3, FullscreenTitle: Title3 } = useChartFullscreen({
+        chartRef: chartRef3, title: `套餐收益对比图 (${dateStr})`
     });
 
     const renderSummaryCards = () => {
@@ -466,14 +475,62 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
         );
     };
 
-    const renderCustomerProfitChart = () => {
+    const renderRetailBubbleChart = () => {
         if (!data || !data.customer_list) return null;
-        const chartData = data.customer_list.map(c => ({
-            name: c.customer_name,
-            spread: c.price_spread,
-            load: c.daily_load,
-            profit: c.daily_profit
-        }));
+
+        const chartData: any[] = [];
+        let hasFixed = false, hasAvg = false, hasUpper = false, hasOther = false;
+
+        data.customer_list.forEach((c: any) => {
+            const load = c.daily_load || 0;
+            const entry = {
+                customerName: c.customer_name,
+                package: c.package_name || c.pricing_model || '无类别',
+                pricing_model: c.pricing_model || '',
+                is_capped: !!c.is_capped,
+                spread: load > 0 ? (c.price_spread || 0) : 0,
+                load: load,
+                profit: c.daily_profit || 0,
+                absProfit: Math.abs(c.daily_profit || 0),
+                color: '#9e9e9e'
+            };
+
+            const packageStr = String(entry.package);
+
+            if (packageStr.includes('上限')) {
+                entry.color = '#ff5722';
+                hasUpper = true;
+            } else if (packageStr.includes('固定')) {
+                entry.color = '#2196f3';
+                hasFixed = true;
+            } else if (packageStr.includes('平均上网电价')) {
+                entry.color = '#4caf50';
+                hasAvg = true;
+            } else {
+                hasOther = true;
+            }
+
+            chartData.push(entry);
+        });
+
+        const CustomTooltip = ({ active, payload }: any) => {
+            if (active && payload && payload.length) {
+                const d = payload[0].payload;
+                return (
+                    <Paper sx={{ p: 1.5, fontSize: '0.875rem' }} elevation={3}>
+                        <Typography variant="subtitle2" fontWeight="bold">{d.customerName}</Typography>
+                        <Divider sx={{ my: 0.5 }} />
+                        <Typography variant="body2" color="text.secondary">套餐: {d.package}</Typography>
+                        <Typography variant="body2">结算电量: {d.load.toFixed(3)} MWh</Typography>
+                        <Typography variant="body2">批零价差: {d.spread.toFixed(2)} 元/MWh</Typography>
+                        <Typography variant="body2" fontWeight="bold" color={d.profit >= 0 ? 'success.main' : 'error.main'}>
+                            日总毛利: {formatYuan(d.profit)}
+                        </Typography>
+                    </Paper>
+                );
+            }
+            return null;
+        };
 
         return (
             <Box ref={chartRef2} sx={{
@@ -485,19 +542,96 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
             }}>
                 <Enter2 /><Exit2 /><Title2 />
                 <ResponsiveContainer width="100%" height="100%">
-                    <ScatterChart margin={{ top: 20, right: 30, bottom: 20, left: 20 }}>
+                    <ScatterChart margin={{ top: 20, right: 30, bottom: 20, left: 10 }}>
                         <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis type="number" dataKey="spread" name="均价差" unit="元" label={{ value: '批零价差 (元/MWh)', position: 'bottom' }} />
-                        <YAxis type="number" dataKey="load" name="负荷" unit="MWh" label={{ value: '量 (MWh)', angle: -90, position: 'insideLeft' }} />
-                        <ZAxis type="number" dataKey="profit" range={[50, 400]} name="利润" />
-                        <Tooltip cursor={{ strokeDasharray: '3 3' }} />
-                        <Scatter name="客户分布" data={chartData}>
-                            {chartData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.profit >= 0 ? '#4caf50' : '#f44336'} fillOpacity={0.6} />
+                        <XAxis type="number" dataKey="spread" name="均价差" unit="元" domain={['auto', 'auto']} label={{ value: '批零价差 (元/MWh)', position: 'bottom', offset: -10 }} />
+                        <YAxis type="number" dataKey="load" name="负荷" unit="MWh" label={{ value: '电量 (MWh)', angle: -90, position: 'insideLeft' }} />
+                        <ZAxis type="number" dataKey="absProfit" range={[50, 400]} name="利润大小" />
+                        <Tooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '3 3' }} />
+                        <Legend wrapperStyle={{ fontSize: 12, bottom: 0 }} />
+
+                        {/* 仅用于控制图例 */}
+                        {hasFixed && <Scatter name="固定价" data={[]} fill="#2196f3" legendType="circle" />}
+                        {hasAvg && <Scatter name="均价参考" data={[]} fill="#4caf50" legendType="circle" />}
+                        {hasUpper && <Scatter name="上限价" data={[]} fill="#ff5722" legendType="circle" />}
+                        {hasOther && <Scatter name="其它" data={[]} fill="#9e9e9e" legendType="circle" />}
+
+                        {/* 真正的气泡图 */}
+                        <Scatter name="客户分布" data={chartData} legendType="none">
+                            {chartData.map((entry: any, index: number) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} fillOpacity={0.7} />
                             ))}
                         </Scatter>
+
                         <ReferenceLine x={0} stroke="#999" />
+                        <ReferenceLine y={0} stroke="#999" />
                     </ScatterChart>
+                </ResponsiveContainer>
+            </Box>
+        );
+    };
+
+    const renderRetailPackageChart = () => {
+        if (!data || !data.customer_list) return null;
+
+        // 按照套餐统计人数、利润和电量
+        const packageAggr = data.customer_list.reduce((acc: any, c: any) => {
+            const pkg = c.package_name || c.pricing_model || '其它';
+            if (!acc[pkg]) {
+                acc[pkg] = { name: pkg, profit: 0, count: 0, load: 0 };
+            }
+            acc[pkg].profit += c.daily_profit || 0;
+            acc[pkg].load += c.daily_load || 0;
+            acc[pkg].count += 1;
+            return acc;
+        }, {});
+
+        // 转为数组并按利润降序排序
+        const chartData = Object.values(packageAggr).sort((a: any, b: any) => b.profit - a.profit);
+
+        const PackageTooltip = ({ active, payload }: any) => {
+            if (active && payload && payload.length) {
+                const d = payload[0].payload;
+                return (
+                    <Paper sx={{ p: 1.5, fontSize: '0.875rem' }} elevation={3}>
+                        <Typography variant="subtitle2" fontWeight="bold">{d.name}</Typography>
+                        <Divider sx={{ my: 0.5 }} />
+                        <Typography variant="body2">涉及客户: {d.count} 户</Typography>
+                        <Typography variant="body2">结算电量: {d.load.toFixed(3)} MWh</Typography>
+                        <Typography variant="body2" fontWeight="bold" color={d.profit >= 0 ? "success.main" : "error.main"}>
+                            该套餐总毛利: {formatYuan(d.profit)}
+                        </Typography>
+                    </Paper>
+                );
+            }
+            return null;
+        };
+
+        return (
+            <Box ref={chartRef3} sx={{
+                height: { xs: 300, sm: 350 }, position: 'relative',
+                bgcolor: isFs3 ? 'background.paper' : 'transparent',
+                p: isFs3 ? 2 : 0,
+                ...(isFs3 && { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1400 }),
+                '& .recharts-wrapper:focus': { outline: 'none' }
+            }}>
+                <Enter3 /><Exit3 /><Title3 />
+                <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={chartData} margin={{ top: 20, right: 30, bottom: 20, left: 10 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                        <YAxis yAxisId="left" tickFormatter={(val) => `${(val / 10000).toFixed(0)}万`} width={50} label={{ value: '毛利 (元)', angle: -90, position: 'insideLeft', offset: 0 }} />
+                        <YAxis yAxisId="right" orientation="right" width={50} label={{ value: '电量 (MWh)', angle: 90, position: 'insideRight', offset: 0 }} />
+                        <Tooltip content={<PackageTooltip />} cursor={{ fill: 'rgba(0,0,0,0.05)' }} />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        <Bar yAxisId="left" dataKey="profit" name="套餐总毛利" barSize={40}>
+                            {chartData.map((entry: any, index: number) => (
+                                <Cell key={`cell-${index}`} fill={entry.profit >= 0 ? '#4caf50' : '#f44336'} />
+                            ))}
+                        </Bar>
+                        <Line yAxisId="right" type="monotone" dataKey="load" name="结算电量" stroke="#1976d2" strokeWidth={2} dot={{ r: 4 }} />
+                        <ReferenceLine yAxisId="left" y={0} stroke="#000" />
+                    </ComposedChart>
                 </ResponsiveContainer>
             </Box>
         );
@@ -805,8 +939,188 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
         );
     };
 
+    const handleRetailRequestSort = (property: string) => {
+        const isAsc = retailOrderBy === property && retailOrder === 'asc';
+        setRetailOrder(isAsc ? 'desc' : 'asc');
+        setRetailOrderBy(property);
+    };
+
     const renderCustomerTable = () => {
         if (!data || !data.customer_list) return null;
+
+        // 构建带计算字段的数组以便排序
+        let totalLoad = 0;
+        let totalFee = 0;
+        let totalCost = 0;
+        let totalProfit = 0;
+
+        const enhancedList = data.customer_list.map((c: any) => {
+            const profit = c.daily_profit || 0;
+            const nominalP = c.nominal_avg_price || 0;
+            const settledP = c.capped_avg_price || 0;
+            const load = c.daily_load || 0;
+            const cost = c.allocated_cost || 0;
+            const fee = c.total_fee || 0;
+
+            totalLoad += load;
+            totalFee += fee;
+            totalCost += cost;
+            totalProfit += profit;
+
+            // 计算其他需要展示的字段
+            const buyingPrice = load > 0 ? (cost / load) : 0;
+            const margin = fee > 0 ? (profit / fee * 100) : 0;
+            const spread = load > 0 ? (settledP - buyingPrice) : 0;
+
+            return {
+                ...c,
+                profit,
+                nominalP,
+                settledP,
+                load,
+                cost,
+                fee,
+                buyingPrice,
+                margin,
+                spread
+            };
+        });
+
+        const totalBuyingPrice = totalLoad > 0 ? (totalCost / totalLoad) : 0;
+        const totalSettledPrice = totalLoad > 0 ? (totalFee / totalLoad) : 0;
+        const totalMargin = totalFee > 0 ? (totalProfit / totalFee * 100) : 0;
+        const totalSpread = totalLoad > 0 ? (totalSettledPrice - totalBuyingPrice) : 0;
+
+        // 排序函数
+        const sortedList = [...enhancedList].sort((a, b) => {
+            let valA = a[retailOrderBy];
+            let valB = b[retailOrderBy];
+
+            if (typeof valA === 'string') valA = valA.toLowerCase();
+            if (typeof valB === 'string') valB = valB.toLowerCase();
+
+            if (valA < valB) {
+                return retailOrder === 'asc' ? -1 : 1;
+            }
+            if (valA > valB) {
+                return retailOrder === 'asc' ? 1 : -1;
+            }
+            return 0;
+        });
+
+        // Headers
+        const headCells = [
+            { id: 'index', label: '序号', sortable: false, align: 'left' as const },
+            { id: 'customer_name', label: '客户名称', sortable: true, align: 'left' as const },
+            { id: 'package_name', label: '套餐名称', sortable: true, align: 'left' as const },
+            { id: 'load', label: '电量(MWh)', sortable: true, align: 'right' as const },
+            { id: 'buyingPrice', label: '购电均价', sortable: true, align: 'right' as const },
+            { id: 'settledP', label: '售电均价', sortable: true, align: 'right' as const },
+            { id: 'fee', label: '零售收入', sortable: true, align: 'right' as const },
+            { id: 'cost', label: '采购成本', sortable: true, align: 'right' as const },
+            { id: 'profit', label: '毛利(元)', sortable: true, align: 'right' as const },
+            { id: 'margin', label: '毛利率(%)', sortable: true, align: 'right' as const },
+            { id: 'spread', label: '批零差价', sortable: true, align: 'right' as const },
+            { id: 'actions', label: '操作', sortable: false, align: 'center' as const }
+        ];
+
+        if (isMobile) {
+            return (
+                <Box>
+                    {/* 合计卡片 */}
+                    <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: 'action.hover', borderLeft: '4px solid', borderColor: 'primary.main' }}>
+                        <Typography variant="subtitle2" fontWeight="bold" gutterBottom>列表合计 (均价加权)</Typography>
+                        <Grid container spacing={1}>
+                            <Grid size={{ xs: 6 }}>
+                                <Typography variant="caption" color="text.secondary">结算总电量</Typography>
+                                <Typography variant="body2" fontWeight="bold">{(totalLoad || 0).toFixed(3)} MWh</Typography>
+                            </Grid>
+                            <Grid size={{ xs: 6 }}>
+                                <Typography variant="caption" color="text.secondary">总毛利</Typography>
+                                <Typography variant="body2" fontWeight="bold" sx={{ color: profitColor(totalProfit) }}>{formatYuan(totalProfit)}</Typography>
+                            </Grid>
+                            <Grid size={{ xs: 6 }}>
+                                <Typography variant="caption" color="text.secondary">平均批零价差</Typography>
+                                <Typography variant="body2" sx={{ color: profitColor(totalSpread) }}>{totalSpread.toFixed(2)}</Typography>
+                            </Grid>
+                            <Grid size={{ xs: 6 }}>
+                                <Typography variant="caption" color="text.secondary">整体毛利率</Typography>
+                                <Typography variant="body2" sx={{ color: profitColor(totalMargin) }}>{(totalMargin || 0).toFixed(2)}%</Typography>
+                            </Grid>
+                        </Grid>
+                    </Paper>
+
+                    {/* 客户卡片列表 */}
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        {sortedList.map((c: any, idx: number) => (
+                            <Paper key={c.customer_id || idx} variant="outlined" sx={{ p: 2 }}>
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                        <Box
+                                            sx={{
+                                                width: 24, height: 24, borderRadius: '50%', bgcolor: 'primary.light',
+                                                color: 'primary.contrastText', display: 'flex', alignItems: 'center',
+                                                justifyContent: 'center', fontSize: '0.75rem', fontWeight: 'bold', mr: 1
+                                            }}
+                                        >
+                                            {idx + 1}
+                                        </Box>
+                                        <Typography variant="subtitle1" fontWeight="bold">{c.customer_name}</Typography>
+                                        {c.is_capped && (
+                                            <Typography component="span" variant="caption" sx={{ ml: 1, color: 'error.main', border: '1px solid', borderColor: 'error.main', borderRadius: 1, px: 0.5 }}>
+                                                封顶
+                                            </Typography>
+                                        )}
+                                    </Box>
+                                    <Button size="small" variant="text" onClick={() => jumpToCustomerDetail(c.customer_id)} sx={{ minWidth: 'auto', p: 0.5 }}>
+                                        详情
+                                    </Button>
+                                </Box>
+
+                                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
+                                    套餐：{c.package_name || c.pricing_model || '-'}
+                                </Typography>
+
+                                <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
+                                    <Grid size={{ xs: 6 }}>
+                                        <Typography variant="caption" color="text.secondary">结算电量</Typography>
+                                        <Typography variant="body2">{c.load.toFixed(3)} MWh</Typography>
+                                    </Grid>
+                                    <Grid size={{ xs: 6 }}>
+                                        <Typography variant="caption" color="text.secondary">日毛利</Typography>
+                                        <Typography variant="body2" fontWeight="bold" sx={{ color: profitColor(c.profit) }}>{formatYuan(c.profit)}</Typography>
+                                    </Grid>
+                                    <Grid size={{ xs: 4 }}>
+                                        <Typography variant="caption" color="text.secondary">售电均价</Typography>
+                                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>{c.settledP.toFixed(2)}</Typography>
+                                    </Grid>
+                                    <Grid size={{ xs: 4 }}>
+                                        <Typography variant="caption" color="text.secondary">批零差价</Typography>
+                                        <Typography variant="body2" sx={{ color: profitColor(c.spread), fontWeight: 'bold' }}>{c.spread.toFixed(2)}</Typography>
+                                    </Grid>
+                                    <Grid size={{ xs: 4 }}>
+                                        <Typography variant="caption" color="text.secondary">毛利率</Typography>
+                                        <Typography variant="body2" sx={{ color: profitColor(c.margin) }}>{c.margin.toFixed(2)}%</Typography>
+                                    </Grid>
+                                </Grid>
+
+                                <Divider sx={{ my: 1, borderStyle: 'dashed' }} />
+
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <Typography variant="caption" color="text.secondary">
+                                        零售收入: <Box component="span" sx={{ color: 'success.main', fontWeight: 500 }}>{formatYuan(c.fee)}</Box>
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                        采购成本: <Box component="span" sx={{ color: 'error.main', fontWeight: 500 }}>{formatYuan(c.cost)}</Box>
+                                    </Typography>
+                                </Box>
+                            </Paper>
+                        ))}
+                    </Box>
+                </Box>
+            );
+        }
+
         return (
             <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto' }}>
                 <Table size="small" sx={{
@@ -817,36 +1131,62 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                 }}>
                     <TableHead>
                         <TableRow sx={{ backgroundColor: 'action.hover' }}>
-                            <TableCell>客户名称</TableCell>
-                            <TableCell>套餐名称</TableCell>
-                            <TableCell align="right">名义均价</TableCell>
-                            <TableCell align="right">封顶均价</TableCell>
-                            <TableCell align="right">结算均价</TableCell>
-                            <TableCell align="right">日电量(MWh)</TableCell>
-                            <TableCell align="right">分摊成本(元)</TableCell>
-                            <TableCell align="right">当日利润(元)</TableCell>
-                            <TableCell align="center">操作</TableCell>
+                            {headCells.map((headCell) => (
+                                <TableCell
+                                    key={headCell.id}
+                                    align={headCell.align}
+                                    sortDirection={retailOrderBy === headCell.id ? retailOrder : false}
+                                >
+                                    {headCell.sortable ? (
+                                        <TableSortLabel
+                                            active={retailOrderBy === headCell.id}
+                                            direction={retailOrderBy === headCell.id ? retailOrder : 'asc'}
+                                            onClick={() => handleRetailRequestSort(headCell.id)}
+                                        >
+                                            {headCell.label}
+                                        </TableSortLabel>
+                                    ) : (
+                                        headCell.label
+                                    )}
+                                </TableCell>
+                            ))}
                         </TableRow>
                     </TableHead>
                     <TableBody>
-                        {data.customer_list.map((c: any) => {
-                            const profit = c.daily_profit || 0;
-                            // 价格后端已转换为 元/MWh 显示
-                            const nominalP = c.nominal_avg_price || 0;
-                            const capP = c.cap_price || 0;
-                            const settledP = c.capped_avg_price || 0;
-
+                        {sortedList.map((c: any, index: number) => {
                             return (
-                                <TableRow key={c.customer_id} hover>
-                                    <TableCell sx={{ fontWeight: '500' }}>{c.customer_name}</TableCell>
+                                <TableRow key={c.customer_id || index} hover>
+                                    <TableCell>{index + 1}</TableCell>
+                                    <TableCell sx={{ fontWeight: '500' }}>
+                                        <Box display="flex" alignItems="center">
+                                            {c.customer_name}
+                                            {c.is_capped && (
+                                                <Typography component="span" variant="caption" sx={{ ml: 1, color: 'error.main', border: '1px solid', borderColor: 'error.main', borderRadius: 1, px: 0.5 }}>
+                                                    封顶
+                                                </Typography>
+                                            )}
+                                        </Box>
+                                    </TableCell>
                                     <TableCell>{c.package_name || c.pricing_model || '-'}</TableCell>
-                                    <TableCell align="right">{nominalP.toFixed(2)}</TableCell>
-                                    <TableCell align="right">{capP.toFixed(2)}</TableCell>
-                                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>{settledP.toFixed(2)}</TableCell>
-                                    <TableCell align="right">{c.daily_load.toFixed(3)}</TableCell>
-                                    <TableCell align="right">{formatYuan(c.allocated_cost)}</TableCell>
-                                    <TableCell align="right" sx={{ color: profitColor(profit), fontWeight: 'bold' }}>
-                                        {formatYuan(profit)}
+
+                                    <TableCell align="right">
+                                        {c.load.toFixed(3)}
+                                    </TableCell>
+
+                                    <TableCell align="right">{c.buyingPrice.toFixed(2)}</TableCell>
+                                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>{c.settledP.toFixed(2)}</TableCell>
+                                    <TableCell align="right" sx={{ color: 'success.main' }}>{formatYuan(c.fee)}</TableCell>
+                                    <TableCell align="right" sx={{ color: 'error.main' }}>{formatYuan(c.cost)}</TableCell>
+
+                                    <TableCell align="right" sx={{ color: profitColor(c.profit), fontWeight: 'bold' }}>
+                                        {formatYuan(c.profit)}
+                                    </TableCell>
+
+                                    <TableCell align="right" sx={{ color: profitColor(c.margin) }}>
+                                        {c.margin.toFixed(2)}%
+                                    </TableCell>
+                                    <TableCell align="right" sx={{ color: profitColor(c.spread) }}>
+                                        {c.spread.toFixed(2)}
                                     </TableCell>
                                     <TableCell align="center">
                                         <Button size="small" variant="text" onClick={() => jumpToCustomerDetail(c.customer_id)}>
@@ -856,6 +1196,23 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                                 </TableRow>
                             );
                         })}
+                        {/* 合计行 */}
+                        <TableRow sx={{ backgroundColor: 'background.default' }}>
+                            <TableCell colSpan={3} align="center" sx={{ fontWeight: 'bold' }}>合计 (均价加权)</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                                {totalLoad.toFixed(3)}
+                            </TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 'bold' }}>{totalBuyingPrice.toFixed(2)}</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 'bold', color: 'primary.main' }}>{totalSettledPrice.toFixed(2)}</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 'bold', color: 'success.main' }}>{formatYuan(totalFee)}</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 'bold', color: 'error.main' }}>{formatYuan(totalCost)}</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 'bold', color: profitColor(totalProfit) }}>
+                                {formatYuan(totalProfit)}
+                            </TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 'bold', color: profitColor(totalMargin) }}>{totalMargin.toFixed(2)}%</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 'bold', color: profitColor(totalSpread) }}>{totalSpread.toFixed(2)}</TableCell>
+                            <TableCell />
+                        </TableRow>
                     </TableBody>
                 </Table>
             </TableContainer>
@@ -1038,9 +1395,7 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                             <Box sx={{ mt: 2 }}>
                                 <Paper variant="outlined" sx={{ p: { xs: 1, sm: 1.5 } }}>
                                     <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ px: 1, pt: 0.5 }}>批发侧盈亏归因分析</Typography>
-                                    <Box sx={{ height: { xs: 300, sm: 360 } }}>
-                                        {renderWholesaleChart()}
-                                    </Box>
+                                    {renderWholesaleChart()}
                                 </Paper>
 
                                 <Paper variant="outlined" sx={{ mt: 2, p: { xs: 1, sm: 2 } }}>
@@ -1085,22 +1440,26 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                                         {renderCustomerDetailTab()}
                                     </Box>
                                 ) : (
-                                    <Grid container spacing={2}>
-                                        <Grid size={{ xs: 12, lg: 5 }}>
-                                            <Paper variant="outlined" sx={{ p: 2, height: '100%', minHeight: 450 }}>
-                                                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>客户收益矩阵 (盈亏 vs 电量)</Typography>
-                                                <Box sx={{ height: { xs: 350, lg: 400 } }}>
-                                                    {renderCustomerProfitChart()}
-                                                </Box>
-                                            </Paper>
+                                    <Box>
+                                        <Grid container spacing={2} sx={{ mb: 2 }}>
+                                            <Grid size={{ xs: 12, lg: 6 }}>
+                                                <Paper variant="outlined" sx={{ p: { xs: 1, sm: 1.5 }, height: '100%' }}>
+                                                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ px: 1, pt: 0.5 }}>客户收益多维气泡图</Typography>
+                                                    {renderRetailBubbleChart()}
+                                                </Paper>
+                                            </Grid>
+                                            <Grid size={{ xs: 12, lg: 6 }}>
+                                                <Paper variant="outlined" sx={{ p: { xs: 1, sm: 1.5 }, height: '100%' }}>
+                                                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ px: 1, pt: 0.5 }}>按套餐收益与电量对比图</Typography>
+                                                    {renderRetailPackageChart()}
+                                                </Paper>
+                                            </Grid>
                                         </Grid>
-                                        <Grid size={{ xs: 12, lg: 7 }}>
-                                            <Paper variant="outlined" sx={{ p: 2 }}>
-                                                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>客户结算明细列表</Typography>
-                                                {renderCustomerTable()}
-                                            </Paper>
-                                        </Grid>
-                                    </Grid>
+                                        <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 } }}>
+                                            <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ px: 1, pt: 1 }}>客户结算明细列表</Typography>
+                                            {renderCustomerTable()}
+                                        </Paper>
+                                    </Box>
                                 )}
                             </Box>
                         )}

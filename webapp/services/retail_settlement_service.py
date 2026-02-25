@@ -521,8 +521,8 @@ class RetailSettlementService:
         """
         # 1. 获取固定价 (5时段字典)
         fixed = {
-            "tip": float(pricing_config.get("fixed_price_tip", 0) or 0),
-            "peak": float(pricing_config.get("fixed_price_peak", 0) or 0),
+            "tip": float(pricing_config.get("fixed_price_peak", 0) or 0),
+            "peak": float(pricing_config.get("fixed_price_high", 0) or 0),
             "flat": float(pricing_config.get("fixed_price_flat", 0) or 0),
             "valley": float(pricing_config.get("fixed_price_valley", 0) or 0),
             "deep": float(pricing_config.get("fixed_price_deep_valley", 0) or 0),

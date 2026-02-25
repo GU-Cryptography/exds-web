@@ -565,9 +565,15 @@ class SettlementService:
             nominal_avg_price = (r.get("nominal_avg_price", 0) or 0) * 1000.0
             cap_price = (r.get("cap_price", 0) or 0) * 1000.0
             
-            # 简化版分摊成本逻辑：客户日电量 * 当日系统批发加权平均价
-            allocated_cost = total_load_mwh * wholesale.predicted_wholesale_price
-            daily_profit = total_fee - allocated_cost
+            # 真正读取数据库内的分摊成本和毛利，若之前没有（旧数据）则走简化算法兼容
+            allocated_cost = r.get("total_allocated_cost")
+            if allocated_cost is None:
+                allocated_cost = total_load_mwh * wholesale.predicted_wholesale_price
+            
+            daily_profit = r.get("gross_profit")
+            if daily_profit is None:
+                daily_profit = total_fee - allocated_cost
+                
             price_spread = capped_avg_price - wholesale.predicted_wholesale_price
             
             total_retail_revenue += total_fee
@@ -577,7 +583,8 @@ class SettlementService:
                 "customer_id": r.get("customer_id"),
                 "customer_name": r.get("customer_name"),
                 "package_name": r.get("package_name"),
-                "pricing_model": r.get("package_name"), 
+                "is_capped": r.get("is_capped", False),
+                "pricing_model": r.get("model_code", r.get("package_name")), 
                 "daily_load": self._round(total_load_mwh, 3),
                 "total_fee": self._round(total_fee, 2),
                 "capped_avg_price": self._round(capped_avg_price, 3),
