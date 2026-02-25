@@ -177,7 +177,7 @@ class RetailPriceService:
                 
                 mwh_prices = get_spot_price_curve_48(self.db, date_str, coll_name, p_field)
                 kwh_prices = [round(p / 1000.0, 6) for p in mwh_prices]
-                return kwh_prices, "simulated"
+                return kwh_prices
 
         # 其他未定义
         return None

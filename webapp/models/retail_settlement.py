@@ -13,6 +13,8 @@ class RetailPeriodDetail(BaseModel):
     load_mwh: float = Field(0.0, description="时段电量 (MWh)")
     unit_price: float = Field(0.0, description="时段单价 (元/kWh)")
     fee: float = Field(0.0, description="时段电费 (元)")
+    allocated_cost: Optional[float] = Field(None, description="该时段采购分摊成本 (元)")
+    wholesale_price: Optional[float] = Field(None, description="该时段计算该成本所依据的最终代理拿货单价 (元/MWh)")
 
 
 class TouSummaryItem(BaseModel):
@@ -74,6 +76,10 @@ class RetailSettlementDaily(BaseModel):
     total_fee: float = Field(0.0, description="日总电费 (元)")
     avg_price: float = Field(0.0, description="加权均价 (元/kWh)")
     tou_summary: Dict[str, TouSummaryItem] = Field(default_factory=dict, description="各时段汇总")
+
+    # 成本与利润
+    total_allocated_cost: Optional[float] = Field(None, description="日总采购分摊成本 (元)")
+    gross_profit: Optional[float] = Field(None, description="日毛利 (元)")
 
     # 时间信息
     created_at: datetime = Field(default_factory=datetime.now)

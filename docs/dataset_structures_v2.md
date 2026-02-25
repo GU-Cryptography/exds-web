@@ -666,9 +666,13 @@ critical_alerts = db.customer_anomaly_alerts.find({
 | `period_details.load_mwh` | `Number` | 时段电量 (MWh) |
 | `period_details.unit_price` | `Number` | 时段单价 (元/kWh) |
 | `period_details.fee` | `Number` | 时段电费 (元) |
+| `period_details.allocated_cost` | `Number` | 该时段采购分摊成本 (元) |
+| `period_details.wholesale_price` | `Number` | 计算该成本所依据的代理拿货单价 (元/MWh) |
 | `total_load_mwh` | `Number` | 日总电量 (MWh) |
 | `total_fee` | `Number` | 日总电费 (元) |
 | `avg_price` | `Number` | 日加权均价 (元/kWh) |
+| `total_allocated_cost` | `Number` | 日总采购分摊成本 (元) |
+| `gross_profit` | `Number` | 日毛利 (元) |
 | `tou_summary` | `Object` | 分时段汇总 `{tip, peak, flat, valley, deep}` |
 | `tou_summary.tip.load_mwh` | `Number` | 尖峰总电量 |
 | `tou_summary.tip.fee` | `Number` | 尖峰总电费 |

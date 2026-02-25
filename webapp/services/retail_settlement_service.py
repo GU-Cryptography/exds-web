@@ -234,7 +234,25 @@ class RetailSettlementService:
                 fee=round(v["fee"], 2)
             )
 
-        # 7. 组装结算文档
+        # 7. 采购分摊成本及毛利计算 (Step 7)
+        # 获取按照天级别规则选定的一套分时批发成本均价
+        try:
+             wholesale_prices_48 = self._get_wholesale_period_prices(date_str)
+        except Exception as e:
+             logger.error(f"客户 {customer_id} 在 {date_str} 结算失败: {e}")
+             return None
+
+        total_allocated_cost = 0.0
+        
+        for i, detail in enumerate(period_details):
+             w_price = wholesale_prices_48[i]
+             allocated_cost = detail.load_mwh * w_price
+             
+             detail.wholesale_price = round(w_price, 6)
+             detail.allocated_cost = round(allocated_cost, 2)
+             total_allocated_cost += allocated_cost
+
+        # 8. 组装结算文档
         customer_name = contract.get("customer_name", "")
         settlement = RetailSettlementDaily(
             customer_id=customer_id,
@@ -258,9 +276,11 @@ class RetailSettlementService:
             total_fee=round(final_total_fee, 2),
             avg_price=round(final_avg_price, 6),
             tou_summary=tou_summary_models,
+            total_allocated_cost=round(total_allocated_cost, 2),
+            gross_profit=round(final_total_fee - total_allocated_cost, 2)
         )
 
-        # 8. 存入数据库 (upsert)
+        # 9. 存入数据库 (upsert)
         doc = settlement.model_dump()
         collection.update_one(
             {
@@ -273,11 +293,65 @@ class RetailSettlementService:
         )
         logger.info(
             f"零售结算完成: {customer_name} {date_str} "
-            f"电量={total_load:.3f}MWh 电费={final_total_fee:.2f}元 均价={final_avg_price:.4f}元/kWh "
+            f"电量={total_load:.3f}MWh 电费={final_total_fee:.2f}元 毛利={doc['gross_profit']:.2f}元 均价={final_avg_price:.4f}元/kWh "
             f"(封顶: {'是' if is_capped else '否'})"
         )
         doc["_is_new"] = True
         return doc
+
+    def _get_wholesale_period_prices(self, date_str: str) -> List[float]:
+         """
+         获取指定日期全系统批发侧的分时段成本单价 (元/MWh)
+         逻辑: 比较天级别的标准值总费用(total_standard_value_cost)和电能量总费用(total_energy_fee)，二者取大。
+         如果选定了标准值，时段单价=本时段的标准值/本时段电量；若选定电能量费，时段单价=本时段的电量总费/本时段电量。
+         """
+         ws_doc = self.db.settlement_daily.find_one({
+             "operating_date": date_str,
+             "version": "PLATFORM_DAILY"
+         })
+         if not ws_doc:
+              ws_doc = self.db.settlement_daily.find_one({
+                  "operating_date": date_str,
+                  "version": "PRELIMINARY"
+              })
+              
+         if not ws_doc:
+              raise ValueError(f"无法获取日期 {date_str} 的批发侧结算数据(需至少完成一版批发结算)")
+              
+         total_energy_fee = ws_doc.get("total_energy_fee", 0.0)
+         total_standard_cost = ws_doc.get("total_standard_value_cost", 0.0)
+         period_details = ws_doc.get("period_details", [])
+         
+         if len(period_details) < 48:
+              raise ValueError(f"日期 {date_str} 批发侧分时明细不足48点")
+              
+         # 判断取大机制选定的哪套费用体系
+         use_standard_value = total_standard_cost > total_energy_fee
+         
+         wholesale_prices = []
+         for p in period_details:
+             real_time_vol = 0.0
+             if "real_time" in p and isinstance(p["real_time"], dict):
+                 real_time_vol = p["real_time"].get("volume", 0.0)
+             else:
+                 # 可能模型对象访问
+                 try:
+                     real_time_vol = getattr(p.real_time, "volume", 0.0)
+                 except Exception:
+                     pass
+                     
+             if real_time_vol < 1e-4:
+                 wholesale_prices.append(0.0)
+                 continue
+                 
+             if use_standard_value:
+                 cost = p.get("standard_value_cost", 0.0) if isinstance(p, dict) else getattr(p, "standard_value_cost", 0.0)
+             else:
+                 cost = p.get("total_energy_fee", 0.0) if isinstance(p, dict) else getattr(p, "total_energy_fee", 0.0)
+                 
+             wholesale_prices.append(cost / real_time_vol)
+             
+         return wholesale_prices
 
     def calculate_all_customers_daily(
         self,
