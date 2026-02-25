@@ -656,7 +656,7 @@ const PreSettlementOverviewPage: React.FC = () => {
             <Box sx={{ width: '100%' }}>
                 {isTablet && (
                     <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold', color: 'text.primary' }}>
-                        结算管理 / 预结算总览
+                        结算管理 / 日清结算总览
                     </Typography>
                 )}
 

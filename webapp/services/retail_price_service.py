@@ -106,13 +106,14 @@ class RetailPriceService:
 
         # 2. 如果无正式数据或查找失败，进入降级处理
         logger.info(f"月份 {month_str} 无正式定价数据 [{price_key}]，采用模拟方案")
-        return self._fallback_resolve(price_key, date_str, is_time_based), "simulated"
+        return self._fallback_resolve(price_key, date_str, is_time_based, is_monthly=is_monthly), "simulated"
 
     def _fallback_resolve(
         self,
         price_key: str,
         date_str: str,
-        is_time_based: bool
+        is_time_based: bool,
+        is_monthly: bool = False
     ) -> Union[float, Dict[str, float], List[float], None]:
         """降级方案实现（江西 4.0 规则）"""
         
@@ -164,7 +165,7 @@ class RetailPriceService:
             if is_monthly:
                 # 场景：月度结算 -> 使用 MTD 均值
                 month_str = date_str[:7]
-                return get_monthly_avg_spot_prices_48(self.db, month_str, date_str, data_type), "simulated"
+                return get_monthly_avg_spot_prices_48(self.db, month_str, date_str, data_type)
             else:
                 # 场景：日清预结算 -> 使用当天的现货价格 (元/MWh -> 元/kWh)
                 collection_mapping = {

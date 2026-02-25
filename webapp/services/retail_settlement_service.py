@@ -344,7 +344,8 @@ class RetailSettlementService:
         pricing_config: Dict[str, Any],
         date_str: str,
         is_time_based_package: bool = True,
-        total_load_mwh: float = 0.0
+        total_load_mwh: float = 0.0,
+        settlement_type: str = "daily"
     ) -> Optional[Dict[str, Any]]:
         """
         价差分成类定价计算
@@ -508,7 +509,8 @@ class RetailSettlementService:
         pricing_config: Dict[str, Any],
         date_str: str,
         is_time_based_package: bool = True,
-        total_load_mwh: float = 0.0
+        total_load_mwh: float = 0.0,
+        settlement_type: str = "daily"
     ) -> Optional[Dict[str, Any]]:
         """
         参考价+联动类定价计算 (reference_linked_*)

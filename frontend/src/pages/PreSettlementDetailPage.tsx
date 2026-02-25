@@ -112,7 +112,7 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
 
     // Tab 模式使用内部状态管理日期和版本
     const [internalDate, setInternalDate] = useState<Date>(
-        initialDate ? parseISO(initialDate) : addDays(new Date(), -1)
+        initialDate ? parseISO(initialDate) : addDays(new Date(), -2)
     );
     const [internalVersion, setInternalVersion] = useState<string>(
         initialVersion || 'PLATFORM_DAILY'
@@ -121,7 +121,7 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
     // 根据模式选择数据源
     const selectedDate = isEmbeddedMode
         ? internalDate
-        : (searchParams.get('date') ? parseISO(searchParams.get('date')!) : addDays(new Date(), -1));
+        : (searchParams.get('date') ? parseISO(searchParams.get('date')!) : addDays(new Date(), -2));
     const version = isEmbeddedMode
         ? internalVersion
         : (searchParams.get('version') || 'PLATFORM_DAILY');
@@ -152,11 +152,17 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                 });
                 if (res.data.code === 200) {
                     setData(res.data.data);
+                } else if (res.data.code === 404) {
+                    setError('暂无数据：' + dateStr + (version === 'PRELIMINARY' ? ' 预出清数据' : ' 平台日清数据'));
                 } else {
                     setError(res.data.message || '加载失败');
                 }
             } catch (err: any) {
-                setError(err.response?.data?.detail || err.message || '请求失败');
+                if (err.response?.status === 404) {
+                    setError('暂无数据：该日期的结算数据尚未生成');
+                } else {
+                    setError(err.response?.data?.detail || err.message || '请求失败');
+                }
             } finally {
                 setLoading(false);
             }
@@ -955,7 +961,7 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
             <Box sx={{ width: '100%', pb: 4 }}>
                 {isTablet && (
                     <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold' }}>
-                        结算管理 / 预结算详情
+                        结算管理 / 日清结算详情
                     </Typography>
                 )}
 
@@ -1000,7 +1006,9 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                         <CircularProgress />
                     </Box>
                 ) : error ? (
-                    <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>
+                    <Alert severity={error.startsWith('暂无') ? 'info' : 'error'} sx={{ mt: 2 }}>
+                        {error}
+                    </Alert>
                 ) : data ? (
                     <Box sx={{ position: 'relative' }}>
                         {loading && (
