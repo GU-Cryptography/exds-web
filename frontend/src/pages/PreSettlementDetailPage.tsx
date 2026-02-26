@@ -19,10 +19,11 @@ import {
     Close as CloseIcon
 } from '@mui/icons-material';
 import { format, addDays, parseISO } from 'date-fns';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import apiClient from '../api/client';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
 import { useTabContext } from '../contexts/TabContext';
+import SingleCustomerSettlementDetailPage from './SingleCustomerSettlementDetailPage';
 
 // ====== 图标组件导入 ======
 import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
@@ -36,6 +37,10 @@ import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import InsightsIcon from '@mui/icons-material/Insights';
+import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
+import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
+import SpeedOutlinedIcon from '@mui/icons-material/SpeedOutlined';
+import VerifiedOutlinedIcon from '@mui/icons-material/VerifiedOutlined';
 
 import {
     ComposedChart, Line, Bar, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -101,9 +106,11 @@ const profitColor = (val: number): string => val >= 0 ? '#4caf50' : '#f44336';
 
 const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?: string }> = ({ initialDate, initialVersion }) => {
     const [searchParams, setSearchParams] = useSearchParams();
+    const navigate = useNavigate();
     const isTablet = useMediaQuery((t: Theme) => t.breakpoints.down('md'));
     const isMobile = useMediaQuery((t: Theme) => t.breakpoints.down('sm'));
-    const { setActiveTab } = useTabContext();
+    const tabContext = useTabContext();
+    const { setActiveTab } = tabContext;
 
     // ====== 关键：区分 Tab 嵌入模式 vs 路由模式 ======
     // Tab 模式：有 initialDate props，此时 useSearchParams 读取的是浏览器实际 URL（总览页），不可靠
@@ -258,11 +265,23 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
         }
     };
 
-    const jumpToCustomerDetail = (customerId: string) => {
-        if (!isEmbeddedMode) {
-            setSearchParams({ date: dateStr, version, customer_id: customerId });
+    const jumpToCustomerDetail = (customerId: string, customerName?: string) => {
+        const path = `/settlement/customer-settlement-detail?date=${dateStr}&version=${version}&customer_id=${customerId}`;
+        if (isMobile) {
+            navigate(path);
+        } else if (tabContext) {
+            tabContext.addTab({
+                key: path,
+                title: `单客户结算 - ${customerName || customerId}`,
+                path: path,
+                component: <SingleCustomerSettlementDetailPage
+                    initialDate={dateStr}
+                    initialVersion={version}
+                    initialCustomerId={customerId}
+                    initialCustomerName={customerName}
+                />,
+            });
         }
-        setActiveTabIdx(2);
     };
 
     const { isFullscreen: isFs1, FullscreenEnterButton: Enter1, FullscreenExitButton: Exit1, FullscreenTitle: Title1 } = useChartFullscreen({
@@ -276,6 +295,7 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
     const { isFullscreen: isFs3, FullscreenEnterButton: Enter3, FullscreenExitButton: Exit3, FullscreenTitle: Title3 } = useChartFullscreen({
         chartRef: chartRef3, title: `套餐收益对比图 (${dateStr})`
     });
+
 
     const renderSummaryCards = () => {
         if (!data) return null;
@@ -1072,7 +1092,7 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                                             </Typography>
                                         )}
                                     </Box>
-                                    <Button size="small" variant="text" onClick={() => jumpToCustomerDetail(c.customer_id)} sx={{ minWidth: 'auto', p: 0.5 }}>
+                                    <Button size="small" variant="text" onClick={() => jumpToCustomerDetail(c.customer_id, c.customer_name)} sx={{ minWidth: 'auto', p: 0.5 }}>
                                         详情
                                     </Button>
                                 </Box>
@@ -1189,7 +1209,7 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                                         {c.spread.toFixed(2)}
                                     </TableCell>
                                     <TableCell align="center">
-                                        <Button size="small" variant="text" onClick={() => jumpToCustomerDetail(c.customer_id)}>
+                                        <Button size="small" variant="text" onClick={() => jumpToCustomerDetail(c.customer_id, c.customer_name)}>
                                             查看明细
                                         </Button>
                                     </TableCell>
@@ -1219,99 +1239,16 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
         );
     };
 
-    const [customerLoading, setCustomerLoading] = useState(false);
-    const [customerData, setCustomerData] = useState<any>(null);
 
-    const fetchCustomerDetail = async () => {
-        const customerId = searchParams.get('customer_id');
-        if (!customerId || !selectedDate) return;
-        setCustomerLoading(true);
-        try {
-            const res = await apiClient.get('/api/v1/settlement/customer-detail', {
-                params: { date: dateStr, version, customer_id: customerId }
-            });
-            if (res.data.code === 200) {
-                setCustomerData(res.data.data);
-            }
-        } catch (err) {
-            console.error('Fetch customer detail failed', err);
-        } finally {
-            setCustomerLoading(false);
-        }
+
+    // ====== 时段类型颜色映射 ======
+    const PERIOD_TYPE_COLORS: Record<string, string> = {
+        '尖峰': '#ff5252', '高峰': '#ff9800', '平段': '#4caf50', '低谷': '#2196f3', '深谷': '#3f51b5'
+    };
+    const PERIOD_TYPE_SHORT: Record<string, string> = {
+        '尖峰': '尖', '高峰': '峰', '平段': '平', '低谷': '谷', '深谷': '深'
     };
 
-    useEffect(() => {
-        if (activeTabIdx === 2) {
-            fetchCustomerDetail();
-        }
-    }, [activeTabIdx, searchParams.get('customer_id'), dateStr, version]);
-
-    const renderCustomerDetailTab = () => {
-        if (customerLoading) return <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}><CircularProgress /></Box>;
-        if (!customerData) return <Alert severity="info">请从“客户结算列表”中选择一个客户查看详情</Alert>;
-
-        return (
-            <Box>
-                <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: 'action.hover' }}>
-                    <Grid container spacing={2}>
-                        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                            <Typography variant="caption" color="text.secondary">客户名称</Typography>
-                            <Typography variant="subtitle1" fontWeight="bold">{customerData.customer_name}</Typography>
-                        </Grid>
-                        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                            <Typography variant="caption" color="text.secondary">定价模式</Typography>
-                            <Typography variant="subtitle1">{customerData.pricing_model}</Typography>
-                        </Grid>
-                        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                            <Typography variant="caption" color="text.secondary">当日均价</Typography>
-                            <Typography variant="subtitle1" fontWeight="bold">{customerData.avg_price.toFixed(2)} 元/MWh</Typography>
-                        </Grid>
-                        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                            <Typography variant="caption" color="text.secondary">当日收益</Typography>
-                            <Typography variant="subtitle1" fontWeight="bold" sx={{ color: profitColor(customerData.daily_profit) }}>
-                                {formatYuan(customerData.daily_profit)} 元
-                            </Typography>
-                        </Grid>
-                    </Grid>
-                </Paper>
-
-                <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto' }}>
-                    <Table size="small" stickyHeader sx={{
-                        '& .MuiTableCell-root': { fontSize: '0.8rem', px: 1, whiteSpace: 'nowrap' }
-                    }}>
-                        <TableHead>
-                            <TableRow sx={{ bgcolor: 'action.hover' }}>
-                                <TableCell>时段</TableCell>
-                                <TableCell align="right">负荷(MWh)</TableCell>
-                                <TableCell align="right">名义价</TableCell>
-                                <TableCell align="right">封顶价</TableCell>
-                                <TableCell align="right">结算价</TableCell>
-                                <TableCell align="right">时段电费</TableCell>
-                            </TableRow>
-                        </TableHead>
-                        <TableBody>
-                            {customerData.period_details.map((p: any) => {
-                                const load = p.load_mwh || 0;
-                                const settlePrice = p.unit_price || 0; // 后端已转换为 元/MWh
-                                const fee = p.fee || 0;
-
-                                return (
-                                    <TableRow key={p.period} hover>
-                                        <TableCell>{p.period}</TableCell>
-                                        <TableCell align="right">{load.toFixed(4)}</TableCell>
-                                        <TableCell align="right">{(customerData.nominal_avg_price || 0).toFixed(2)}</TableCell>
-                                        <TableCell align="right">{(customerData.cap_price || 0).toFixed(2)}</TableCell>
-                                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>{settlePrice.toFixed(2)}</TableCell>
-                                        <TableCell align="right">{formatYuan(fee)}</TableCell>
-                                    </TableRow>
-                                );
-                            })}
-                        </TableBody>
-                    </Table>
-                </TableContainer>
-            </Box>
-        );
-    };
 
     return (
         <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
@@ -1358,6 +1295,7 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                     </Button>
                 </Paper>
 
+                {/* ====== 结算数据展示区域 ====== */}
                 {loading && !data ? (
                     <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
                         <CircularProgress />
@@ -1382,7 +1320,7 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                         {/* 主页签切换：批发 vs 零售 */}
                         <Box sx={{ borderBottom: 1, borderColor: 'divider', mt: 3 }}>
                             <Tabs
-                                value={activeTabIdx === 2 ? 1 : activeTabIdx} // 单客户详情归属于零售侧
+                                value={activeTabIdx}
                                 onChange={(_, val) => setActiveTabIdx(val)}
                             >
                                 <Tab label="批发侧结算分析" />
@@ -1417,50 +1355,26 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                         )}
 
                         {/* 零售侧内容 */}
-                        {(activeTabIdx === 1 || activeTabIdx === 2) && (
+                        {activeTabIdx === 1 && (
                             <Box sx={{ mt: 2 }}>
-                                {activeTabIdx === 2 && searchParams.get('customer_id') ? (
-                                    <Box>
-                                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                                            <Button
-                                                variant="outlined"
-                                                size="small"
-                                                onClick={() => {
-                                                    setActiveTabIdx(1);
-                                                    const nextParams = new URLSearchParams(searchParams);
-                                                    nextParams.delete('customer_id');
-                                                    setSearchParams(nextParams, { replace: true });
-                                                }}
-                                                sx={{ mr: 2 }}
-                                            >
-                                                返回列表
-                                            </Button>
-                                            <Typography variant="h6">单客户结算明细</Typography>
-                                        </Box>
-                                        {renderCustomerDetailTab()}
-                                    </Box>
-                                ) : (
-                                    <Box>
-                                        <Grid container spacing={2} sx={{ mb: 2 }}>
-                                            <Grid size={{ xs: 12, lg: 6 }}>
-                                                <Paper variant="outlined" sx={{ p: { xs: 1, sm: 1.5 }, height: '100%' }}>
-                                                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ px: 1, pt: 0.5 }}>客户收益多维气泡图</Typography>
-                                                    {renderRetailBubbleChart()}
-                                                </Paper>
-                                            </Grid>
-                                            <Grid size={{ xs: 12, lg: 6 }}>
-                                                <Paper variant="outlined" sx={{ p: { xs: 1, sm: 1.5 }, height: '100%' }}>
-                                                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ px: 1, pt: 0.5 }}>按套餐收益与电量对比图</Typography>
-                                                    {renderRetailPackageChart()}
-                                                </Paper>
-                                            </Grid>
-                                        </Grid>
-                                        <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 } }}>
-                                            <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ px: 1, pt: 1 }}>客户结算明细列表</Typography>
-                                            {renderCustomerTable()}
+                                <Grid container spacing={2} sx={{ mb: 2 }}>
+                                    <Grid size={{ xs: 12, lg: 6 }}>
+                                        <Paper variant="outlined" sx={{ p: { xs: 1, sm: 1.5 }, height: '100%' }}>
+                                            <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ px: 1, pt: 0.5 }}>客户收益多维气泡图</Typography>
+                                            {renderRetailBubbleChart()}
                                         </Paper>
-                                    </Box>
-                                )}
+                                    </Grid>
+                                    <Grid size={{ xs: 12, lg: 6 }}>
+                                        <Paper variant="outlined" sx={{ p: { xs: 1, sm: 1.5 }, height: '100%' }}>
+                                            <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ px: 1, pt: 0.5 }}>按套餐收益与电量对比图</Typography>
+                                            {renderRetailPackageChart()}
+                                        </Paper>
+                                    </Grid>
+                                </Grid>
+                                <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 } }}>
+                                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ px: 1, pt: 1 }}>客户结算明细列表</Typography>
+                                    {renderCustomerTable()}
+                                </Paper>
                             </Box>
                         )}
                     </Box>

@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 from calendar import monthrange
 
+from bson import ObjectId
 from webapp.tools.mongo import DATABASE
 from webapp.models.settlement import (
     SettlementDaily, SettlementPeriodDetail, 
@@ -624,7 +625,25 @@ class SettlementService:
             "date": date_str,
             "customer_id": customer_id
         })
+        if not doc:
+            return None
+            
         if "_id" in doc: del doc["_id"]
+
+        # 补全套餐配置详情
+        contract_id = doc.get("contract_id")
+        if contract_id:
+            try:
+                query_id = ObjectId(contract_id) if (isinstance(contract_id, str) and len(contract_id) == 24) else contract_id
+                contract = self.db.retail_contracts.find_one({"_id": query_id})
+                if contract and contract.get("package_id"):
+                    pkg_id = contract["package_id"]
+                    pkg_query_id = ObjectId(pkg_id) if (isinstance(pkg_id, str) and len(pkg_id) == 24) else pkg_id
+                    package = self.db.retail_packages.find_one({"_id": pkg_query_id})
+                    if package:
+                        doc["pricing_config"] = package.get("pricing_config", {})
+            except Exception as e:
+                logger.error(f"Error fetching package config for contract {contract_id}: {e}")
         
         # 补充收益计算 (对齐概览列表逻辑)
         # 需要当天的批发均价
@@ -648,6 +667,22 @@ class SettlementService:
         doc["avg_price"] = (doc.get("avg_price", 0) or 0) * 1000.0 # 元/kWh -> 元/MWh
         doc["nominal_avg_price"] = (doc.get("nominal_avg_price", 0) or 0) * 1000.0
         doc["cap_price"] = (doc.get("cap_price", 0) or 0) * 1000.0
+
+        # 处理汇总价格单位 (元/kWh -> 元/MWh)
+        for key in ["final_prices", "fixed_prices"]:
+            if key in doc and isinstance(doc[key], dict):
+                for pk in doc[key]:
+                    if doc[key][pk] is not None:
+                        doc[key][pk] = float(doc[key][pk]) * 1000.0
+        
+        if "linked_config" in doc and doc["linked_config"]:
+            lc = doc["linked_config"]
+            if "target_prices" in lc and isinstance(lc["target_prices"], dict):
+                for pk in lc["target_prices"]:
+                     if lc["target_prices"][pk] is not None:
+                         lc["target_prices"][pk] = float(lc["target_prices"][pk]) * 1000.0
+            if "target_prices_48" in lc and isinstance(lc["target_prices_48"], list):
+                lc["target_prices_48"] = [float(v) * 1000.0 if v is not None else 0 for v in lc["target_prices_48"]]
         
         # 处理分时明细价格单位 (元/kWh -> 元/MWh)
         if "period_details" in doc:
