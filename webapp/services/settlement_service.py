@@ -180,11 +180,14 @@ class SettlementService:
         elif k_ratio > 1.2:
             # 目标允许签约量 = 1.2 * Q_rt - Q_mech
             # 若 Q_mech > 1.2 * Q_rt, 则允许签约量 < 0 ?? (暂取 max(0, ...))
-            q_target_contract = max(0, 1.2 * q_rt - q_mech)
+            # q_target_contract = max(0, 1.2 * q_rt - q_mech)
+            q_excess = 1.2 * q_rt - (q_contract + q_mech)
             
             # 标准值模型: 按 (1.2 * Q_rt - Q_mech) 作为用户合同量，价格按用户均价
-            cost_std_contract = q_target_contract * (p_company_contract - p_rt)
-            cost_std = cost_std_contract + cost_da + cost_rt
+            cost_std = cost_actual + q_excess * (p_company_contract- p_rt)
+            
+            # cost_std_contract = q_target_contract * (p_company_contract - p_rt)
+            # cost_std = cost_std_contract + cost_da + cost_rt
             
         # 单时段不计算回收费 (设为0，留到日汇总 Netting)
         # recovery_fee = 0.0
