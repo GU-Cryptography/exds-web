@@ -352,6 +352,41 @@ class CustomerService:
         if result.matched_count == 0:
             raise ValueError("客户不存在")
 
+        # 同步更新关联的零售合同信息
+        new_short_name = update_data.get("short_name")
+        old_short_name = existing_customer.get("short_name")
+        # new_user_name check from update_data because user_name might not be provided in partial updates
+        new_user_name = update_data.get("user_name")
+        old_user_name = existing_customer.get("user_name")
+
+        contract_updates = {}
+        
+        if "user_name" in update_data and new_user_name != old_user_name:
+            contract_updates["customer_name"] = new_user_name
+            
+        if "short_name" in update_data and new_short_name != old_short_name:
+            # 合同名称依赖于客户简称，需要针对每个合同单独处理
+            needs_contract_name_update = True
+        else:
+            needs_contract_name_update = False
+            
+        if contract_updates or needs_contract_name_update:
+            contracts = self.db.retail_contracts.find({"customer_id": str(customer_id)})
+            for contract in contracts:
+                current_updates = contract_updates.copy()
+                if needs_contract_name_update:
+                    purchase_start = contract.get("purchase_start_month")
+                    if purchase_start:
+                        year_month_str = purchase_start.strftime("%Y%m")
+                        short_name_to_use = new_short_name if new_short_name else "客户"
+                        current_updates["contract_name"] = f"{short_name_to_use}{year_month_str}"
+                
+                if current_updates:
+                    self.db.retail_contracts.update_one(
+                        {"_id": contract["_id"]},
+                        {"$set": current_updates}
+                    )
+
         # 返回更新后的客户信息
         updated_customer = self.collection.find_one({"_id": ObjectId(customer_id)})
         return self._convert_to_dict(updated_customer)
