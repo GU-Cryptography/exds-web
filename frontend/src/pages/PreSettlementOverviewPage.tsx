@@ -4,7 +4,9 @@ import {
     Select, MenuItem, FormControl, InputLabel, SelectChangeEvent,
     useMediaQuery, Theme, Table, TableBody, TableCell,
     TableContainer, TableHead, TableRow, Card, CardContent, Divider,
-    ToggleButtonGroup, ToggleButton
+    ToggleButtonGroup, ToggleButton, Button, Dialog, DialogTitle,
+    DialogContent, DialogActions, CircularProgress as MUICircularProgress,
+    List, ListItem, ListItemText, Typography as MUITypography
 } from '@mui/material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -173,6 +175,12 @@ const PreSettlementOverviewPage: React.FC = () => {
     const [data, setData] = useState<OverviewData | null>(null);
     const [chartView, setChartView] = useState<ChartViewMode>('price');
 
+    // 校验状态
+    const [validateDialogOpen, setValidateDialogOpen] = useState(false);
+    const [validating, setValidating] = useState(false);
+    const [validateResult, setValidateResult] = useState<any>(null);
+    const [validateError, setValidateError] = useState<string | null>(null);
+
     const leftChartRef = useRef<HTMLDivElement>(null);
     const rightChartRef = useRef<HTMLDivElement>(null);
     const navigate = useNavigate();
@@ -279,6 +287,28 @@ const PreSettlementOverviewPage: React.FC = () => {
             setLoading(false);
         }
     }, [selectedMonth, version]);
+
+    const handleValidate = async () => {
+        if (!selectedMonth) return;
+        setValidateDialogOpen(true);
+        setValidating(true);
+        setValidateResult(null);
+        setValidateError(null);
+        try {
+            const res = await apiClient.get('/api/v1/settlement/validate', {
+                params: { month: format(selectedMonth, 'yyyy-MM') },
+            });
+            if (res.data.code === 200) {
+                setValidateResult(res.data.data);
+            } else {
+                setValidateError(res.data.message || '校验失败');
+            }
+        } catch (err: any) {
+            setValidateError(err.response?.data?.detail || err.message || '请求失败');
+        } finally {
+            setValidating(false);
+        }
+    };
 
     const navigateToDetail = (date: string) => {
         const path = `/settlement/pre-settlement-detail?date=${date}&version=${version}`;
@@ -597,6 +627,7 @@ const PreSettlementOverviewPage: React.FC = () => {
                             <TableCell align="right">价差</TableCell>
                             <TableCell align="right">日毛利(元)</TableCell>
                             <TableCell align="right">累计毛利(元)</TableCell>
+                            <TableCell align="center">操作</TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
@@ -626,6 +657,16 @@ const PreSettlementOverviewPage: React.FC = () => {
                                         {hasRowData ? formatYuan(d.daily_profit) : '-'}
                                     </TableCell>
                                     <TableCell align="right">{hasRowData ? formatYuan(d.cumulative_profit) : '-'}</TableCell>
+                                    <TableCell align="center">
+                                        <Button
+                                            size="small"
+                                            variant="outlined"
+                                            onClick={() => navigateToDetail(d.date)}
+                                            sx={{ minWidth: 'auto', py: 0.25 }}
+                                        >
+                                            查看详情
+                                        </Button>
+                                    </TableCell>
                                 </TableRow>
                             );
                         })}
@@ -644,10 +685,110 @@ const PreSettlementOverviewPage: React.FC = () => {
                                 {formatYuan(s.gross_profit)}
                             </TableCell>
                             <TableCell align="right">{formatYuan(s.gross_profit)}</TableCell>
+                            <TableCell></TableCell>
                         </TableRow>
                     </TableBody>
                 </Table>
             </TableContainer>
+        );
+    };
+
+    const renderValidateDialog = () => {
+        const r1Errors = validateResult?.rule1_errors || [];
+        const r2Errors = validateResult?.rule2_errors || [];
+        const hasErrors = r1Errors.length > 0 || r2Errors.length > 0;
+
+        return (
+            <Dialog open={validateDialogOpen} onClose={() => setValidateDialogOpen(false)} maxWidth="md" fullWidth>
+                <DialogTitle>数据校验结果 ({monthStr})</DialogTitle>
+                <DialogContent dividers>
+                    {validating ? (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', p: 4, flexDirection: 'column', alignItems: 'center' }}>
+                            <MUICircularProgress size={40} sx={{ mb: 2 }} />
+                            <MUITypography>正在比对平台数据与结算结果...</MUITypography>
+                        </Box>
+                    ) : validateError ? (
+                        <Alert severity="error">{validateError}</Alert>
+                    ) : validateResult ? (
+                        !hasErrors ? (
+                            <Alert severity="success" sx={{ py: 3, '& .MuiAlert-message': { fontSize: '1.1rem' } }}>
+                                恭喜！当月平台侧与结算侧数据比对完全一致。
+                            </Alert>
+                        ) : (
+                            <Box>
+                                <Alert severity="warning" sx={{ mb: 2 }}>
+                                    发现不一致数据，请核查以下日期的结算单：
+                                </Alert>
+
+                                {r1Errors.length > 0 && (
+                                    <Box sx={{ mb: 3 }}>
+                                        <Typography variant="subtitle1" fontWeight="bold" color="error.main" gutterBottom>
+                                            规则1：电能量费用异常 (平台每日原始电能量费 vs 结算单确权版总电费)
+                                        </Typography>
+                                        <TableContainer component={Paper} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                                            <Table size="small">
+                                                <TableHead>
+                                                    <TableRow sx={{ bgcolor: 'action.hover' }}>
+                                                        <TableCell>日期</TableCell>
+                                                        <TableCell align="right">平台原始电费(元)</TableCell>
+                                                        <TableCell align="right">结算单确权电费(元)</TableCell>
+                                                        <TableCell align="right">误差绝对值(元)</TableCell>
+                                                    </TableRow>
+                                                </TableHead>
+                                                <TableBody>
+                                                    {r1Errors.map((e: any) => (
+                                                        <TableRow key={e.date}>
+                                                            <TableCell>{e.date}</TableCell>
+                                                            <TableCell align="right">{e.platform_original_fee.toFixed(2)}</TableCell>
+                                                            <TableCell align="right">{e.settlement_fee.toFixed(2)}</TableCell>
+                                                            <TableCell align="right" sx={{ color: 'error.main', fontWeight: 'bold' }}>{e.diff.toFixed(2)}</TableCell>
+                                                        </TableRow>
+                                                    ))}
+                                                </TableBody>
+                                            </Table>
+                                        </TableContainer>
+                                    </Box>
+                                )}
+
+                                {r2Errors.length > 0 && (
+                                    <Box>
+                                        <Typography variant="subtitle1" fontWeight="bold" color="error.main" gutterBottom>
+                                            规则2：标准值电费异常 (结算单预结算版 vs 结算单确权版)
+                                        </Typography>
+                                        <TableContainer component={Paper} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                                            <Table size="small">
+                                                <TableHead>
+                                                    <TableRow sx={{ bgcolor: 'action.hover' }}>
+                                                        <TableCell>日期</TableCell>
+                                                        <TableCell align="right">预结算标准值电费(元)</TableCell>
+                                                        <TableCell align="right">确权版标准值电费(元)</TableCell>
+                                                        <TableCell align="right">误差绝对值(元)</TableCell>
+                                                    </TableRow>
+                                                </TableHead>
+                                                <TableBody>
+                                                    {r2Errors.map((e: any) => (
+                                                        <TableRow key={e.date}>
+                                                            <TableCell>{e.date}</TableCell>
+                                                            <TableCell align="right">{e.preliminary_std_cost.toFixed(2)}</TableCell>
+                                                            <TableCell align="right">{e.platform_std_cost.toFixed(2)}</TableCell>
+                                                            <TableCell align="right" sx={{ color: 'error.main', fontWeight: 'bold' }}>{e.diff.toFixed(2)}</TableCell>
+                                                        </TableRow>
+                                                    ))}
+                                                </TableBody>
+                                            </Table>
+                                        </TableContainer>
+                                    </Box>
+                                )}
+                            </Box>
+                        )
+                    ) : null}
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setValidateDialogOpen(false)} variant="contained">
+                        关闭
+                    </Button>
+                </DialogActions>
+            </Dialog>
         );
     };
 
@@ -686,6 +827,15 @@ const PreSettlementOverviewPage: React.FC = () => {
                             ))}
                         </Select>
                     </FormControl>
+                    <Button
+                        variant="outlined"
+                        color="secondary"
+                        onClick={handleValidate}
+                        disabled={loading}
+                        sx={{ ml: 1 }}
+                    >
+                        数据校验
+                    </Button>
                 </Paper>
 
                 {loading && !data ? (
@@ -735,6 +885,7 @@ const PreSettlementOverviewPage: React.FC = () => {
 
                         {isMobile && <Typography variant="h6" sx={{ mt: 2 }}>日度明细</Typography>}
                         {isMobile ? renderMobileCards() : renderDesktopTable()}
+                        {renderValidateDialog()}
                     </Box>
                 ) : null}
             </Box>

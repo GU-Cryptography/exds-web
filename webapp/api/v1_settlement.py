@@ -332,3 +332,84 @@ async def export_wholesale_settlement(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/validate", response_model=ResponseModel)
+async def validate_settlement_data(
+    month: str = Query(..., regex=r"^\d{4}-\d{2}$", description="月份，格式 YYYY-MM"),
+):
+    """
+    日清结算数据校验：
+    1. 比较当月 spot_settlement_daily(平台电能量费) 与 settlement_daily(PLATFORM_DAILY版) 的电能量费用，误差是否 < 10
+    2. 比较当月 settlement_daily 中 PRELIMINARY 与 PLATFORM_DAILY 版本的标准值电费，误差是否 < 100
+    """
+    try:
+        import calendar
+        year, mon = int(month[:4]), int(month[5:7])
+        _, last_day = calendar.monthrange(year, mon)
+        start_date = f"{month}-01"
+        end_date = f"{month}-{last_day:02d}"
+
+        db = service.db
+        
+        # 1. 获取当月 spot_settlement_daily 数据 (平台原始日结数据)
+        spot_cursor = db.spot_settlement_daily.find({
+            "operating_date": {"$gte": start_date, "$lte": end_date}
+        })
+        spot_data = {doc["operating_date"]: doc.get("total_fee", 0) for doc in spot_cursor}
+        
+        # 2. 获取当月 settlement_daily 数据 (PRELIMINARY 和 PLATFORM_DAILY)
+        preliminary_cursor = db.settlement_daily.find({
+            "operating_date": {"$gte": start_date, "$lte": end_date},
+            "version": SettlementVersion.PRELIMINARY.value
+        }, projection={"operating_date": 1, "total_energy_fee": 1, "total_standard_value_cost": 1})
+        preliminary_data = {doc["operating_date"]: doc for doc in preliminary_cursor}
+        
+        platform_cursor = db.settlement_daily.find({
+            "operating_date": {"$gte": start_date, "$lte": end_date},
+            "version": SettlementVersion.PLATFORM_DAILY.value
+        }, projection={"operating_date": 1, "total_energy_fee": 1, "total_standard_value_cost": 1})
+        platform_data = {doc["operating_date"]: doc for doc in platform_cursor}
+        
+        all_dates = sorted(list(set(list(spot_data.keys()) + list(preliminary_data.keys()) + list(platform_data.keys()))))
+        
+        rule1_errors = []
+        rule2_errors = []
+        
+        for d in all_dates:
+            # Rule 1: spot total_fee vs platform_daily total_energy_fee
+            spot_fee = spot_data.get(d)
+            pf_doc = platform_data.get(d)
+            if spot_fee is not None and pf_doc is not None:
+                pf_fee = pf_doc.get("total_energy_fee", 0)
+                diff1 = abs(spot_fee - pf_fee)
+                if diff1 > 10:
+                    rule1_errors.append({
+                        "date": d,
+                        "platform_original_fee": round(spot_fee, 2),
+                        "settlement_fee": round(pf_fee, 2),
+                        "diff": round(diff1, 2)
+                    })
+            
+            # Rule 2: preliminary vs platform_daily standard_value_cost
+            pr_doc = preliminary_data.get(d)
+            if pr_doc is not None and pf_doc is not None:
+                pr_std = pr_doc.get("total_standard_value_cost", 0)
+                pf_std = pf_doc.get("total_standard_value_cost", 0)
+                diff2 = abs(pr_std - pf_std)
+                if diff2 > 100:
+                    rule2_errors.append({
+                        "date": d,
+                        "preliminary_std_cost": round(pr_std, 2),
+                        "platform_std_cost": round(pf_std, 2),
+                        "diff": round(diff2, 2)
+                    })
+                    
+        return ResponseModel(code=200, data={
+            "rule1_errors": rule1_errors,
+            "rule2_errors": rule2_errors
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return ResponseModel(code=500, message=str(e), data=None)
