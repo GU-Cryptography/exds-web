@@ -82,9 +82,6 @@ class SettlementPeriodDetail(BaseModel):
     # 偏差考核
     contract_ratio: float = Field(..., description="签约比例 (%)")
     standard_value_cost: float = Field(..., description="标准值费用 (模拟)")
-    # 偏差考核
-    contract_ratio: float = Field(..., description="签约比例 (%)")
-    standard_value_cost: float = Field(..., description="标准值费用 (模拟)")
 
 
 # --- 日结算主模型 ---
@@ -129,7 +126,7 @@ class SettlementDaily(BaseMongoModel):
     predicted_wholesale_price: float = Field(..., description="预测批发均价 (Predicted / Total_RT_Vol)")
     
     # --- 分时明细 ---
-    period_details: List[SettlementPeriodDetail] = Field(..., description="48点明细")
+    period_details: Optional[List[SettlementPeriodDetail]] = Field(None, description="48点明细")
 
     class Config:
         collection_name = "settlement_daily"

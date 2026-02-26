@@ -4,7 +4,7 @@ import {
     Select, MenuItem, FormControl, InputLabel, SelectChangeEvent,
     useMediaQuery, Theme, Tabs, Tab, Button, Divider,
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel,
-    Drawer
+    Drawer, Dialog, DialogTitle, DialogContent, DialogActions, FormGroup, FormControlLabel, Checkbox
 } from '@mui/material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -140,6 +140,16 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
     const [activeTabIdx, setActiveTabIdx] = useState(0);
     const [refreshCount, setRefreshCount] = useState(0);
     const [exporting, setExporting] = useState(false);
+    const [processing, setProcessing] = useState(false);
+    const [processStatus, setProcessStatus] = useState<string>('');
+
+    // 重算弹窗状态
+    const [reSettleDialogOpen, setReSettleDialogOpen] = useState(false);
+    const [reSettleOptions, setReSettleOptions] = useState({
+        wholesalePreliminary: true,
+        wholesalePlatform: false,
+        retail: true
+    });
 
     const chartRef1 = useRef<HTMLDivElement>(null);
     const chartRef2 = useRef<HTMLDivElement>(null);
@@ -217,19 +227,53 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
         }
     };
 
-    const handleReSettle = async () => {
+    const handleReSettle = () => {
+        setReSettleDialogOpen(true);
+    };
+
+    const executeReSettle = async () => {
         if (!selectedDate) return;
-        setLoading(true);
+        setProcessing(true);
+        setReSettleDialogOpen(false);
+        setError(null);
         try {
-            await apiClient.post('/api/v1/settlement/calculate', {
-                date: dateStr,
-                version: version,
-                force: true
-            });
+            // 1. 批发侧 - 原始数据计算
+            if (reSettleOptions.wholesalePreliminary) {
+                setProcessStatus('正在重算：批发侧(原始数据)...');
+                await apiClient.post('/api/v1/settlement/calculate', {
+                    date: dateStr,
+                    version: 'PRELIMINARY',
+                    force: true
+                });
+            }
+
+            // 2. 批发侧 - 平台日清数据
+            if (reSettleOptions.wholesalePlatform) {
+                setProcessStatus('正在重算：批发侧(平台日清)...');
+                await apiClient.post('/api/v1/settlement/calculate', {
+                    date: dateStr,
+                    version: 'PLATFORM_DAILY',
+                    force: true
+                });
+            }
+
+            // 3. 零售侧全量核算
+            if (reSettleOptions.retail) {
+                setProcessStatus('正在重算：零售侧全量核算...');
+                await apiClient.post('/api/v1/retail-settlement/calculate', {
+                    date: dateStr,
+                    force: true
+                });
+            }
+
+            setProcessStatus('重算完成，正在刷新页面...');
             setRefreshCount((prev: number) => prev + 1);
         } catch (err: any) {
-            setError(err.response?.data?.detail || '重算失败');
-            setLoading(false);
+            console.error('重算失败:', err);
+            setError(err.response?.data?.detail || err.message || '重算过程出现错误');
+        } finally {
+            setProcessing(false);
+            setProcessStatus('');
         }
     };
 
@@ -1306,13 +1350,18 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                     </Alert>
                 ) : data ? (
                     <Box sx={{ position: 'relative' }}>
-                        {loading && (
+                        {(loading || processing) && (
                             <Box sx={{
                                 position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                                 backgroundColor: 'rgba(255, 255, 255, 0.7)', zIndex: 1000,
                             }}>
                                 <CircularProgress />
+                                {processStatus && (
+                                    <Typography variant="body2" sx={{ mt: 2, color: 'primary.main', fontWeight: 'bold' }}>
+                                        {processStatus}
+                                    </Typography>
+                                )}
                             </Box>
                         )}
                         {renderSummaryCards()}
@@ -1379,6 +1428,54 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                         )}
                     </Box>
                 ) : null}
+                {/* 重算选择弹窗 */}
+                <Dialog open={reSettleDialogOpen} onClose={() => !processing && setReSettleDialogOpen(false)}>
+                    <DialogTitle>重新结算选择 ({dateStr})</DialogTitle>
+                    <DialogContent dividers>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                            请选择需要重新执行的结算任务类型。重算过程可能持续几秒钟。
+                        </Typography>
+                        <FormGroup>
+                            <FormControlLabel
+                                control={
+                                    <Checkbox
+                                        checked={reSettleOptions.wholesalePreliminary}
+                                        onChange={(e) => setReSettleOptions({ ...reSettleOptions, wholesalePreliminary: e.target.checked })}
+                                    />
+                                }
+                                label="批发侧 - 原始数据计算 (PRELIMINARY)"
+                            />
+                            <FormControlLabel
+                                control={
+                                    <Checkbox
+                                        checked={reSettleOptions.wholesalePlatform}
+                                        onChange={(e) => setReSettleOptions({ ...reSettleOptions, wholesalePlatform: e.target.checked })}
+                                    />
+                                }
+                                label="批发侧 - 平台日清数据 (PLATFORM_DAILY)"
+                            />
+                            <FormControlLabel
+                                control={
+                                    <Checkbox
+                                        checked={reSettleOptions.retail}
+                                        onChange={(e) => setReSettleOptions({ ...reSettleOptions, retail: e.target.checked })}
+                                    />
+                                }
+                                label="零售侧全量核算 (涵盖所有客户)"
+                            />
+                        </FormGroup>
+                    </DialogContent>
+                    <DialogActions>
+                        <Button onClick={() => setReSettleDialogOpen(false)} color="inherit">取消</Button>
+                        <Button
+                            onClick={executeReSettle}
+                            variant="contained"
+                            disabled={!reSettleOptions.wholesalePreliminary && !reSettleOptions.wholesalePlatform && !reSettleOptions.retail}
+                        >
+                            开始执行
+                        </Button>
+                    </DialogActions>
+                </Dialog>
             </Box>
         </LocalizationProvider >
     );

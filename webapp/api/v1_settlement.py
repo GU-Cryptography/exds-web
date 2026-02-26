@@ -82,7 +82,9 @@ async def get_daily_settlement(
         if version:
             query["version"] = version
         
-        cursor = service.db.settlement_daily.find(query).sort("operating_date", 1)
+        # 优化：根据 include_details 决定是否加载重型明细数据
+        projection = None if include_details else {"period_details": 0}
+        cursor = service.db.settlement_daily.find(query, projection).sort("operating_date", 1)
         
         results = []
         for doc in cursor:
@@ -142,7 +144,8 @@ async def get_settlement_overview(
 
         # ====== 批发侧 ======
         wholesale_cursor = db.settlement_daily.find(
-            {"operating_date": {"$gte": start_date, "$lte": end_date}, "version": version.value}
+            {"operating_date": {"$gte": start_date, "$lte": end_date}, "version": version.value},
+            projection={"period_details": 0}
         ).sort("operating_date", 1)
 
         wholesale_by_date = {}

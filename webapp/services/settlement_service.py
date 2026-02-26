@@ -549,8 +549,11 @@ class SettlementService:
         wholesale = SettlementDaily(**wholesale_doc)
         wholesale_data = wholesale.model_dump() if hasattr(wholesale, 'model_dump') else wholesale.dict()
 
-        # 2. 获取零售侧数据并聚合
-        retail_cursor = self.db.retail_settlement_daily.find({"date": date_str})
+        # 2. 获取零售侧数据并聚合 (优化：增加 projection 排除重型 period_details)
+        retail_cursor = self.db.retail_settlement_daily.find(
+            {"date": date_str},
+            projection={"period_details": 0}
+        )
         retail_docs = list(retail_cursor)
         
         # 计算批发均价 (用于分摊成本简化计算)
@@ -648,15 +651,17 @@ class SettlementService:
             except Exception as e:
                 logger.error(f"Error fetching package config for contract {contract_id}: {e}")
         
-        # 补充收益计算 (对齐概览列表逻辑)
-        # 需要当天的批发均价
+        # 需要当天的批发均价 (优化：增加 projection 排除明细)
         wholesale_price = 0.0
         ws_doc = self.db.settlement_daily.find_one({
             "operating_date": date_str,
             "version": SettlementVersion.PLATFORM_DAILY # 默认取确权版
-        })
+        }, projection={"predicted_wholesale_price": 1})
         if not ws_doc:
-             ws_doc = self.db.settlement_daily.find_one({"operating_date": date_str})
+             ws_doc = self.db.settlement_daily.find_one(
+                 {"operating_date": date_str},
+                 projection={"predicted_wholesale_price": 1}
+             )
         
         if ws_doc:
              wholesale_price = ws_doc.get("predicted_wholesale_price", 0)
