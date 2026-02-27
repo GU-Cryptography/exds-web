@@ -413,9 +413,7 @@ class CustomerService:
         if not customer:
             raise ValueError("客户不存在")
 
-        # 只有意向客户可以删除
-        if customer.get("status") != "prospect":
-            raise ValueError("只有意向客户可以删除，其他状态的客户请使用状态转换操作")
+        # 不再检查客户状态，允许直接删除
 
         # 物理删除
         result = self.collection.delete_one({"_id": ObjectId(customer_id)})
