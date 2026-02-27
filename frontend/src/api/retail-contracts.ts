@@ -280,3 +280,64 @@ export const uploadContractPdf = (contractId: string, file: File) => {
 export const checkContractHasPdf = (contractId: string) => {
   return apiClient.get<{ has_pdf: boolean }>(`/api/v1/retail-contracts/${contractId}/has-pdf`);
 };
+
+// ##############################################################################
+// 导入创建合同及客户 (Import and Create New Contract APIs)
+// ##############################################################################
+
+export interface MeterPointData {
+  meter_id: string;
+  measuring_point: string;
+  voltage_level: string;
+}
+
+export interface ParsePdfResponse {
+  customer_name?: string;
+  customer_short_name?: string;
+  period?: string;
+  package_name?: string;
+  total_electricity?: number;
+  attachment2?: MeterPointData[];
+  location?: string;
+  is_customer_new: boolean;
+  is_package_new: boolean;
+  is_contract_duplicate: boolean;
+  duplicate_contract_id?: string;
+}
+
+export interface ImportCreateRequest {
+  customer_name: string;
+  customer_short_name: string;
+  location?: string;
+  period: string;
+  package_name: string;
+  total_electricity: number;
+  attachment2: MeterPointData[];
+}
+
+export interface ImportCreateResponse {
+  success: boolean;
+  contract_id: string;
+  customer_id: string;
+  package_id: string;
+}
+
+/**
+ * 上传PDF并解析出合同数据预览
+ * @param file PDF文件
+ */
+export const parseContractPdf = (file: File) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return apiClient.post<ParsePdfResponse>('/api/v1/retail-contracts/parse-pdf', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  });
+};
+
+/**
+ * 确认创建客户及合同
+ * @param data 解析后经确认的数据
+ */
+export const importAndCreateContract = (data: ImportCreateRequest) => {
+  return apiClient.post<ImportCreateResponse>('/api/v1/retail-contracts/import-create', data);
+};

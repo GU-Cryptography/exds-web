@@ -24,7 +24,8 @@ import {
   ListItem,
   ListItemIcon,
   ListItemText,
-  Divider
+  Divider,
+  Grid
 } from '@mui/material';
 import {
   Download as DownloadIcon,
@@ -40,7 +41,11 @@ import {
   ImportResult,
   ImportError,
   uploadContractPdfs,
-  PdfUploadResult
+  PdfUploadResult,
+  parseContractPdf,
+  ParsePdfResponse,
+  importAndCreateContract,
+  uploadContractPdf
 } from '../api/retail-contracts';
 
 interface ContractImportDialogProps {
@@ -54,8 +59,9 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
   onClose,
   onSuccess
 }) => {
-  // 导入类型：excel 或 pdf
-  const [importType, setImportType] = useState<'excel' | 'pdf'>('excel');
+
+  // 导入类型：excel 或 pdf 或 pdf_create
+  const [importType, setImportType] = useState<'excel' | 'pdf' | 'pdf_create'>('excel');
 
   // Excel导入相关状态
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -64,10 +70,16 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // PDF导入相关状态
+  // PDF批量导入相关状态
   const [selectedPdfFiles, setSelectedPdfFiles] = useState<File[]>([]);
   const [pdfUploadResult, setPdfUploadResult] = useState<PdfUploadResult | null>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
+
+  // 导入创建合同(PDF)相关状态
+  const [createPdfFile, setCreatePdfFile] = useState<File | null>(null);
+  const [parseResult, setParseResult] = useState<ParsePdfResponse | null>(null);
+  const [createSuccess, setCreateSuccess] = useState<boolean>(false);
+  const createPdfRef = useRef<HTMLInputElement>(null);
 
   // Excel文件选择处理
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -178,11 +190,87 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
     }
   };
 
+  // 导入创建合同(PDF)选择处理
+  const handleCreatePdfSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (!file.name.toLowerCase().endsWith('.pdf')) {
+        setError('请选择PDF文件');
+        return;
+      }
+      setCreatePdfFile(file);
+      setError(null);
+      setParseResult(null);
+      setCreateSuccess(false);
+
+      // 自动开始解析
+      setLoading(true);
+      try {
+        const res = await parseContractPdf(file);
+        setParseResult(res.data);
+      } catch (err: any) {
+        console.error('解析失败:', err);
+        setError(err.response?.data?.detail || err.message || '解析失败，请检查文件格式');
+        setCreatePdfFile(null);
+      } finally {
+        setLoading(false);
+        if (createPdfRef.current) {
+          createPdfRef.current.value = '';
+        }
+      }
+    }
+  };
+
+  // 确认创建合同处理
+  const handleConfirmCreateContract = async () => {
+    if (!parseResult || !createPdfFile) return;
+
+    if (!parseResult.customer_name || !parseResult.package_name || !parseResult.period) {
+      setError('PDF 解析信息不全，无法创建合同 (需包含客户名称、套餐名称、购电时间)');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      const createRes = await importAndCreateContract({
+        customer_name: parseResult.customer_name,
+        customer_short_name: parseResult.customer_short_name || parseResult.customer_name,
+        location: parseResult.location,
+        period: parseResult.period,
+        package_name: parseResult.package_name,
+        total_electricity: parseResult.total_electricity || 0.0,
+        attachment2: parseResult.attachment2 || []
+      });
+
+      const contractId = createRes.data.contract_id;
+      // 上传对应的PDF原件
+      await uploadContractPdf(contractId, createPdfFile);
+
+      setCreateSuccess(true);
+      // 触发列表刷新
+      onSuccess({
+        total: 1,
+        success: 1,
+        failed: 0,
+        errors: []
+      });
+    } catch (err: any) {
+      console.error('创建失败:', err);
+      setError(err.response?.data?.detail || err.message || '创建合同或上传原件失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleClose = () => {
     setSelectedFile(null);
     setImportResult(null);
     setSelectedPdfFiles([]);
     setPdfUploadResult(null);
+    setCreatePdfFile(null);
+    setParseResult(null);
+    setCreateSuccess(false);
     setError(null);
     setImportType('excel');
     onClose();
@@ -204,6 +292,9 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
     } else if (importType === 'pdf') {
       const fakeEvent = { target: { files } } as any;
       handlePdfFilesSelect(fakeEvent);
+    } else if (importType === 'pdf_create' && files[0]) {
+      const fakeEvent = { target: { files: [files[0]] } } as any;
+      handleCreatePdfSelect(fakeEvent);
     }
   };
 
@@ -229,7 +320,14 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
     }
   };
 
-  const handleTabChange = (_: React.SyntheticEvent, newValue: 'excel' | 'pdf') => {
+  const removeCreatePdfFile = () => {
+    setCreatePdfFile(null);
+    setParseResult(null);
+    setCreateSuccess(false);
+    setError(null);
+  };
+
+  const handleTabChange = (_: React.SyntheticEvent, newValue: 'excel' | 'pdf' | 'pdf_create') => {
     setImportType(newValue);
     setError(null);
   };
@@ -548,7 +646,142 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
     </>
   );
 
-  const hasResult = importResult !== null || pdfUploadResult !== null;
+  // 渲染导入创建合同 (PDF_CREATE) 结果确认界面
+  const renderPdfCreateContent = () => (
+    <>
+      <Alert severity="info" sx={{ mb: 2 }}>
+        <Typography variant="body2" component="div">
+          <strong>功能说明：</strong><br />
+          • 选择一份PDF签章合同进行智能识别。<br />
+          • 自动提取客户资料及合同细节，若客户不存在则自动建立客户档案。<br />
+          • 用户经核对无误后提交创建，并自动绑定上传该原件PDF。<br />
+        </Typography>
+      </Alert>
+
+      {!createPdfFile && !parseResult && !createSuccess && (
+        <Box
+          sx={{
+            border: '2px dashed',
+            borderColor: 'grey.300',
+            borderRadius: 1,
+            p: 3,
+            textAlign: 'center',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease-in-out',
+            '&:hover': { borderColor: 'primary.main', backgroundColor: 'action.hover' }
+          }}
+          onClick={() => createPdfRef.current?.click()}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+        >
+          <input
+            ref={createPdfRef}
+            type="file"
+            accept=".pdf"
+            onChange={handleCreatePdfSelect}
+            style={{ display: 'none' }}
+          />
+          <PdfIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
+          <Typography variant="h6" color="text.secondary" gutterBottom>
+            选择或拖拽需要解析的 PDF 文件
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            仅限单份合同
+          </Typography>
+        </Box>
+      )}
+
+      {createPdfFile && parseResult && !createSuccess && (
+        <Box>
+          <Paper variant="outlined" sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+            <FileIcon color="primary" />
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="body1" fontWeight="medium">{createPdfFile.name}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {(createPdfFile.size / 1024).toFixed(2)} KB
+              </Typography>
+            </Box>
+            <IconButton onClick={removeCreatePdfFile} size="small" color="error">
+              <CloseIcon />
+            </IconButton>
+          </Paper>
+
+          {parseResult.is_contract_duplicate && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              系统中已存在该客户此时期的同名合同，请仔细核对是否重录！
+            </Alert>
+          )}
+
+          <Grid container spacing={2}>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
+                <Typography variant="subtitle2" color="primary" gutterBottom>解析结果摘要</Typography>
+                <Divider sx={{ mb: 1 }} />
+
+                <Typography variant="body2" sx={{ mt: 1, mb: 0.5 }}>
+                  <strong>客户名称：</strong> {parseResult.customer_name || '无法解析'}
+                  {parseResult.is_customer_new ? (
+                    <Chip label="将新建客户" color="info" size="small" sx={{ ml: 1, height: 20 }} />
+                  ) : (
+                    <Chip label="系统已有" color="success" size="small" sx={{ ml: 1, height: 20 }} />
+                  )}
+                </Typography>
+
+                <Typography variant="body2" sx={{ mb: 0.5 }}>
+                  <strong>购电时间：</strong> {parseResult.period || '无法解析'}
+                </Typography>
+
+                <Typography variant="body2" sx={{ mb: 0.5 }}>
+                  <strong>关联套餐：</strong> {parseResult.package_name || '未提取到套餐名'}
+                  {parseResult.is_package_new && parseResult.package_name && (
+                    <Chip label="将建为草稿" color="warning" size="small" sx={{ ml: 1, height: 20 }} />
+                  )}
+                </Typography>
+
+                <Typography variant="body2">
+                  <strong>代理电量：</strong> {parseResult.total_electricity ? `${parseResult.total_electricity} 千瓦时` : '未解析到电量'}
+                </Typography>
+
+                <Typography variant="body2" sx={{ mt: 0.5 }}>
+                  <strong>推断地市：</strong> {parseResult.location || '-'}
+                </Typography>
+              </Paper>
+            </Grid>
+
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <Paper variant="outlined" sx={{ p: 2, height: '100%', maxHeight: 200, overflow: 'auto' }}>
+                <Typography variant="subtitle2" color="primary" gutterBottom>附件中发现的户号/计量点</Typography>
+                <Divider sx={{ mb: 1 }} />
+                {(parseResult.attachment2 && parseResult.attachment2.length > 0) ? (
+                  <List dense disablePadding>
+                    {parseResult.attachment2.map((item, index) => (
+                      <ListItem key={index} disableGutters sx={{ py: 0 }}>
+                        <ListItemText
+                          primary={`户号: ${item.meter_id || '-'} / 资产: ${item.measuring_point || '-'}`}
+                          secondaryTypographyProps={{ fontSize: '0.7rem' }}
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">未解析到计量点配置表</Typography>
+                )}
+              </Paper>
+            </Grid>
+          </Grid>
+        </Box>
+      )}
+
+      {createSuccess && (
+        <Alert severity="success" sx={{ mt: 2 }}>
+          <Typography variant="body2">合同与客户信息创建成功，并已绑定该文件为主合同原件！</Typography>
+        </Alert>
+      )}
+    </>
+  );
+
+  const hasResult = importResult !== null || pdfUploadResult !== null || createSuccess;
+  const isProcessDoneAndHasSuccessMessage = (importType === 'excel' && importResult) || (importType === 'pdf' && pdfUploadResult) || (importType === 'pdf_create' && createSuccess);
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
@@ -564,8 +797,9 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
       <DialogContent>
         {/* Tab切换 */}
         <Tabs value={importType} onChange={handleTabChange} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
-          <Tab label="导入订单列表 (Excel)" value="excel" disabled={loading || hasResult} />
-          <Tab label="上传合同原件 (PDF)" value="pdf" disabled={loading || hasResult} />
+          <Tab label="导入订单列表 (Excel)" value="excel" disabled={loading || createSuccess} />
+          <Tab label="批量上传合同 (PDF)" value="pdf" disabled={loading || createSuccess} />
+          <Tab label="导入创建合同 (PDF)" value="pdf_create" disabled={loading || createSuccess} />
         </Tabs>
 
         <Box sx={{ minHeight: 300 }}>
@@ -577,14 +811,16 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
           )}
 
           {/* 根据Tab显示不同内容 */}
-          {importType === 'excel' ? renderExcelContent() : renderPdfContent()}
+          {importType === 'excel' && renderExcelContent()}
+          {importType === 'pdf' && renderPdfContent()}
+          {importType === 'pdf_create' && renderPdfCreateContent()}
 
           {/* 加载状态 */}
           {loading && (
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4 }}>
               <CircularProgress size={40} />
               <Typography variant="body2" sx={{ mt: 2 }} color="text.secondary">
-                {importType === 'excel' ? '正在导入数据，请稍候...' : '正在上传文件，请稍候...'}
+                {importType === 'excel' ? '正在导入数据，请稍候...' : (importType === 'pdf' ? '正在上传文件，请稍候...' : '正在处理中...')}
               </Typography>
             </Box>
           )}
@@ -592,12 +828,12 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
       </DialogContent>
 
       <DialogActions sx={{ p: 2, pt: 0 }}>
-        {!hasResult && (
+        {!isProcessDoneAndHasSuccessMessage && (
           <>
             <Button onClick={handleClose} disabled={loading}>
               取消
             </Button>
-            {importType === 'excel' ? (
+            {importType === 'excel' && (
               <Button
                 onClick={handleImport}
                 variant="contained"
@@ -606,7 +842,9 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
               >
                 {loading ? '导入中...' : '开始导入'}
               </Button>
-            ) : (
+            )}
+
+            {importType === 'pdf' && (
               <Button
                 onClick={handlePdfUpload}
                 variant="contained"
@@ -616,10 +854,21 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
                 {loading ? '上传中...' : '开始上传'}
               </Button>
             )}
+
+            {importType === 'pdf_create' && (
+              <Button
+                onClick={handleConfirmCreateContract}
+                variant="contained"
+                disabled={!createPdfFile || !parseResult || loading || parseResult.is_contract_duplicate}
+                startIcon={loading ? <CircularProgress size={16} /> : <CheckCircleIcon />}
+              >
+                {loading ? '创建中...' : '确认导入创建'}
+              </Button>
+            )}
           </>
         )}
 
-        {hasResult && (
+        {isProcessDoneAndHasSuccessMessage && (
           <Button onClick={handleClose} variant="contained">
             完成
           </Button>

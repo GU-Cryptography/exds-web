@@ -626,6 +626,226 @@ async def upload_contract_pdfs(
     }
 
 
+from webapp.tools.contract_analyzer import ContractAnalyzer
+from webapp.models.pdf_import import ParsePdfResponse, ImportCreateRequest
+from webapp.services.customer_service import CustomerService
+from webapp.services.package_service import PackageService
+import dateutil.parser
+
+
+@router.post("/parse-pdf", response_model=ParsePdfResponse, summary="解析合同PDF进行预览")
+async def parse_contract_pdf(
+    file: UploadFile = File(..., description="合同原件PDF文件"),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    解析PDF返回其中提取的数据，并检查与现有系统的重复情况。
+    """
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请上传PDF格式的文件"
+        )
+    
+    analyzer = ContractAnalyzer()
+    content = await file.read()
+
+    try:
+        parsed_data = analyzer.analyze(content)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    customer_name = parsed_data.get("customer_name")
+    if not customer_name:
+        raise HTTPException(status_code=400, detail="未能从PDF中解析出客户名称")
+    
+    # 地区推断(来自简称生成方法的地名推断逻辑也可复用，此处ContractAnalyzer已经根据地名生成简称，我们可以取其首部地名作为location)
+    location = None
+    regions = [
+        '景德镇', '南昌', '九江', '赣州', '吉安', '宜春', '抚州', '上饶', 
+        '萍乡', '新余', '鹰潭', '上高', '丰城', '峡江', '新干', '高安', 
+        '井冈山', '宜丰', '青云谱', '江西'
+    ]
+    for r in sorted(regions, key=len, reverse=True):
+        if r in customer_name:
+            location = r
+            break
+            
+    # 检查数据库
+    customer_service = CustomerService(DATABASE)
+    existing_customer = customer_service.collection.find_one({"user_name": customer_name})
+    is_customer_new = existing_customer is None
+
+    package_name = parsed_data.get("package_name")
+    is_package_new = False
+    if package_name:
+        # Check if package exists
+        package_doc = DATABASE.retail_packages.find_one({"package_name": package_name})
+        if not package_doc:
+            is_package_new = True
+            
+    # 检查合同是否重复（同客户名，同起始时间）
+    is_contract_duplicate = False
+    duplicate_contract_id = None
+    period_str = parsed_data.get("period")
+    if period_str and existing_customer:
+        # 尝试简易提取开始时间，例如 "2024年1月至2024年12月" -> "2024年1月"
+        start_part = period_str.split("至")[0].strip()
+        try:
+            # 转换为日期以进行查询
+            import re
+            m = re.search(r'(\d{4})年(\d{1,2})月', start_part)
+            if m:
+                year, month = int(m.group(1)), int(m.group(2))
+                start_date = datetime(year, month, 1)
+                
+                # 查询该客户在此月是否已有合同
+                dup = DATABASE.retail_contracts.find_one({
+                    "customer_name": customer_name,
+                    "purchase_start_month": {"$gte": start_date, "$lt": datetime(year, month+1, 1) if month < 12 else datetime(year+1, 1, 1)}
+                })
+                if dup:
+                    is_contract_duplicate = True
+                    duplicate_contract_id = str(dup["_id"])
+        except:
+            pass
+
+    return ParsePdfResponse(
+        customer_name=customer_name,
+        customer_short_name=parsed_data.get("customer_short_name"),
+        period=period_str,
+        package_name=package_name,
+        total_electricity=parsed_data.get("total_electricity"),
+        attachment2=parsed_data.get("attachment2", []),
+        location=location,
+        is_customer_new=is_customer_new,
+        is_package_new=is_package_new,
+        is_contract_duplicate=is_contract_duplicate,
+        duplicate_contract_id=duplicate_contract_id
+    )
+
+
+@router.post("/import-create", summary="确认导入创建合同及相关数据")
+async def import_create_contract(
+    req: ImportCreateRequest,
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    根据前端确认的数据创建客户、套餐和合同
+    """
+    # 1. 处理客户
+    customer_service = CustomerService(DATABASE)
+    existing_customer = customer_service.collection.find_one({"user_name": req.customer_name})
+    
+    # 构建新户号数据
+    new_accounts = []
+    # 预处理附件作为户号
+    if req.attachment2:
+        # 以account_id进行分组
+        account_map = {}
+        for mp in req.attachment2:
+            acc_id = mp.measuring_point # 从ContractAnalyzer, 我们提取的是户号(meter_id位置)还是计量点
+            # 修改: contract_analyzer目前提取的是 `(\d{10,})` as meter_id, `(\d{8,10})` as measuring_point. (通常10位长的是用电户号, 8-10位的是资产号)
+            # 不过我们目前仅原样存储
+            # 这里按照Account模型组装
+            # Account requires account_id, meters, metering_points
+            acc_id = mp.meter_id  # 假设10位数字为account id
+            if acc_id not in account_map:
+                account_map[acc_id] = {
+                    "account_id": acc_id,
+                    "meters": [],
+                    "metering_points": []
+                }
+            account_map[acc_id]["metering_points"].append({
+                "mp_no": mp.measuring_point,
+                "mp_name": ""
+            })
+            
+        new_accounts = list(account_map.values())
+        
+    customer_id = None
+    if not existing_customer:
+        customer_data = {
+            "user_name": req.customer_name,
+            "short_name": req.customer_short_name or req.customer_name[:4],
+            "location": req.location,
+            "accounts": new_accounts
+        }
+        res = customer_service.create(customer_data, current_user.username)
+        customer_id = res["id"]
+    else:
+        customer_id = str(existing_customer["_id"])
+        # 更新location和追加accounts
+        updates = {}
+        if req.location and not existing_customer.get("location"):
+            updates["location"] = req.location
+            
+        if new_accounts:
+            existing_accounts = existing_customer.get("accounts", [])
+            existing_acc_ids = {acc["account_id"] for acc in existing_accounts}
+            for na in new_accounts:
+                if na["account_id"] not in existing_acc_ids:
+                    existing_accounts.append(na)
+            updates["accounts"] = existing_accounts
+            
+        if updates:
+            customer_service.update(customer_id, updates, current_user.username)
+            
+    # 2. 处理套餐
+    package_service = PackageService(DATABASE)
+    package_doc = DATABASE.retail_packages.find_one({"package_name": req.package_name})
+    package_id = None
+    if not package_doc:
+        # 创建默认草稿套餐
+        pkg_res = package_service.create({
+            "package_name": req.package_name,
+            "package_type": "time_based", # 默认分时套餐
+            "template_id": None,
+            "description": "从PDF导入自动创建的草稿套餐",
+            "parameters": {}
+        }, current_user.username)
+        package_id = pkg_res["id"]
+        # 服务内状态默认可能为draft, 如果不是, 可以手动update... 不过RetailPackageCreate目前不强制status
+    else:
+        package_id = str(package_doc["_id"])
+        
+    # 3. 处理合同
+    import re
+    # 解析购电时间 "2024年1月至2024年12月"
+    start_date, end_date = None, None
+    if req.period:
+        m = re.findall(r'(\d{4})年(\d{1,2})月', req.period)
+        if len(m) >= 2:
+            start_date = datetime(int(m[0][0]), int(m[0][1]), 1)
+            end_date = datetime(int(m[1][0]), int(m[1][1]), 1)
+        elif len(m) == 1:
+            start_date = datetime(int(m[0][0]), int(m[0][1]), 1)
+            end_date = start_date
+            
+    if not start_date or not end_date:
+        raise HTTPException(status_code=400, detail="购电起止月份解析失败，请检查PDF时期格式是否标准")
+        
+    contract_service = ContractService(DATABASE)
+    contract_data = {
+        "customer_id": customer_id,
+        "customer_name": req.customer_name,
+        "package_id": package_id,
+        "package_name": req.package_name,
+        "purchasing_electricity_quantity": req.total_electricity or 0.0,
+        "purchase_start_month": start_date,
+        "purchase_end_month": end_date,
+        # 合同名称自动在 service.create 中基于 customer short_name 和时间生成
+    }
+    
+    contract_res = contract_service.create(contract_data, current_user.username)
+    return {
+        "success": True,
+        "contract_id": contract_res["id"],
+        "customer_id": customer_id,
+        "package_id": package_id
+    }
+
+
 @router.get("/{contract_id}/pdf", summary="获取合同PDF文件")
 async def get_contract_pdf(
     contract_id: str,
