@@ -1,4 +1,4 @@
-# 项目数据集结构文档
+﻿# 项目数据集结构文档
 
 本文档详细描述了 "电力交易辅助决策系统" 项目中主要数据集（MongoDB 集合）的结构、字段含义及索引信息。
 
@@ -811,3 +811,184 @@ critical_alerts = db.customer_anomaly_alerts.find({
 - `imported_at`（时间倒序查询）
 
 ---
+
+---
+
+## 17. `wholesale_settlement_monthly` - 批发月度结算台账
+
+该集合存储交易中心发布的**批发侧月度结算**主体数据（按月一条），用于月度台账展示与日清聚合对账分析。
+
+- **数据来源**: 月度结算 Excel（`.xls/.xlsx`）导入  
+- **业务约束**:
+  - 每月仅保留一条记录（同月覆盖导入）
+  - 仅导入本公司主体行
+  - 不导入“合计”“全市场合计”行
+
+**实现文件**:
+- 服务: `webapp/services/wholesale_monthly_settlement_service.py`
+- API: `webapp/api/v1_wholesale_monthly_settlement.py`
+
+### 17.1. 字段说明
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `_id` | `String` | 月份主键（`YYYY-MM`） |
+| `month` | `String` | 月份（冗余字段，`YYYY-MM`） |
+| `subject_name` | `String` | 市场主体名称（本公司） |
+| `user_type` | `String` | 用户类型（如：售电公司） |
+| `agency_purchase_type` | `String` | 代理购电类型 |
+| `settlement_items` | `Object` | 月度结算明细对象（见 17.2） |
+| `source_file_name` | `String` | 导入文件名 |
+| `imported_at` | `DateTime` | 导入时间 |
+| `imported_by` | `String` | 导入人 |
+| `updated_at` | `DateTime` | 最后更新时间 |
+
+### 17.2. `settlement_items` 子结构
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `contract_volume` | `Number` | 合同电量 |
+| `contract_avg_price` | `Number` | 合同均价 |
+| `contract_fee` | `Number` | 合同电费 |
+| `day_ahead_declared_volume` | `Number` | 日前申报电量 |
+| `day_ahead_deviation_fee` | `Number` | 日前偏差电费 |
+| `actual_consumption_volume` | `Number` | 实际用电量 |
+| `real_time_deviation_fee` | `Number` | 实时偏差电费 |
+| `green_transfer_fee` | `Number` | 绿色电能量合同转让收支费用 |
+| `daily_24h_total_volume` | `Number` | 日24时段用电量合计 |
+| `actual_monthly_volume` | `Number` | 实际月度用电量 |
+| `monthly_balancing_volume` | `Number` | 月度调平电量 |
+| `monthly_balancing_deviation_rate_pct` | `Number` | 月度调平偏差率(%) |
+| `balancing_price` | `Number` | 调平电价 |
+| `balancing_fee` | `Number` | 调平电费 |
+| `energy_fee_total` | `Number` | 电能量电费 |
+| `energy_avg_price` | `Number` | 电能量均价 |
+| `gen_side_cost_allocation` | `Number` | 发电侧成本类费用分摊 |
+| `congestion_fee_allocation` | `Number` | 阻塞费分摊 |
+| `imbalance_fund_allocation` | `Number` | 不平衡资金分摊 |
+| `deviation_recovery_fee` | `Number` | 偏差回收费 |
+| `deviation_recovery_return_fee` | `Number` | 偏差回收费补偿居农损益后返还 |
+| `fund_surplus_deficit_total` | `Number` | 资金余缺费用合计 |
+| `settlement_fee_total` | `Number` | 结算电费 |
+| `settlement_avg_price` | `Number` | 结算均价 |
+| `clearing_retroactive_total_fee` | `Number` | 清算退补总费（展示用） |
+| `retroactive_to_retail_users` | `Number` | 退补零售用户（展示用） |
+| `retroactive_to_retail_company` | `Number` | 退补售电公司（展示用） |
+| `remark` | `String` | 备注信息 |
+| `confirmation_status` | `String` | 确认状态（来自文件，仅展示） |
+| `confirmation_time` | `String` | 确认时间（来自文件，仅展示） |
+| `dispute_content` | `String` | 争议内容（来自文件，仅展示） |
+
+### 17.3. 索引信息
+
+- `_id_`（默认，月份主键）
+- `month`（唯一索引）
+
+### 17.4. 示例文档
+
+```json
+{
+  "_id": "2026-01",
+  "month": "2026-01",
+  "subject_name": "国网江西综合能源服务有限公司",
+  "user_type": "售电公司",
+  "agency_purchase_type": "",
+  "settlement_items": {
+    "contract_volume": 38650.404,
+    "contract_avg_price": 422.566,
+    "contract_fee": -1640166.8,
+    "day_ahead_declared_volume": 48477.158,
+    "day_ahead_deviation_fee": -2007412.79,
+    "actual_consumption_volume": 68913.307,
+    "real_time_deviation_fee": 31187086.83,
+    "green_transfer_fee": 0.0,
+    "daily_24h_total_volume": 68913.307,
+    "actual_monthly_volume": 68919.909,
+    "monthly_balancing_volume": 6.602,
+    "monthly_balancing_deviation_rate_pct": 0.01,
+    "balancing_price": 460.005,
+    "balancing_fee": 3036.95,
+    "energy_fee_total": 27542544.19,
+    "energy_avg_price": 399.631,
+    "gen_side_cost_allocation": 43124.17,
+    "congestion_fee_allocation": 430.93,
+    "imbalance_fund_allocation": -188417.81,
+    "deviation_recovery_fee": 517055.31,
+    "deviation_recovery_return_fee": -1092213.77,
+    "fund_surplus_deficit_total": -720021.17,
+    "settlement_fee_total": 26822523.02,
+    "settlement_avg_price": 389.184,
+    "clearing_retroactive_total_fee": null,
+    "retroactive_to_retail_users": null,
+    "retroactive_to_retail_company": null,
+    "remark": "",
+    "confirmation_status": "已确认",
+    "confirmation_time": "2026-02-08 19:12",
+    "dispute_content": ""
+  },
+  "source_file_name": "现货月度结算.xls",
+  "imported_at": "2026-03-03T10:00:00",
+  "imported_by": "admin",
+  "updated_at": "2026-03-03T10:00:00"
+}
+```
+
+---
+
+## 18. `customer_monthly_energy` - 客户结算月度电量
+
+### 18.1. 集合用途
+
+用于“基础数据导入 -> 客户结算月度电量”子页面，按月份存储客户月度电量导入结果。  
+每个月 1 份版本，导入时按月份覆盖（`_id = month`）。
+
+### 18.2. 字段定义
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `_id` | `String` | 文档主键，格式 `YYYY-MM` |
+| `month` | `String` | 数据月份，格式 `YYYY-MM` |
+| `imported_at` | `DateTime` | 导入时间（UTC） |
+| `imported_by` | `String` | 导入操作人 |
+| `records` | `Array[Object]` | 当月客户电量明细列表 |
+| `records.customer_no` | `String` | 用户号 |
+| `records.customer_name` | `String` | 代理零售用户名称 |
+| `records.mp_no` | `String` | 计量点号（导入时规范化为字符串，避免 `12345.0`） |
+| `records.energy_mwh` | `Number` | 本月电量（MWh） |
+| `records.auth_status` | `String` | 用户授权状态 |
+| `records.auth_end_date` | `String` | 授权查询截止月份/日期（按原文件内容保存） |
+
+### 18.3. 索引信息
+
+- `_id_`（默认主键索引，月份唯一）
+- `month`（建议唯一索引）
+
+### 18.4. 示例文档
+
+```json
+{
+  "_id": "2026-01",
+  "month": "2026-01",
+  "imported_at": "2026-03-03T10:00:00Z",
+  "imported_by": "admin",
+  "records": [
+    {
+      "customer_no": "320100001234",
+      "customer_name": "某工业用户A",
+      "mp_no": "120000000123",
+      "energy_mwh": 1289.537,
+      "auth_status": "已授权",
+      "auth_end_date": "2026-12"
+    },
+    {
+      "customer_no": "320100009999",
+      "customer_name": "某商业用户B",
+      "mp_no": "120000000456",
+      "energy_mwh": 0.0,
+      "auth_status": "未授权",
+      "auth_end_date": ""
+    }
+  ]
+}
+```
+

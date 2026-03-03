@@ -19,6 +19,28 @@ router = APIRouter(tags=["客户结算月度电量"])
 
 COLLECTION = DATABASE['customer_monthly_energy']
 
+def _normalize_mp_no(raw_value) -> str:
+    """将 Excel 中的计量点号统一为字符串，避免出现 12345.0 这类展示问题。"""
+    if raw_value is None:
+        return ''
+
+    text = str(raw_value).strip()
+    if not text:
+        return ''
+
+    # 处理 Excel 数字转字符串后出现的小数尾巴，例如 123456.0 / 123456.00
+    text = re.sub(r'^(\d+)\.0+$', r'\1', text)
+
+    # 兜底：如果仍是数值型字符串且为整数值，转成无小数格式
+    try:
+        num = float(text)
+        if num.is_integer():
+            return str(int(num))
+    except (TypeError, ValueError):
+        pass
+
+    return text
+
 def _parse_excel_with_pandas(content: bytes) -> dict:
     import pandas as pd
     import io
@@ -65,7 +87,7 @@ def _parse_excel_with_pandas(content: bytes) -> dict:
     col_map = {
         'customer_no': '用户号',
         'customer_name': '代理零售用户名称',
-        'meter_id': '计量点ID',
+        'mp_no': '计量点ID',
         'energy_mwh': '本月电量',
         'auth_status': '用户是否\n授权查询',
         'auth_end_date': '授权查询\n截止月份',
@@ -84,7 +106,7 @@ def _parse_excel_with_pandas(content: bytes) -> dict:
 
     idx_no = get_col_index('customer_no', 3)
     idx_name = get_col_index('customer_name', 1)
-    idx_meter = get_col_index('meter_id', 4)
+    idx_meter = get_col_index('mp_no', 4)
     idx_energy = get_col_index('energy_mwh', 10)
     idx_status = get_col_index('auth_status', 5)
     idx_end_date = get_col_index('auth_end_date', 7)
@@ -101,7 +123,7 @@ def _parse_excel_with_pandas(content: bytes) -> dict:
         # 提取字段
         c_no = str(row.iloc[idx_no]).strip() if pd.notna(row.iloc[idx_no]) else ''
         c_name = str(row.iloc[idx_name]).strip() if pd.notna(row.iloc[idx_name]) else ''
-        m_id = str(row.iloc[idx_meter]).strip() if pd.notna(row.iloc[idx_meter]) else ''
+        mp_no = _normalize_mp_no(row.iloc[idx_meter]) if pd.notna(row.iloc[idx_meter]) else ''
         
         status = str(row.iloc[idx_status]).strip() if pd.notna(row.iloc[idx_status]) else ''
         end_date = str(row.iloc[idx_end_date]).strip() if pd.notna(row.iloc[idx_end_date]) else ''
@@ -117,7 +139,7 @@ def _parse_excel_with_pandas(content: bytes) -> dict:
         records.append({
             'customer_no': c_no,
             'customer_name': c_name,
-            'meter_id': m_id,
+            'mp_no': mp_no,
             'energy_mwh': energy,
             'auth_status': status,
             'auth_end_date': end_date

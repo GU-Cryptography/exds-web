@@ -13,7 +13,7 @@ import apiClient from '../../api/client';
 interface CustomerEnergyRecord {
     customer_no: string;
     customer_name: string;
-    meter_id: string;
+    mp_no: string;
     energy_mwh: number;
     auth_status: string;
     auth_end_date: string;
@@ -28,6 +28,12 @@ interface MonthData {
     month: string;
     records: CustomerEnergyRecord[];
 }
+
+const formatMpNo = (value?: string): string => {
+    if (!value) return '—';
+    const trimmed = String(value).trim();
+    return trimmed.replace(/^(\d+)\.0+$/, '$1');
+};
 
 const CustomerMonthlyEnergyTab: React.FC = () => {
     const [months, setMonths] = useState<MonthMeta[]>([]);
@@ -190,7 +196,7 @@ const CustomerMonthlyEnergyTab: React.FC = () => {
                                                 <TableCell>{idx + 1}</TableCell>
                                                 <TableCell>{r.customer_name}</TableCell>
                                                 <TableCell>{r.customer_no}</TableCell>
-                                                <TableCell>{r.meter_id}</TableCell>
+                                                <TableCell>{formatMpNo(r.mp_no)}</TableCell>
                                                 <TableCell align="right">
                                                     {r.auth_status === '已授权' ? (r.energy_mwh?.toFixed(3) ?? '0.000') : '—'}
                                                 </TableCell>
