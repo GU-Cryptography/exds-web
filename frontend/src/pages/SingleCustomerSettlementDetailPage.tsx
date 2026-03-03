@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
     Box, Grid, Paper, Typography, CircularProgress, Alert, IconButton,
-    Tabs, Tab, Button, Divider, Table, TableBody, TableCell, TableContainer, TableHead, TableRow
+    Tabs, Tab, Button, Divider, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+    useTheme, useMediaQuery
 } from '@mui/material';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -11,6 +12,7 @@ import {
     ArrowRight as ArrowRightIcon,
     Refresh as RefreshIcon,
 } from '@mui/icons-material';
+import { useSearchParams } from 'react-router-dom';
 import { format, addDays } from 'date-fns';
 import apiClient from '../api/client';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
@@ -69,9 +71,9 @@ const PERIOD_TYPE_SHORT: Record<string, string> = {
 };
 
 interface SingleCustomerDetailProps {
-    initialDate: string;
-    initialVersion: string;
-    initialCustomerId: string;
+    initialDate?: string;
+    initialVersion?: string;
+    initialCustomerId?: string;
     initialCustomerName?: string;
 }
 
@@ -81,8 +83,17 @@ const SingleCustomerSettlementDetailPage: React.FC<SingleCustomerDetailProps> = 
     initialCustomerId,
     initialCustomerName
 }) => {
-    const [dateStr, setDateStr] = useState(initialDate);
-    const [version, setVersion] = useState(initialVersion);
+    const theme = useTheme();
+    const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+    const [searchParams] = useSearchParams();
+
+    const resolvedDate = initialDate || searchParams.get('date') || format(new Date(), 'yyyy-MM-dd');
+    const resolvedVersion = initialVersion || searchParams.get('version') || 'PRELIMINARY';
+    const resolvedCustomerId = initialCustomerId || searchParams.get('customer_id') || '';
+    const resolvedCustomerName = initialCustomerName || searchParams.get('customer_name') || '';
+
+    const [dateStr, setDateStr] = useState(resolvedDate);
+    const [version, setVersion] = useState(resolvedVersion);
     const [loading, setLoading] = useState(false);
     const [data, setData] = useState<any>(null);
     const [error, setError] = useState<string | null>(null);
@@ -94,11 +105,14 @@ const SingleCustomerSettlementDetailPage: React.FC<SingleCustomerDetailProps> = 
     });
 
     const fetchData = async () => {
+        const currentCustomerId = initialCustomerId || searchParams.get('customer_id') || '';
+        if (!currentCustomerId) return;
+
         setLoading(true);
         setError(null);
         try {
             const res = await apiClient.get('/api/v1/settlement/customer-detail', {
-                params: { date: dateStr, version, customer_id: initialCustomerId }
+                params: { date: dateStr, version, customer_id: currentCustomerId }
             });
             if (res.data.code === 200) {
                 setData(res.data.data);
@@ -113,8 +127,11 @@ const SingleCustomerSettlementDetailPage: React.FC<SingleCustomerDetailProps> = 
     };
 
     useEffect(() => {
-        fetchData();
-    }, [dateStr, version, initialCustomerId]);
+        const currentCustomerId = initialCustomerId || searchParams.get('customer_id') || '';
+        if (currentCustomerId) {
+            fetchData();
+        }
+    }, [dateStr, version, initialCustomerId, searchParams]);
 
     const handleShiftDate = (days: number) => {
         const d = new Date(dateStr);
@@ -141,6 +158,10 @@ const SingleCustomerSettlementDetailPage: React.FC<SingleCustomerDetailProps> = 
 
     if (loading && !data) return <Box sx={{ display: 'flex', justifyContent: 'center', p: 5 }}><CircularProgress /></Box>;
     if (error) return <Alert severity="error" sx={{ m: 2 }}>{error}</Alert>;
+
+    const currentCustomerId = initialCustomerId || searchParams.get('customer_id') || '';
+    if (!currentCustomerId) return <Alert severity="info" sx={{ m: 2 }}>无客户ID</Alert>;
+
     if (!data) return <Alert severity="info" sx={{ m: 2 }}>暂无数据</Alert>;
 
     const cd = data;
@@ -481,56 +502,134 @@ const SingleCustomerSettlementDetailPage: React.FC<SingleCustomerDetailProps> = 
                 </Grid>
 
                 {/* 第三层：明细表格 */}
-                <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+                <Paper variant="outlined" sx={{ p: isMobile ? 1 : 2, mt: 2 }}>
                     <Typography variant="subtitle1" fontWeight="bold" gutterBottom>48 时段结算明细表</Typography>
-                    <TableContainer sx={{ maxHeight: 600 }}>
-                        <Table size="small" stickyHeader>
-                            <TableHead>
-                                <TableRow>
-                                    <TableCell sx={{ position: 'sticky', left: 0, zIndex: 3, bgcolor: 'background.paper' }}>时段</TableCell>
-                                    <TableCell>类型</TableCell>
-                                    <TableCell align="right">负荷(MWh)</TableCell>
-                                    <TableCell align="right" sx={{ color: 'success.dark' }}>结算单价<br />(元/MWh)</TableCell>
-                                    {linkedCfg && <TableCell align="right" sx={{ color: 'warning.dark' }}>现货标的<br />(元/MWh)</TableCell>}
-                                    <TableCell align="right" sx={{ color: 'success.dark' }}>零售电费(元)</TableCell>
-                                    <TableCell align="right" sx={{ color: 'primary.dark' }}>采购单价<br />(元/MWh)</TableCell>
-                                    <TableCell align="right" sx={{ color: 'primary.dark' }}>采购成本(元)</TableCell>
-                                </TableRow>
-                            </TableHead>
-                            <TableBody>
-                                {chartData.map((p: any, index: number) => (
-                                    <TableRow key={p.period} hover>
-                                        <TableCell sx={{ position: 'sticky', left: 0, zIndex: 1, bgcolor: 'background.paper' }}>{p.period}</TableCell>
-                                        <TableCell>
-                                            <Box sx={{ px: 1, borderRadius: 1, bgcolor: PERIOD_TYPE_COLORS[p.periodType] + '22', color: PERIOD_TYPE_COLORS[p.periodType], fontSize: '0.75rem', textAlign: 'center' }}>
-                                                {p.periodType}
-                                            </Box>
-                                        </TableCell>
-                                        <TableCell align="right">{p.load.toFixed(3)}</TableCell>
-                                        <TableCell align="right">{p.unitPrice.toFixed(2)}</TableCell>
+                    {isMobile ? (
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                            {chartData.map((p: any, index: number) => (
+                                <Paper key={p.period} variant="outlined" sx={{ p: 1.5, borderColor: 'divider' }}>
+                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                                        <Typography variant="subtitle2" fontWeight="bold">时段: {p.period}</Typography>
+                                        <Box sx={{ px: 1, py: 0.2, borderRadius: 1, bgcolor: PERIOD_TYPE_COLORS[p.periodType] + '22', color: PERIOD_TYPE_COLORS[p.periodType], fontSize: '0.75rem', fontWeight: 'bold' }}>
+                                            {p.periodType}
+                                        </Box>
+                                    </Box>
+                                    <Divider sx={{ mb: 1 }} />
+                                    <Grid container spacing={1}>
+                                        <Grid size={{ xs: 6 }}>
+                                            <Typography variant="caption" color="text.secondary">负荷 (MWh)</Typography>
+                                            <Typography variant="body2" fontWeight="bold">{p.load.toFixed(3)}</Typography>
+                                        </Grid>
                                         {linkedCfg && (
-                                            <TableCell align="right">
-                                                {(linkedCfg.target_prices_48?.[index] || 0).toFixed(2)}
-                                            </TableCell>
+                                            <Grid size={{ xs: 6 }}>
+                                                <Typography variant="caption" color="text.secondary">现货标的</Typography>
+                                                <Typography variant="body2" sx={{ color: 'warning.dark', fontWeight: 'bold' }}>
+                                                    {(linkedCfg.target_prices_48?.[index] || 0).toFixed(2)}
+                                                </Typography>
+                                            </Grid>
                                         )}
-                                        <TableCell align="right">{p.fee.toFixed(2)}</TableCell>
-                                        <TableCell align="right">{p.wholesalePrice.toFixed(2)}</TableCell>
-                                        <TableCell align="right">{p.allocatedCost.toFixed(2)}</TableCell>
+                                        <Grid size={{ xs: 6 }}>
+                                            <Typography variant="caption" color="text.secondary">结算单价</Typography>
+                                            <Typography variant="body2" sx={{ color: 'success.dark', fontWeight: 'bold' }}>{p.unitPrice.toFixed(2)}</Typography>
+                                        </Grid>
+                                        <Grid size={{ xs: 6 }}>
+                                            <Typography variant="caption" color="text.secondary">采购单价</Typography>
+                                            <Typography variant="body2" sx={{ color: 'primary.dark', fontWeight: 'bold' }}>{p.wholesalePrice.toFixed(2)}</Typography>
+                                        </Grid>
+                                        <Grid size={{ xs: 6 }}>
+                                            <Typography variant="caption" color="text.secondary">零售电费 (元)</Typography>
+                                            <Typography variant="body2" sx={{ color: 'success.dark', fontWeight: 'bold' }}>{p.fee.toFixed(2)}</Typography>
+                                        </Grid>
+                                        <Grid size={{ xs: 6 }}>
+                                            <Typography variant="caption" color="text.secondary">采购成本 (元)</Typography>
+                                            <Typography variant="body2" sx={{ color: 'primary.dark', fontWeight: 'bold' }}>{p.allocatedCost.toFixed(2)}</Typography>
+                                        </Grid>
+                                    </Grid>
+                                </Paper>
+                            ))}
+                            <Paper variant="outlined" sx={{ p: 1.5, bgcolor: 'grey.50', borderColor: 'divider' }}>
+                                <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1 }}>合计</Typography>
+                                <Divider sx={{ mb: 1 }} />
+                                <Grid container spacing={1}>
+                                    <Grid size={{ xs: 6 }}>
+                                        <Typography variant="caption" color="text.secondary">总负荷 (MWh)</Typography>
+                                        <Typography variant="body2" fontWeight="bold">{totalLoad.toFixed(3)}</Typography>
+                                    </Grid>
+                                    {linkedCfg && (
+                                        <Grid size={{ xs: 6 }}>
+                                            <Typography variant="caption" color="text.secondary">现货标的</Typography>
+                                            <Typography variant="body2" sx={{ color: 'warning.dark', fontWeight: 'bold' }}>-</Typography>
+                                        </Grid>
+                                    )}
+                                    <Grid size={{ xs: 6 }}>
+                                        <Typography variant="caption" color="text.secondary">平均结算价</Typography>
+                                        <Typography variant="body2" sx={{ color: 'success.dark', fontWeight: 'bold' }}>{avgPrice.toFixed(2)}</Typography>
+                                    </Grid>
+                                    <Grid size={{ xs: 6 }}>
+                                        <Typography variant="caption" color="text.secondary">平均采购价</Typography>
+                                        <Typography variant="body2" sx={{ color: 'primary.dark', fontWeight: 'bold' }}>{avgWholesalePrice.toFixed(2)}</Typography>
+                                    </Grid>
+                                    <Grid size={{ xs: 6 }}>
+                                        <Typography variant="caption" color="text.secondary">总零售电费 (元)</Typography>
+                                        <Typography variant="body2" sx={{ color: 'success.dark', fontWeight: 'bold' }}>{formatYuan(totalFee)}</Typography>
+                                    </Grid>
+                                    <Grid size={{ xs: 6 }}>
+                                        <Typography variant="caption" color="text.secondary">总采购成本 (元)</Typography>
+                                        <Typography variant="body2" sx={{ color: 'primary.dark', fontWeight: 'bold' }}>{formatYuan(allocatedCost)}</Typography>
+                                    </Grid>
+                                </Grid>
+                            </Paper>
+                        </Box>
+                    ) : (
+                        <TableContainer sx={{ maxHeight: 600 }}>
+                            <Table size="small" stickyHeader>
+                                <TableHead>
+                                    <TableRow>
+                                        <TableCell sx={{ position: 'sticky', left: 0, zIndex: 3, bgcolor: 'background.paper' }}>时段</TableCell>
+                                        <TableCell>类型</TableCell>
+                                        <TableCell align="right">负荷(MWh)</TableCell>
+                                        <TableCell align="right" sx={{ color: 'success.dark' }}>结算单价<br />(元/MWh)</TableCell>
+                                        {linkedCfg && <TableCell align="right" sx={{ color: 'warning.dark' }}>现货标的<br />(元/MWh)</TableCell>}
+                                        <TableCell align="right" sx={{ color: 'success.dark' }}>零售电费(元)</TableCell>
+                                        <TableCell align="right" sx={{ color: 'primary.dark' }}>采购单价<br />(元/MWh)</TableCell>
+                                        <TableCell align="right" sx={{ color: 'primary.dark' }}>采购成本(元)</TableCell>
                                     </TableRow>
-                                ))}
-                                <TableRow sx={{ bgcolor: 'grey.100', '& .MuiTableCell-root': { fontWeight: 'bold' } }}>
-                                    <TableCell align="right">合计</TableCell>
-                                    <TableCell>-</TableCell>
-                                    <TableCell align="right">{totalLoad.toFixed(3)}</TableCell>
-                                    <TableCell align="right">{avgPrice.toFixed(2)} (均)</TableCell>
-                                    {linkedCfg && <TableCell align="right">-</TableCell>}
-                                    <TableCell align="right">{formatYuan(totalFee)}</TableCell>
-                                    <TableCell align="right">{avgWholesalePrice.toFixed(2)} (均)</TableCell>
-                                    <TableCell align="right">{formatYuan(allocatedCost)}</TableCell>
-                                </TableRow>
-                            </TableBody>
-                        </Table>
-                    </TableContainer>
+                                </TableHead>
+                                <TableBody>
+                                    {chartData.map((p: any, index: number) => (
+                                        <TableRow key={p.period} hover>
+                                            <TableCell sx={{ position: 'sticky', left: 0, zIndex: 1, bgcolor: 'background.paper' }}>{p.period}</TableCell>
+                                            <TableCell>
+                                                <Box sx={{ px: 1, borderRadius: 1, bgcolor: PERIOD_TYPE_COLORS[p.periodType] + '22', color: PERIOD_TYPE_COLORS[p.periodType], fontSize: '0.75rem', textAlign: 'center' }}>
+                                                    {p.periodType}
+                                                </Box>
+                                            </TableCell>
+                                            <TableCell align="right">{p.load.toFixed(3)}</TableCell>
+                                            <TableCell align="right">{p.unitPrice.toFixed(2)}</TableCell>
+                                            {linkedCfg && (
+                                                <TableCell align="right">
+                                                    {(linkedCfg.target_prices_48?.[index] || 0).toFixed(2)}
+                                                </TableCell>
+                                            )}
+                                            <TableCell align="right">{p.fee.toFixed(2)}</TableCell>
+                                            <TableCell align="right">{p.wholesalePrice.toFixed(2)}</TableCell>
+                                            <TableCell align="right">{p.allocatedCost.toFixed(2)}</TableCell>
+                                        </TableRow>
+                                    ))}
+                                    <TableRow sx={{ bgcolor: 'grey.100', '& .MuiTableCell-root': { fontWeight: 'bold' } }}>
+                                        <TableCell align="right">合计</TableCell>
+                                        <TableCell>-</TableCell>
+                                        <TableCell align="right">{totalLoad.toFixed(3)}</TableCell>
+                                        <TableCell align="right">{avgPrice.toFixed(2)} (均)</TableCell>
+                                        {linkedCfg && <TableCell align="right">-</TableCell>}
+                                        <TableCell align="right">{formatYuan(totalFee)}</TableCell>
+                                        <TableCell align="right">{avgWholesalePrice.toFixed(2)} (均)</TableCell>
+                                        <TableCell align="right">{formatYuan(allocatedCost)}</TableCell>
+                                    </TableRow>
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
+                    )}
                 </Paper>
             </Box>
         </LocalizationProvider>

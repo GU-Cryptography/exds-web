@@ -138,6 +138,7 @@ const menuItems: MenuItem[] = [
         subItems: [
             { text: '日清结算总览', path: '/settlement/pre-settlement-overview', icon: <RequestQuoteOutlined /> },
             { text: '日清结算详情', path: '/settlement/pre-settlement-detail', icon: <FactCheckOutlined /> },
+            { text: '批发月度结算', path: '/settlement/bill-review', icon: <FactCheckOutlined /> },
             { text: '零售用户结算', path: '/settlement/retail-settlement', icon: <PaymentIcon /> },
             { text: '经营利润分析', path: '/settlement/profit-analysis', icon: <ShowChartOutlined /> },
         ],

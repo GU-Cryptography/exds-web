@@ -25,6 +25,7 @@ import PreSettlementOverviewPage from '../pages/PreSettlementOverviewPage';
 import PreSettlementDetailPage from '../pages/PreSettlementDetailPage';
 import MonthlyManualDataPage from '../pages/MonthlyManualDataPage';
 import SingleCustomerSettlementDetailPage from '../pages/SingleCustomerSettlementDetailPage';
+import WholesaleMonthlySettlementPage from '../pages/WholesaleMonthlySettlementPage';
 
 // 路由配置接口
 export interface RouteConfig {
@@ -79,6 +80,7 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/settlement/pre-settlement-overview', title: '日清结算总览', component: PreSettlementOverviewPage },
     { path: '/settlement/pre-settlement-detail', title: '日清结算详情', component: PreSettlementDetailPage },
     { path: '/settlement/customer-settlement-detail', title: '单客户结算详情', component: SingleCustomerSettlementDetailPage as any },
+    { path: '/settlement/bill-review', title: '批发月度结算', component: WholesaleMonthlySettlementPage },
     { path: '/settlement/retail-settlement', title: '零售用户结算', component: PlaceholderPage },
     { path: '/settlement/profit-analysis', title: '经营利润分析', component: PlaceholderPage },
 
