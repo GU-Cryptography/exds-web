@@ -23,7 +23,7 @@ import LoadCharacteristicsDetailPage from '../pages/LoadCharacteristicsDetailPag
 import { SystemLogsPage } from '../pages/SystemLogsPage';
 import PreSettlementOverviewPage from '../pages/PreSettlementOverviewPage';
 import PreSettlementDetailPage from '../pages/PreSettlementDetailPage';
-import RetailSettlementPricePage from '../pages/RetailSettlementPricePage';
+import MonthlyManualDataPage from '../pages/MonthlyManualDataPage';
 import SingleCustomerSettlementDetailPage from '../pages/SingleCustomerSettlementDetailPage';
 
 // 路由配置接口
@@ -87,7 +87,7 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/basic-data/tou-definition', title: '时段电价分布', component: TouRulesPage },
     { path: '/basic-data/weather-data', title: '天气预测数据', component: WeatherDataPage },
     { path: '/basic-data/load-validation', title: '负荷数据诊断', component: LoadDataDiagnosisPage },
-    { path: '/basic-data/retail-prices', title: '零售套餐价格', component: RetailSettlementPricePage },
+    { path: '/basic-data/monthly-manual-data', title: '基础数据导入', component: MonthlyManualDataPage },
 
     // 系统管理
     { path: '/system-settings/user-permissions', title: '用户与权限', component: PlaceholderPage },

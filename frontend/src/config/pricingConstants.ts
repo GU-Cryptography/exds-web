@@ -20,7 +20,7 @@ interface ReferenceTypeInternalDefinition {
  * 
  * 映射来源：
  * - regularLabel 匹配 webapp/api/v1_retail_prices.py 的 REGULAR_PRICE_KEY_MAP
- * - periodLabel 匹配 frontend/src/pages/RetailSettlementPricePage.tsx 的 PERIOD_PRICE_COLS
+ * - periodLabel 匹配 frontend/src/pages/tabs/RetailSettlementPriceTab.tsx 的 PERIOD_PRICE_COLS
  */
 const REFERENCE_DEFINITIONS: ReferenceTypeInternalDefinition[] = [
     {

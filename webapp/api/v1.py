@@ -13,6 +13,8 @@ from webapp.api import (
     v1_load_forecast, v1_manual_adjustment, v1_settlement,
     v1_retail_settlement,
     v1_retail_prices,
+    v1_mechanism_energy,
+    v1_customer_energy,
     medium_term_forecast  # New module
 )
 
@@ -45,6 +47,8 @@ router.include_router(v1_customer_tags.router)
 router.include_router(v1_settlement.router)
 router.include_router(v1_retail_settlement.router)
 router.include_router(v1_retail_prices.router)  # 零售结算价格定义
+router.include_router(v1_mechanism_energy.router)
+router.include_router(v1_customer_energy.router)
 
 # Include additional routers previously in main.py
 router.include_router(v1_rpa_monitor.router, prefix="/rpa", tags=["RPA监控"])

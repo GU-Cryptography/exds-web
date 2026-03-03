@@ -9,7 +9,7 @@ import {
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
-import apiClient from '../api/client';
+import apiClient from '../../api/client';
 
 // ─── 类型 ────────────────────────────────────────────────────────────
 interface RegularPrice {
@@ -80,7 +80,7 @@ const PERIOD_PRICE_COLS: Array<{ key: keyof PeriodPrice; label: string }> = [
 const fmt = (v: number | null, digits = 3) => (v == null ? '—' : v.toFixed(digits));
 
 // ─── 主组件 ───────────────────────────────────────────────────────────
-const RetailSettlementPricePage: React.FC = () => {
+const RetailSettlementPriceTab: React.FC = () => {
     const theme = useTheme();
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
 
@@ -233,7 +233,7 @@ const RetailSettlementPricePage: React.FC = () => {
                     startIcon={<UploadFileIcon />}
                     component="label"
                 >
-                    导入价格数据
+                    导入结算参考价格文件
                     <input type="file" hidden accept=".xlsx,.xls" onChange={handleFileChange} />
                 </Button>
 
@@ -424,4 +424,4 @@ const RetailSettlementPricePage: React.FC = () => {
     );
 };
 
-export default RetailSettlementPricePage;
+export default RetailSettlementPriceTab;
