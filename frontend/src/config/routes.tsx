@@ -15,8 +15,6 @@ import { RpaMonitorPage } from '../pages/RpaMonitorPage';
 import { DayAheadPriceForecastPage } from '../pages/DayAheadPriceForecastPage';
 import { WeatherDataPage } from '../pages/WeatherDataPage';
 import { LoadDataDiagnosisPage } from '../pages/LoadDataDiagnosisPage';
-import { CustomerLoadAnalysisPage } from '../pages/CustomerLoadAnalysisPage';
-import { LoadForecastWorkbench } from '../pages/LoadForecastWorkbench';
 import { CustomerLoadOverviewPage } from '../pages/CustomerLoadOverviewPage';
 import LoadCharacteristicsOverviewPage from '../pages/LoadCharacteristicsOverviewPage';
 import LoadCharacteristicsDetailPage from '../pages/LoadCharacteristicsDetailPage';
@@ -26,15 +24,15 @@ import PreSettlementDetailPage from '../pages/PreSettlementDetailPage';
 import MonthlyManualDataPage from '../pages/MonthlyManualDataPage';
 import SingleCustomerSettlementDetailPage from '../pages/SingleCustomerSettlementDetailPage';
 import WholesaleMonthlySettlementPage from '../pages/WholesaleMonthlySettlementPage';
+import RetailMonthlySettlementPage from '../pages/RetailMonthlySettlementPage';
+import { LoadForecastWorkbench } from '../pages/LoadForecastWorkbench';
 
-// 路由配置接口
 export interface RouteConfig {
     path: string;
     title: string;
     component: React.ComponentType;
 }
 
-// 路由配置列表
 export const routeConfigs: RouteConfig[] = [
     { path: '/dashboard', title: '交易总览', component: PlaceholderPage },
 
@@ -59,7 +57,6 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/price-analysis/mid-long-term', title: '中长期日内分析', component: ContractPriceDailyPage },
     { path: '/price-analysis/mid-long-trend', title: '中长期趋势分析', component: ContractPriceTrendPage },
 
-
     // 价格预测
     { path: '/price-forecast/baseline-data', title: '预测基础数据', component: ForecastBaseDataPage },
     { path: '/price-forecast/d-2', title: 'D-2价格预测', component: PlaceholderPage },
@@ -81,7 +78,7 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/settlement/pre-settlement-detail', title: '日清结算详情', component: PreSettlementDetailPage },
     { path: '/settlement/customer-settlement-detail', title: '单客户结算详情', component: SingleCustomerSettlementDetailPage as any },
     { path: '/settlement/bill-review', title: '批发月度结算', component: WholesaleMonthlySettlementPage },
-    { path: '/settlement/retail-settlement', title: '零售用户结算', component: PlaceholderPage },
+    { path: '/settlement/retail-settlement', title: '零售月度结算', component: RetailMonthlySettlementPage },
     { path: '/settlement/profit-analysis', title: '经营利润分析', component: PlaceholderPage },
 
     // 基础数据
@@ -98,7 +95,6 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/system-settings/model-parameters', title: '预测模型参数', component: PlaceholderPage },
 ];
 
-// 根据路径获取路由配置
 export const getRouteConfig = (path: string): RouteConfig | undefined => {
-    return routeConfigs.find(config => config.path === path);
+    return routeConfigs.find((config) => config.path === path);
 };

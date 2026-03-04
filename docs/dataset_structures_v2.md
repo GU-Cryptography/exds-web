@@ -992,3 +992,107 @@ critical_alerts = db.customer_anomaly_alerts.find({
 }
 ```
 
+---
+
+## 19. `retail_settlement_monthly_status` - 零售月度结算状态汇总
+
+### 19.1. 集合用途
+
+用于存储“零售月度结算”每个月的状态与核心汇总指标（按月一条），供月度结算台账读取。
+
+### 19.2. 字段定义
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `_id` | `String` | 文档主键，格式 `YYYY-MM` |
+| `month` | `String` | 月份，格式 `YYYY-MM` |
+| `wholesale_settled` | `Boolean` | 批发月度结算是否已完成 |
+| `wholesale_avg_price` | `Number` | 批发月度结算均价（元/MWh） |
+| `retail_daily_recomputed` | `Boolean` | 是否完成该月客户日清重算 |
+| `retail_avg_price` | `Number` | 零售月度均价（元/kWh） |
+| `retail_total_energy` | `Number` | 零售月度总电量（MWh，日清+调平口径） |
+| `retail_total_fee` | `Number` | 零售月度总电费（元，日清+调平口径，未扣返还） |
+| `excess_profit_threshold` | `Number` | 超额收益阈值（元/MWh） |
+| `excess_profit_total` | `Number` | 超额收益总额（元） |
+| `excess_refund_pool` | `Number` | 超额返还资金池（元） |
+| `force` | `Boolean` | 本次结算是否强制重算 |
+| `created_at` | `DateTime` | 创建时间（UTC） |
+| `updated_at` | `DateTime` | 最后更新时间（UTC） |
+
+### 19.3. 索引信息
+
+- `_id_`（默认主键索引，月份唯一）
+
+---
+
+## 20. `customer_retail_monthly_settlement` - 客户零售月度结算结果
+
+### 20.1. 集合用途
+
+用于存储客户维度的零售月度结算结果明细（按“月份+客户”一条），作为月度结算页面客户明细数据源。
+
+### 20.2. 字段定义
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `_id` | `String` | 文档主键，格式 `{month}_{safe_customer_name}` |
+| `month` | `String` | 月份，格式 `YYYY-MM` |
+| `customer_id` | `String\|Null` | 客户档案ID（若能解析） |
+| `customer_name` | `String` | 客户名称 |
+| `daily_energy_mwh` | `Number` | 日清重算电量合计（MWh） |
+| `retail_fee` | `Number` | 日清重算电费合计（元） |
+| `retail_avg_price` | `Number` | 日清均价（元/kWh） |
+| `balancing_energy_mwh` | `Number` | 调平电量（MWh） |
+| `balancing_fee` | `Number` | 调平电费（元） |
+| `balancing_avg_price` | `Number` | 调平均价（元/kWh） |
+| `total_energy_mwh` | `Number` | 结算总电量（MWh，日清+调平） |
+| `retail_total_fee` | `Number` | 零售总电费（元，日清+调平，未扣返还） |
+| `total_fee` | `Number` | 结算电费（元，扣减返还后） |
+| `wholesale_avg_price` | `Number` | 批发月度结算均价（元/MWh） |
+| `excess_refund_fee` | `Number` | 客户分摊返还金额（元） |
+| `excess_refund_unit_price` | `Number` | 客户返还单价（元/MWh） |
+| `excess_refund_ratio` | `Number` | 客户返还占比 |
+| `settlement_avg_price` | `Number` | 结算均价（元/kWh，`total_fee / total_energy_mwh / 1000`） |
+| `refund_allocated_at` | `DateTime\|Null` | 返还分配时间（UTC） |
+| `created_at` | `DateTime` | 创建时间（UTC） |
+| `updated_at` | `DateTime` | 最后更新时间（UTC） |
+
+### 20.3. 索引信息
+
+- `_id_`（默认主键索引）
+- `month`（建议索引，支持按月份查询）
+- `month + customer_name`（可选唯一索引，若需防重）
+
+---
+
+## 21. `retail_monthly_jobs` - 零售月度结算任务进度
+
+### 21.1. 集合用途
+
+用于记录零售月度结算后台任务的执行进度，支撑前端“结算进度”弹窗轮询显示。
+
+### 21.2. 字段定义
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `_id` | `String` | 任务ID（`uuid4().hex`） |
+| `month` | `String` | 结算月份（`YYYY-MM`） |
+| `status` | `String` | 任务状态：`pending` / `running` / `completed` / `failed` |
+| `force` | `Boolean` | 是否强制重算 |
+| `total_customers` | `Integer` | 客户总数 |
+| `processed_customers` | `Integer` | 已处理客户数 |
+| `success_count` | `Integer` | 成功客户数 |
+| `failed_count` | `Integer` | 失败客户数 |
+| `progress` | `Integer` | 进度百分比（0-100） |
+| `current_customer` | `String` | 当前处理客户名称 |
+| `message` | `String` | 任务提示信息 |
+| `started_at` | `DateTime` | 任务开始时间（UTC） |
+| `updated_at` | `DateTime` | 最后更新时间（UTC） |
+
+### 21.3. 索引信息
+
+- `_id_`（默认主键索引）
+- `month`（建议索引，支持按月查询任务）
+- `updated_at`（建议索引，支持任务清理与排序）
+
+

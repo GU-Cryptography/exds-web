@@ -39,6 +39,7 @@ import PreSettlementOverviewPage from './pages/PreSettlementOverviewPage';
 import PreSettlementDetailPage from './pages/PreSettlementDetailPage';
 import SingleCustomerSettlementDetailPage from './pages/SingleCustomerSettlementDetailPage';
 import MonthlyManualDataPage from './pages/MonthlyManualDataPage';
+import RetailMonthlySettlementPage from './pages/RetailMonthlySettlementPage';
 import { TabProvider } from './contexts/TabContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { DesktopTabLayout } from './layouts/DesktopTabLayout';
@@ -120,7 +121,7 @@ const ResponsiveLayout: React.FC = () => {
                     <Route path="settlement/pre-settlement-detail" element={<PreSettlementDetailPage />} />
                     <Route path="settlement/customer-settlement-detail" element={<SingleCustomerSettlementDetailPage />} />
                     <Route path="settlement/bill-review" element={<PlaceholderPage />} />
-                    <Route path="settlement/retail-settlement" element={<PlaceholderPage />} />
+                    <Route path="settlement/retail-settlement" element={<RetailMonthlySettlementPage />} />
                     <Route path="settlement/profit-analysis" element={<PlaceholderPage />} />
 
                     {/* 基础数据 */}

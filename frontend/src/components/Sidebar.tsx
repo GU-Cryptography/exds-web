@@ -1,54 +1,44 @@
-import React, { useState, useEffect } from 'react';
-import {
-    List,
-    ListItemButton,
-    ListItemIcon,
-    ListItemText,
-    Divider,
-    Toolbar,
-    Box,
-    Collapse
-} from '@mui/material';
+import React, { useEffect, useState } from 'react';
+import { Box, Collapse, Divider, List, ListItemButton, ListItemIcon, ListItemText, Toolbar } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
+    AccountBoxOutlined,
+    AnalyticsOutlined,
+    AssessmentOutlined,
+    BarChartOutlined,
+    BubbleChartOutlined,
+    CalendarMonthOutlined,
+    CrisisAlertOutlined,
     DashboardOutlined as DashboardIcon,
-    PeopleOutlined as PeopleIcon,
-    TimelineOutlined as TimelineIcon,
-    PriceChangeOutlined as PriceChangeIcon,
-    GavelOutlined as GavelIcon,
-    ShieldOutlined as ShieldIcon,
-    PaymentOutlined as PaymentIcon,
-    AssessmentOutlined as AssessmentIcon,
-    SettingsOutlined as SettingsIcon,
-    LogoutOutlined as LogoutIcon,
     ExpandLess,
     ExpandMore,
-    AccountBoxOutlined,
-    StyleOutlined,
-    ShowChartOutlined,
-    BubbleChartOutlined,
-    StackedLineChartOutlined,
-    QueryStatsOutlined,
-    RuleOutlined,
-    CalendarMonthOutlined,
-    AnalyticsOutlined,
-    CrisisAlertOutlined,
-    TrendingUpOutlined,
-    FunctionsOutlined,
     FactCheckOutlined,
-    RequestQuoteOutlined,
-    VerifiedUserOutlined,
-    StorageOutlined,
+    FunctionsOutlined,
+    GavelOutlined as GavelIcon,
+    LogoutOutlined as LogoutIcon,
     ModelTrainingOutlined,
+    NotificationsActiveOutlined,
+    PaymentOutlined as PaymentIcon,
+    PeopleOutlined as PeopleIcon,
+    PriceChangeOutlined as PriceChangeIcon,
+    QueryStatsOutlined,
+    RequestQuoteOutlined,
+    RuleOutlined,
+    SettingsOutlined as SettingsIcon,
+    ShieldOutlined as ShieldIcon,
+    ShowChartOutlined,
     SourceOutlined,
+    StackedLineChartOutlined,
+    StorageOutlined,
+    StyleOutlined,
+    TimelineOutlined as TimelineIcon,
+    TrendingUpOutlined,
+    VerifiedUserOutlined,
     VpnKeyOutlined,
-    BarChartOutlined,
-    NotificationsActiveOutlined
 } from '@mui/icons-material';
 import { useTabContext } from '../contexts/TabContext';
 import { getRouteConfig } from '../config/routes';
 
-// 定义菜单项类型
 interface SubMenuItem {
     text: string;
     path: string;
@@ -62,7 +52,6 @@ interface MenuItem {
     subItems?: SubMenuItem[];
 }
 
-// 根据系统菜单规划.md定义新的菜单结构
 const menuItems: MenuItem[] = [
     { text: '交易总览', icon: <DashboardIcon />, path: '/dashboard' },
     {
@@ -103,7 +92,6 @@ const menuItems: MenuItem[] = [
             { text: '中长期趋势分析', path: '/price-analysis/mid-long-trend', icon: <BarChartOutlined /> },
         ],
     },
-
     {
         text: '价格预测',
         icon: <QueryStatsOutlined />,
@@ -139,13 +127,13 @@ const menuItems: MenuItem[] = [
             { text: '日清结算总览', path: '/settlement/pre-settlement-overview', icon: <RequestQuoteOutlined /> },
             { text: '日清结算详情', path: '/settlement/pre-settlement-detail', icon: <FactCheckOutlined /> },
             { text: '批发月度结算', path: '/settlement/bill-review', icon: <FactCheckOutlined /> },
-            { text: '零售用户结算', path: '/settlement/retail-settlement', icon: <PaymentIcon /> },
+            { text: '零售月度结算', path: '/settlement/retail-settlement', icon: <PaymentIcon /> },
             { text: '经营利润分析', path: '/settlement/profit-analysis', icon: <ShowChartOutlined /> },
         ],
     },
     {
         text: '基础数据',
-        icon: <AssessmentIcon />,
+        icon: <AssessmentOutlined />,
         subItems: [
             { text: '国网代理购电', path: '/basic-data/grid-price', icon: <PriceChangeIcon /> },
             { text: '时段电价分布', path: '/basic-data/tou-definition', icon: <StyleOutlined /> },
@@ -170,60 +158,47 @@ export const Sidebar: React.FC<{ isMobile?: boolean }> = ({ isMobile = false }) 
     const location = useLocation();
     const navigate = useNavigate();
     const [open, setOpen] = useState<{ [key: string]: boolean }>({});
-
-    // Hook 必须无条件调用，在使用时再判断是否为移动端
     const tabContext = useTabContext();
 
     const handleClick = (text: string) => {
-        setOpen(prev => ({ ...prev, [text]: !prev[text] }));
+        setOpen((prev) => ({ ...prev, [text]: !prev[text] }));
     };
 
-    // 处理菜单项点击
     const handleMenuItemClick = (path: string) => {
         if (isMobile) {
-            // 移动端：使用传统的路由跳转
             navigate(path);
-        } else if (tabContext) {
-            // 桌面端：打开或激活页签
+            return;
+        }
+
+        if (tabContext) {
             const routeConfig = getRouteConfig(path);
             if (routeConfig) {
                 const Component = routeConfig.component;
                 tabContext.addTab({
                     key: path,
                     title: routeConfig.title,
-                    path: path,
+                    path,
                     component: <Component />,
                 });
             }
         }
     };
 
-    // 根据当前激活的页签或路由，确定选中的菜单项
-    const getActivePath = (): string => {
-        if (isMobile) {
-            return location.pathname;
-        } else if (tabContext && tabContext.activeTabKey) {
-            return tabContext.activeTabKey;
-        }
-        return '';
-    };
+    const activePath = isMobile
+        ? location.pathname
+        : tabContext && tabContext.activeTabKey
+          ? tabContext.activeTabKey
+          : '';
 
-    const activePath = getActivePath();
-
-    // 自动展开包含当前激活路径的菜单
     useEffect(() => {
-        if (activePath) {
-            menuItems.forEach((item) => {
-                if (item.subItems) {
-                    const hasActiveSubItem = item.subItems.some(
-                        (sub) => activePath.startsWith(sub.path)
-                    );
-                    if (hasActiveSubItem) {
-                        setOpen((prev) => ({ ...prev, [item.text]: true }));
-                    }
-                }
-            });
-        }
+        if (!activePath) return;
+        menuItems.forEach((item) => {
+            if (!item.subItems) return;
+            const hasActiveSubItem = item.subItems.some((sub) => activePath.startsWith(sub.path));
+            if (hasActiveSubItem) {
+                setOpen((prev) => ({ ...prev, [item.text]: true }));
+            }
+        });
     }, [activePath]);
 
     const handleLogout = () => {
@@ -238,7 +213,7 @@ export const Sidebar: React.FC<{ isMobile?: boolean }> = ({ isMobile = false }) 
             <List component="nav" sx={{ flexGrow: 1, p: 1 }}>
                 {menuItems.map((item) => {
                     if (item.subItems) {
-                        const isOpen = open[item.text] || item.subItems.some(sub => activePath.startsWith(sub.path));
+                        const isOpen = open[item.text] || item.subItems.some((sub) => activePath.startsWith(sub.path));
                         return (
                             <div key={item.text}>
                                 <ListItemButton onClick={() => handleClick(item.text)} sx={{ borderRadius: '8px' }}>
@@ -264,6 +239,7 @@ export const Sidebar: React.FC<{ isMobile?: boolean }> = ({ isMobile = false }) 
                             </div>
                         );
                     }
+
                     return (
                         <ListItemButton
                             key={item.text}
@@ -280,7 +256,9 @@ export const Sidebar: React.FC<{ isMobile?: boolean }> = ({ isMobile = false }) 
             <Divider />
             <List component="nav" sx={{ p: 1 }}>
                 <ListItemButton onClick={handleLogout} sx={{ borderRadius: '8px' }}>
-                    <ListItemIcon sx={{ minWidth: 40 }}><LogoutIcon /></ListItemIcon>
+                    <ListItemIcon sx={{ minWidth: 40 }}>
+                        <LogoutIcon />
+                    </ListItemIcon>
                     <ListItemText primary="退出登录" />
                 </ListItemButton>
             </List>

@@ -87,7 +87,8 @@ class RetailSettlementService:
         if not force:
             existing = collection.find_one({
                 "customer_id": customer_id,
-                "date": date_str
+                "date": date_str,
+                "settlement_type": settlement_type
             })
             if existing:
                 logger.info(f"零售结算已存在: {customer_id} {date_str}")
@@ -117,7 +118,7 @@ class RetailSettlementService:
 
         # 3. 获取用户48时段电量
         daily_curve = LoadQueryService.get_daily_curve(
-            customer_id, date_str, FusionStrategy.MP_COMPLETE
+            customer_id, date_str, FusionStrategy.MP_ONLY
         )
         if not daily_curve:
             logger.warning(f"客户 {customer_id} 在 {date_str} 无负荷数据")
@@ -261,7 +262,7 @@ class RetailSettlementService:
             contract_id=str(contract.get("_id", "")),
             package_name=contract.get("package_name", ""),
             model_code=model_code,
-            settlement_type="daily",
+            settlement_type=settlement_type,
             reference_price=price_result.get("reference_price"),
             fixed_prices=price_result.get("fixed_prices"),
             linked_config=price_result.get("linked_config"),
@@ -286,7 +287,7 @@ class RetailSettlementService:
             {
                 "customer_id": customer_id, 
                 "date": date_str,
-                "settlement_type": "daily"
+                "settlement_type": settlement_type
             },
             {"$set": doc},
             upsert=True,
