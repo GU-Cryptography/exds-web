@@ -70,6 +70,11 @@ class RetailPriceService:
                 - 缺失: None
         """
         month_str = date_str[:7]
+
+        # 日常日清（is_monthly=False）不使用月度发布价，直接走降级取数逻辑。
+        if not is_monthly:
+            logger.info(f"日清结算 {date_str} 使用降级定价逻辑 [{price_key}]")
+            return self._fallback_resolve(price_key, date_str, is_time_based, is_monthly=is_monthly), "simulated"
         
         # 1. 优先尝试从 retail_settlement_prices 获取正式发布数据
         doc = self.collection.find_one({"_id": month_str})
@@ -130,7 +135,7 @@ class RetailPriceService:
         substitute_keys = (
             "market_monthly_avg", "market_annual_avg", "market_avg", "market_monthly_on_grid",
             "retailer_monthly_avg", "retailer_annual_avg", "retailer_avg",
-            "grid_agency_price"
+            "grid_agency_price", "market_longterm_flat_avg"
         )
         if price_key in substitute_keys:
             month_str = date_str[:7]

@@ -4,11 +4,14 @@
 import calendar
 import logging
 import re
-from datetime import date, datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
-from webapp.services.retail_settlement_service import RetailSettlementService
+from webapp.models.load_enums import FusionStrategy
+from webapp.services.load_query_service import LoadQueryService
+from webapp.services.retail_settlement_service import DEFAULT_RATIOS, TOU_TYPE_MAP, RetailSettlementService
+from webapp.services.tou_service import get_month_tou_meta
 from webapp.tools.mongo import DATABASE
 
 logger = logging.getLogger(__name__)
@@ -18,7 +21,7 @@ EXCESS_PROFIT_THRESHOLD_PER_MWH = 10.0
 
 class RetailMonthlySettlementService:
     STATUS_COLLECTION = "retail_settlement_monthly_status"
-    CUSTOMER_COLLECTION = "customer_retail_monthly_settlement"
+    CUSTOMER_COLLECTION = "retail_settlement_monthly"
     JOB_COLLECTION = "retail_monthly_jobs"
 
     def __init__(self):
@@ -56,7 +59,7 @@ class RetailMonthlySettlementService:
     def get_customer_records(self, month: str) -> List[Dict]:
         return list(self.db[self.CUSTOMER_COLLECTION].find({"month": month}).sort("customer_name", 1))
 
-    def validate_month_ready(self, month: str) -> Tuple[bool, str]:
+    def validate_month_ready(self, month: str, allow_fallback: bool = False) -> Tuple[bool, str]:
         energy_doc = self.db["customer_monthly_energy"].find_one({"_id": month}, {"records": 1})
         if not energy_doc:
             return False, f"{month} 缺少客户月度电量记录"
@@ -66,6 +69,10 @@ class RetailMonthlySettlementService:
         wholesale_doc = self.db["wholesale_settlement_monthly"].find_one({"_id": month}, {"_id": 1})
         if not wholesale_doc:
             return False, f"{month} 批发月度结算未执行"
+
+        has_cap, cap_msg = self._check_monthly_cap_base_ready(month, allow_fallback=allow_fallback)
+        if not has_cap:
+            return False, cap_msg
 
         return True, ""
 
@@ -77,7 +84,7 @@ class RetailMonthlySettlementService:
         customer_docs = list(
             self.db["customer_monthly_energy"]
             .find(query, {"_id": 1, "imported_at": 1, "records": 1})
-            .sort("_id", 1)  # 升序，1月在前
+            .sort("_id", 1)
         )
 
         status_query = {"_id": query["_id"]} if "_id" in query else {}
@@ -109,10 +116,8 @@ class RetailMonthlySettlementService:
                 trigger_excess_refund = price_margin_per_mwh > EXCESS_PROFIT_THRESHOLD_PER_MWH
 
             groups = self._group_monthly_energy_records(doc.get("records", []))
-            # 月度总电量：求 customer_monthly_energy 中所有 records energy_mwh 合计
             total_energy_mwh = round(sum(float(r.get("energy_mwh") or 0.0) for r in doc.get("records", [])), 6)
 
-            # 结算汇总计算（需有 status 才有意义）
             retail_total_fee = status.get("retail_total_fee") if status else None
             excess_refund_pool = status.get("excess_refund_pool") if status else None
             settlement_total_fee: Optional[float] = None
@@ -128,16 +133,10 @@ class RetailMonthlySettlementService:
                     "month": month,
                     "customer_count": len(groups),
                     "wholesale_settled": bool(wholesale_doc),
-                    "wholesale_avg_price": round(wholesale_avg_price, 6)
-                    if wholesale_avg_price is not None
-                    else None,
-                    "wholesale_total_cost": round(wholesale_total_cost, 2)
-                    if wholesale_total_cost is not None
-                    else None,
+                    "wholesale_avg_price": round(wholesale_avg_price, 6) if wholesale_avg_price is not None else None,
+                    "wholesale_total_cost": round(wholesale_total_cost, 2) if wholesale_total_cost is not None else None,
                     "total_energy_mwh": total_energy_mwh,
-                    "price_margin_per_mwh": round(price_margin_per_mwh, 6)
-                    if price_margin_per_mwh is not None
-                    else None,
+                    "price_margin_per_mwh": round(price_margin_per_mwh, 6) if price_margin_per_mwh is not None else None,
                     "trigger_excess_refund": trigger_excess_refund,
                     "can_settle": bool(wholesale_doc) and len(groups) > 0,
                     "settlement_total_fee": settlement_total_fee,
@@ -151,11 +150,12 @@ class RetailMonthlySettlementService:
     def run_monthly_settlement(self, month: str, job_id: str, force: bool = False) -> None:
         try:
             start_date, end_date = self._parse_month(month)
+            end_date_str = end_date.strftime("%Y-%m-%d")
         except ValueError as exc:
             self._set_job_failed(job_id, str(exc))
             return
 
-        ready, reason = self.validate_month_ready(month)
+        ready, reason = self.validate_month_ready(month, allow_fallback=force)
         if not ready:
             self._set_job_failed(job_id, reason)
             return
@@ -178,7 +178,7 @@ class RetailMonthlySettlementService:
                 "failed_count": 0,
                 "progress": 0,
                 "current_customer": "",
-                "message": "步骤1/2：正在执行客户月度正式日清重算",
+                "message": "步骤1/2：按客户聚合月度48时段电量并计算零售结算",
             },
             initialize=False,
         )
@@ -187,7 +187,6 @@ class RetailMonthlySettlementService:
         processed = 0
         success = 0
         failed = 0
-        daily_energy_total = 0.0
 
         for group in customer_groups:
             processed += 1
@@ -199,17 +198,22 @@ class RetailMonthlySettlementService:
                     "processed_customers": processed,
                     "current_customer": customer_name,
                     "progress": int((processed / total_customers) * 70),
-                    "message": "步骤1/2：正在执行客户月度正式日清重算",
+                    "message": "步骤1/2：按客户聚合月度48时段电量并计算零售结算",
                 },
                 initialize=False,
             )
 
             try:
-                self._recompute_customer_monthly_daily(customer_ids, start_date, end_date, force)
-                daily_energy, retail_fee = self._aggregate_monthly_daily(customer_ids, customer_name, start_date, end_date)
-                entry = self._build_base_customer_entry(group, customer_ids, daily_energy, retail_fee)
+                calc_result = self._calculate_customer_monthly_retail(
+                    customer_ids=customer_ids,
+                    customer_name=customer_name,
+                    start_date=start_date,
+                    end_date=end_date,
+                    end_date_str=end_date_str,
+                    allow_fallback=force,
+                )
+                entry = self._build_base_customer_entry(group, customer_ids, calc_result)
                 base_entries.append(entry)
-                daily_energy_total += entry["daily_energy_mwh"]
                 success += 1
             except Exception as exc:
                 logger.exception("月度结算客户失败 month=%s customer=%s err=%s", month, customer_name, exc)
@@ -228,14 +232,16 @@ class RetailMonthlySettlementService:
             initialize=False,
         )
 
-        status_doc = self._build_month_status(month, base_entries, daily_energy_total, force)
-        self._upsert_status(status_doc)
+        status_doc = self._build_month_status(month, base_entries, force)
 
         # 第一步：先落地不含返还的客户月度结算记录
         self._persist_base_customer_entries(month, base_entries, status_doc)
 
         # 第二步：基于全量客户参数计算返还后，再回写每个客户返还字段
         self._apply_refund_to_customer_entries(month, base_entries, status_doc)
+
+        # 最后写状态，保证状态与客户月结同批次同步
+        self._upsert_status(status_doc)
 
         self._update_job(
             job_id,
@@ -279,10 +285,6 @@ class RetailMonthlySettlementService:
         return result
 
     def _resolve_customer_ids(self, customer_nos: List[str], customer_name: str) -> List[str]:
-        """按客户名称优先查找 customer_id，作为主要匹配方式。
-        customer_monthly_energy.customer_no 格式存在浮点后缀问题（如 3600188726280.0），
-        直接按名称查找 customer_archives 最可靠。"""
-        # 1. 先按名称精确查找
         candidate = self.db.customer_archives.find_one(
             {"user_name": customer_name},
             {"_id": 1},
@@ -290,11 +292,9 @@ class RetailMonthlySettlementService:
         if candidate:
             return [str(candidate["_id"])]
 
-        # 2. 名称未命中，逐个 customer_no 清理格式后匹配（去除浮点 .0 后缀）
         ids: List[str] = []
         for no in customer_nos:
-            # customer_monthly_energy 中可能存 "3600188726280.0"，档案中是 "3600188726280"
-            clean_no = no.rstrip('0').rstrip('.') if '.' in no else no
+            clean_no = no.rstrip("0").rstrip(".") if "." in no else no
             for lookup_no in {no, clean_no}:
                 doc = self.db.customer_archives.find_one(
                     {"accounts.account_id": lookup_no},
@@ -309,89 +309,372 @@ class RetailMonthlySettlementService:
         if not ids:
             logger.warning(
                 "无法从档案中解析客户 ID：customer_name=%s, customer_nos=%s",
-                customer_name, customer_nos
+                customer_name,
+                customer_nos,
             )
         return ids
 
-    def _recompute_customer_monthly_daily(
-        self, customer_ids: List[str], start_date: date, end_date: date, force: bool
-    ) -> None:
-        for customer_id in customer_ids:
-            current = start_date
-            while current <= end_date:
-                self.retail_service.calculate_customer_daily(
-                    customer_id=customer_id,
-                    date_str=current.strftime("%Y-%m-%d"),
-                    force=force,
-                    settlement_type="monthly",
-                )
-                current += timedelta(days=1)
+    def _calculate_customer_monthly_retail(
+        self,
+        customer_ids: List[str],
+        customer_name: str,
+        start_date: date,
+        end_date: date,
+        end_date_str: str,
+        allow_fallback: bool,
+    ) -> Dict[str, Any]:
+        if not customer_ids:
+            raise ValueError(f"客户 {customer_name} 未解析到 customer_id")
 
-    def _aggregate_monthly_daily(
-        self, customer_ids: List[str], customer_name: str, start_date: date, end_date: date
-    ) -> Tuple[float, float]:
+        cap_price = self._get_monthly_cap_price(
+            month=end_date_str[:7], date_str=end_date_str, allow_fallback=allow_fallback
+        )
+        tou_48 = self.retail_service._get_tou_48(end_date_str)
+        if not tou_48 or len(tou_48) != 48:
+            raise ValueError(f"{end_date_str} 峰谷时段定义异常")
+
+        monthly_load_values = [0.0] * 48
+        for customer_id in customer_ids:
+            load_values = self._aggregate_customer_monthly_load_values(customer_id, start_date, end_date)
+            for i in range(48):
+                monthly_load_values[i] += float(load_values[i] if i < len(load_values) else 0.0)
+
+        total_energy = sum(monthly_load_values)
+        if total_energy <= 0:
+            raise ValueError(f"客户 {customer_name} 在 {start_date}~{end_date} 无 MP_ONLY 电量数据")
+
+        contract = None
+        selected_customer_id = None
+        for customer_id in customer_ids:
+            tmp = self.retail_service._find_active_contract(customer_id, end_date_str)
+            if tmp:
+                contract = tmp
+                selected_customer_id = customer_id
+                break
+
+        if not contract:
+            raise ValueError(f"客户 {customer_name} 在 {end_date_str} 无有效合同")
+
+        package_info = self.retail_service._get_package_info(contract)
+        if not package_info:
+            raise ValueError(f"客户 {customer_name} 无法解析套餐定价配置")
+
+        model_code = package_info.get("model_code", "")
+        pricing_config = package_info.get("pricing_config", {})
+
+        if model_code.startswith("price_spread"):
+            is_time_based_pkg = model_code.endswith("_time") and not model_code.endswith("_non_time")
+            price_result = self.retail_service._calculate_price_spread(
+                pricing_config,
+                end_date_str,
+                is_time_based_package=is_time_based_pkg,
+                total_load_mwh=total_energy,
+                settlement_type="monthly",
+            )
+        elif model_code.startswith("fixed_linked"):
+            price_result = self.retail_service._calculate_fixed_linked(
+                pricing_config,
+                end_date_str,
+                settlement_type="monthly",
+            )
+        elif model_code.startswith("reference_linked"):
+            is_time_based_pkg = model_code.endswith("_time") and not model_code.endswith("_non_time")
+            price_result = self.retail_service._calculate_reference_linked(
+                pricing_config,
+                end_date_str,
+                is_time_based_package=is_time_based_pkg,
+                total_load_mwh=total_energy,
+                settlement_type="monthly",
+            )
+        elif model_code.startswith("single_comprehensive"):
+            price_result = self.retail_service._calculate_single_comprehensive(
+                pricing_config,
+                end_date_str,
+                settlement_type="monthly",
+            )
+        else:
+            raise ValueError(f"客户 {customer_name} 不支持的定价模型: {model_code}")
+
+        final_prices = dict(price_result.get("final_prices", {}) or {})
+        final_prices_48 = list(price_result.get("final_prices_48") or []) or None
+        nominal_total_fee = self._calculate_total_fee(monthly_load_values, tou_48, final_prices, final_prices_48)
+        nominal_avg_price = nominal_total_fee / (total_energy * 1000) if total_energy > 0 else 0.0
+        ratio = cap_price / nominal_avg_price if nominal_avg_price > cap_price + 1e-12 and nominal_avg_price > 0 else 1.0
+        is_capped = ratio < 1.0
+
+        if is_capped:
+            final_prices = {k: v * ratio for k, v in final_prices.items()}
+            if final_prices_48 and len(final_prices_48) == 48:
+                final_prices_48 = [v * ratio for v in final_prices_48]
+
+        period_details: List[Dict[str, Any]] = []
+        tou_summary: Dict[str, Dict[str, float]] = {
+            k: {"load_mwh": 0.0, "fee": 0.0} for k in DEFAULT_RATIOS.keys()
+        }
+        period_allocated_costs = self._aggregate_customer_monthly_period_allocated_costs(
+            customer_ids=customer_ids,
+            month=end_date_str[:7],
+        )
+        total_fee = 0.0
+        total_allocated_cost = 0.0
+        for i in range(48):
+            period_type = tou_48[i]
+            period_key = TOU_TYPE_MAP.get(period_type, "flat")
+            unit_price = (
+                final_prices_48[i]
+                if final_prices_48 and len(final_prices_48) == 48
+                else float(final_prices.get(period_key, 0.0))
+            )
+            load_mwh = float(monthly_load_values[i] if i < len(monthly_load_values) else 0.0)
+            fee = unit_price * load_mwh * 1000
+            allocated_cost = float(period_allocated_costs.get(i + 1, 0.0))
+            wholesale_price = (allocated_cost / load_mwh) if load_mwh > 0 else 0.0
+            total_fee += fee
+            total_allocated_cost += allocated_cost
+            tou_summary[period_key]["load_mwh"] += load_mwh
+            tou_summary[period_key]["fee"] += fee
+            period_details.append(
+                {
+                    "period": i + 1,
+                    "period_type": period_type,
+                    "load_mwh": round(load_mwh, 6),
+                    "unit_price": round(unit_price, 6),
+                    "fee": round(fee, 2),
+                    "allocated_cost": round(allocated_cost, 6),
+                    "wholesale_price": round(wholesale_price, 6),
+                }
+            )
+
+        avg_price = total_fee / (total_energy * 1000) if total_energy > 0 else 0.0
+        # 按要求：总采购金额来自 period_details.allocated_cost 聚合
+        total_allocated_cost = sum(float(d.get("allocated_cost") or 0.0) for d in period_details)
+        gross_profit = total_fee - total_allocated_cost
+        tou_summary_out = {
+            k: {
+                "load_mwh": round(v["load_mwh"], 6),
+                "fee": round(v["fee"], 2),
+            }
+            for k, v in tou_summary.items()
+        }
+
+        return {
+            "customer_id": selected_customer_id,
+            "contract_id": str(contract.get("_id", "")),
+            "package_name": contract.get("package_name", ""),
+            "model_code": model_code,
+            "reference_price": self._to_plain(price_result.get("reference_price")),
+            "fixed_prices": self._to_plain(price_result.get("fixed_prices")),
+            "linked_config": self._to_plain(price_result.get("linked_config")),
+            "final_prices": {k: round(float(v), 6) for k, v in final_prices.items()},
+            "price_ratio_adjusted": bool(price_result.get("price_ratio_adjusted", False)),
+            "price_ratio_adjusted_base": bool(price_result.get("price_ratio_adjusted_base", False)),
+            "period_details": period_details,
+            "tou_summary": tou_summary_out,
+            "total_load_mwh": round(total_energy, 6),
+            "total_fee": round(total_fee, 2),
+            "avg_price": round(avg_price, 6),
+            "total_allocated_cost": round(total_allocated_cost, 6),
+            "gross_profit": round(gross_profit, 2),
+            "nominal_avg_price": round(nominal_avg_price, 6),
+            "cap_price": round(cap_price, 6),
+            "is_capped": is_capped,
+        }
+
+    def _aggregate_customer_monthly_load_values(self, customer_id: str, start_date: date, end_date: date) -> List[float]:
         start_str = start_date.strftime("%Y-%m-%d")
         end_str = end_date.strftime("%Y-%m-%d")
+        curves = LoadQueryService.get_curve_series(
+            customer_id=customer_id,
+            start_date=start_str,
+            end_date=end_str,
+            strategy=FusionStrategy.MP_ONLY,
+        )
 
-        query: Dict = {
-            "settlement_type": "monthly",
-            "date": {"$gte": start_str, "$lte": end_str},
-        }
-        if customer_ids:
-            query["customer_id"] = {"$in": customer_ids}
-        else:
-            query["customer_name"] = customer_name
+        monthly = [0.0] * 48
+        for curve in curves:
+            values = self._normalize_to_48(curve.values if curve else [])
+            for i, v in enumerate(values):
+                monthly[i] += float(v or 0.0)
+        return [round(v, 6) for v in monthly]
 
-        cursor = self.db["retail_settlement_daily"].find(query, {"total_load_mwh": 1, "total_fee": 1})
-        energy = 0.0
-        fee = 0.0
-        for doc in cursor:
-            energy += float(doc.get("total_load_mwh") or 0.0)
-            fee += float(doc.get("total_fee") or 0.0)
-        return energy, fee
+    def _normalize_to_48(self, values: List[float]) -> List[float]:
+        vals = [float(v or 0.0) for v in values]
+        if len(vals) == 48:
+            return vals
+        if len(vals) == 96:
+            return [vals[i * 2] + vals[i * 2 + 1] for i in range(48)]
+        if len(vals) > 48:
+            return vals[:48]
+        return vals + [0.0] * (48 - len(vals))
 
-    def _build_base_customer_entry(
-        self, group: Dict, customer_ids: List[str], daily_energy: float, retail_fee: float
-    ) -> Dict:
+    def _aggregate_customer_monthly_period_allocated_costs(
+        self,
+        customer_ids: List[str],
+        month: str,
+    ) -> Dict[int, float]:
+        if not customer_ids:
+            return {}
+
+        docs = list(
+            self.db["retail_settlement_daily"].find(
+                {
+                    "customer_id": {"$in": customer_ids},
+                    "settlement_type": "daily",
+                    "date": {"$regex": f"^{month}-"},
+                },
+                {"period_details": 1},
+            )
+        )
+
+        period_costs: Dict[int, float] = {}
+        for doc in docs:
+            for detail in (doc.get("period_details") or []):
+                try:
+                    period = int(detail.get("period"))
+                except (TypeError, ValueError):
+                    continue
+                if not 1 <= period <= 48:
+                    continue
+                period_costs[period] = period_costs.get(period, 0.0) + float(detail.get("allocated_cost") or 0.0)
+        return period_costs
+
+    def _calculate_total_fee(
+        self,
+        load_values: List[float],
+        tou_48: List[str],
+        final_prices: Dict[str, float],
+        final_prices_48: Optional[List[float]],
+    ) -> float:
+        total_fee = 0.0
+        for i in range(48):
+            load_mwh = load_values[i] if i < len(load_values) else 0.0
+            if final_prices_48 and len(final_prices_48) == 48:
+                unit_price = final_prices_48[i]
+            else:
+                period_key = TOU_TYPE_MAP.get(tou_48[i], "flat")
+                unit_price = final_prices.get(period_key, 0.0)
+            total_fee += unit_price * load_mwh * 1000
+        return total_fee
+
+    def _check_monthly_cap_base_ready(self, month: str, allow_fallback: bool) -> Tuple[bool, str]:
+        doc = self.db["retail_settlement_prices"].find_one({"_id": month}, {"regular_prices": 1})
+        if not doc:
+            if allow_fallback:
+                return True, ""
+            return False, f"{month} 未发布零售结算价格定义，确认后可降级计算"
+
+        regular_prices = doc.get("regular_prices", []) or []
+        found = any((p.get("price_type_key") == "market_longterm_flat_avg" and p.get("value") is not None) for p in regular_prices)
+        if found:
+            return True, ""
+
+        if allow_fallback:
+            return True, ""
+        return False, f"{month} 缺少 market_longterm_flat_avg，确认后可降级计算"
+
+    def _get_monthly_cap_price(self, month: str, date_str: str, allow_fallback: bool) -> float:
+        date_dt = datetime.strptime(date_str, "%Y-%m-%d")
+        tou_meta = get_month_tou_meta(date_dt, self.db["tou_rules"])
+        ratio = 0.15 if tou_meta.get("is_tip_month", False) else 0.10
+
+        base_price = self._get_monthly_cap_base_price(month, allow_fallback=allow_fallback)
+        return round(base_price * (1 + ratio), 6)
+
+    def _get_monthly_cap_base_price(self, month: str, allow_fallback: bool) -> float:
+        doc = self.db["retail_settlement_prices"].find_one({"_id": month}, {"regular_prices": 1})
+        regular_prices = (doc or {}).get("regular_prices", []) or []
+        for row in regular_prices:
+            if row.get("price_type_key") == "market_longterm_flat_avg" and row.get("value") is not None:
+                value = float(row.get("value"))
+                return value / 1000.0 if value > 10 else value
+
+        if not allow_fallback:
+            raise ValueError(f"{month} 缺少 market_longterm_flat_avg，无法计算月度封顶价")
+
+        sgcc = self.db["price_sgcc"].find_one({"_id": month}, {"avg_on_grid_price": 1})
+        fallback = float((sgcc or {}).get("avg_on_grid_price") or 0.0)
+        if fallback <= 0:
+            raise ValueError(f"{month} market_longterm_flat_avg 缺失且无可用降级基准")
+
+        logger.warning("%s 使用 avg_on_grid_price=%s 作为月封顶基准降级值", month, fallback)
+        return fallback
+
+    def _build_base_customer_entry(self, group: Dict, customer_ids: List[str], calc_result: Dict[str, Any]) -> Dict:
         customer_name = group["customer_name"]
         monthly_energy = float(group.get("monthly_energy_mwh") or 0.0)
-        retail_avg_price = retail_fee / (daily_energy * 1000) if daily_energy > 0 else 0.0
+        daily_energy = float(calc_result.get("total_load_mwh") or 0.0)
+        retail_fee = float(calc_result.get("total_fee") or 0.0)
+        retail_avg_price = retail_fee / daily_energy if daily_energy > 0 else 0.0
+        total_allocated_cost = float(calc_result.get("total_allocated_cost") or 0.0)
+        pre_wholesale_avg_price = total_allocated_cost / daily_energy if daily_energy > 0 else 0.0
+        pre_gross_profit = retail_fee - total_allocated_cost
+        pre_price_spread = retail_avg_price - pre_wholesale_avg_price
         balancing_energy = monthly_energy - daily_energy
-        balancing_fee = balancing_energy * retail_avg_price * 1000
+        balancing_fee = balancing_energy * retail_avg_price
         total_energy = daily_energy + balancing_energy
-        # retail_total_fee = 日清电费 + 调平电费（零售电费，未扣返还）
         retail_total_fee = retail_fee + balancing_fee
-        # total_fee_before_refund 与 retail_total_fee 相同，待返还回写时 total_fee 会被更新
         total_fee_before_refund = retail_total_fee
-        settlement_avg_price = total_fee_before_refund / (total_energy * 1000) if total_energy > 0 else 0.0
+        settlement_avg_price = total_fee_before_refund / total_energy if total_energy > 0 else 0.0
 
         primary_customer_id = customer_ids[0] if customer_ids else None
 
         return {
-            "customer_id": primary_customer_id,
+            "customer_id": calc_result.get("customer_id") or primary_customer_id,
             "customer_name": customer_name,
+            "contract_id": calc_result.get("contract_id", ""),
+            "package_name": calc_result.get("package_name", ""),
+            "model_code": calc_result.get("model_code", ""),
+            "reference_price": calc_result.get("reference_price"),
+            "fixed_prices": calc_result.get("fixed_prices"),
+            "linked_config": calc_result.get("linked_config"),
+            "final_prices": calc_result.get("final_prices", {}),
+            "price_ratio_adjusted": bool(calc_result.get("price_ratio_adjusted", False)),
+            "price_ratio_adjusted_base": bool(calc_result.get("price_ratio_adjusted_base", False)),
+            "period_details": calc_result.get("period_details", []),
+            "tou_summary": calc_result.get("tou_summary", {}),
+            "total_allocated_cost": round(total_allocated_cost, 6),
+            "nominal_avg_price": round(float(calc_result.get("nominal_avg_price") or 0.0), 6),
+            "cap_price": round(float(calc_result.get("cap_price") or 0.0), 6),
+            "is_capped": bool(calc_result.get("is_capped", False)),
             "daily_energy_mwh": round(daily_energy, 6),
-            "retail_fee": round(retail_fee, 2),
-            "retail_avg_price": round(retail_avg_price, 6),
             "balancing_energy_mwh": round(balancing_energy, 6),
             "balancing_fee": round(balancing_fee, 2),
-            "balancing_avg_price": round(retail_avg_price, 6),
             "total_energy_mwh": round(total_energy, 6),
             "retail_total_fee": round(retail_total_fee, 2),
             "total_fee_before_refund": round(total_fee_before_refund, 2),
-            "settlement_avg_price": round(settlement_avg_price, 6),
+            "pre_energy_mwh": round(daily_energy, 6),
+            "pre_retail_fee": round(retail_fee, 2),
+            "pre_retail_unit_price": round(retail_avg_price, 3),
+            "pre_wholesale_fee": round(total_allocated_cost, 6),
+            "pre_wholesale_unit_price": round(pre_wholesale_avg_price, 3),
+            "pre_gross_profit": round(pre_gross_profit, 2),
+            "pre_price_spread_per_mwh": round(pre_price_spread, 3),
         }
 
-    def _build_month_status(self, month: str, entries: List[Dict], daily_energy_total: float, force: bool) -> Dict:
+    def _build_month_status(self, month: str, entries: List[Dict], force: bool) -> Dict:
         wholesale_doc = self.db["wholesale_settlement_monthly"].find_one({"_id": month})
+        settlement_items = wholesale_doc.get("settlement_items", {}) if wholesale_doc else {}
         wholesale_avg_price = float(
-            wholesale_doc.get("settlement_items", {}).get("settlement_avg_price") if wholesale_doc else 0.0
+            (settlement_items.get("settlement_avg_price") or 0.0) if wholesale_doc else 0.0
         )
+        balancing_price = float((settlement_items.get("balancing_price") or 0.0) if wholesale_doc else 0.0)
 
-        # 月度状态与客户月度结算记录保持同口径：
-        # 电量取 total_energy_mwh（日清+调平），费用取 retail_total_fee（日清+调平，未扣返还）
+        fund_surplus_deficit_total = float((settlement_items.get("fund_surplus_deficit_total") or 0.0) if wholesale_doc else 0.0)
+        deviation_recovery_fee = float((settlement_items.get("deviation_recovery_fee") or 0.0) if wholesale_doc else 0.0)
+        actual_monthly_volume = float((settlement_items.get("actual_monthly_volume") or 0.0) if wholesale_doc else 0.0)
+
+        surplus_unit_price = 0.0
+        if actual_monthly_volume > 0:
+            surplus_unit_price = round((fund_surplus_deficit_total - deviation_recovery_fee) / actual_monthly_volume, 6)
+
         retail_total_energy = sum(entry["total_energy_mwh"] for entry in entries)
-        retail_total_fee = sum(entry["retail_total_fee"] for entry in entries)
+        retail_total_fee = 0.0
+        for entry in entries:
+            _, sttl_retail_fee, _ = self._calculate_post_balancing_retail(
+                entry=entry,
+                balancing_price=balancing_price,
+            )
+            retail_total_fee += sttl_retail_fee
         retail_avg_price = retail_total_fee / (retail_total_energy * 1000) if retail_total_energy > 0 else 0.0
 
         excess_profit_per_mwh = max(
@@ -407,7 +690,9 @@ class RetailMonthlySettlementService:
             "month": month,
             "wholesale_settled": bool(wholesale_doc),
             "wholesale_avg_price": round(wholesale_avg_price, 6),
-            "retail_daily_recomputed": True,
+            "balancing_price": round(balancing_price, 6),
+            "surplus_unit_price": surplus_unit_price,
+            "retail_daily_recomputed": False,
             "retail_avg_price": round(retail_avg_price, 6),
             "retail_total_energy": round(retail_total_energy, 6),
             "retail_total_fee": round(retail_total_fee, 2),
@@ -425,32 +710,118 @@ class RetailMonthlySettlementService:
 
         for entry in entries:
             doc_id = self._build_customer_doc_id(month, entry["customer_name"])
+            balancing_price = float(status_doc.get("balancing_price") or 0.0)
+            surplus_unit_price = float(status_doc.get("surplus_unit_price", 0.0))
+            
+            balancing_wholesale_fee = round(entry["balancing_energy_mwh"] * balancing_price, 2)
+            surplus_fee = round(entry["total_energy_mwh"] * surplus_unit_price, 2)
+            
+            balancing_retail_fee, post_balancing_retail_fee, post_balancing_retail_unit_price = (
+                self._calculate_post_balancing_retail(entry=entry, balancing_price=balancing_price)
+            )
+
+            # 回写 entry，保证后续返还阶段沿用同一“调平按批发侧调平价”口径
+            entry["balancing_fee"] = balancing_retail_fee
+            entry["retail_total_fee"] = post_balancing_retail_fee
+            entry["total_fee_before_refund"] = post_balancing_retail_fee
+
+            wholesale_total_fee = round(entry.get("total_allocated_cost", 0.0) + balancing_wholesale_fee + surplus_fee, 6)
+            customer_wholesale_avg_price = (
+                wholesale_total_fee / entry["total_energy_mwh"] if entry["total_energy_mwh"] > 0 else 0.0
+            )
+            post_balancing_gross_profit = round(entry["total_fee_before_refund"] - wholesale_total_fee, 2)
+            post_balancing_spread = post_balancing_retail_unit_price - customer_wholesale_avg_price
             payload = {
                 "month": month,
+                "settlement_type": "monthly",
                 "customer_id": entry["customer_id"],
                 "customer_name": entry["customer_name"],
-                "daily_energy_mwh": entry["daily_energy_mwh"],
-                "retail_fee": entry["retail_fee"],
-                "retail_avg_price": entry["retail_avg_price"],
-                "balancing_energy_mwh": entry["balancing_energy_mwh"],
-                "balancing_fee": entry["balancing_fee"],
-                "balancing_avg_price": entry["balancing_avg_price"],
-                "total_energy_mwh": entry["total_energy_mwh"],
-                # retail_total_fee = 日清电费 + 调平电费（零售电费，不含返还扣减，字段固化不会被回写覆盖）
-                "retail_total_fee": entry["retail_total_fee"],
-                # total_fee 初始等于 retail_total_fee，阶段2返还回写后变为结算电费
-                "total_fee": entry["total_fee_before_refund"],
-                "wholesale_avg_price": status_doc["wholesale_avg_price"],
-                "excess_refund_fee": 0.0,
-                "excess_refund_unit_price": 0.0,
-                "excess_refund_ratio": 0.0,
-                "settlement_avg_price": entry["settlement_avg_price"],
-                "refund_allocated_at": None,
+                "contract_id": entry.get("contract_id", ""),
+                "package_name": entry.get("package_name", ""),
+                "model_code": entry.get("model_code", ""),
+                "price_model": {
+                    "reference_price": entry.get("reference_price"),
+                    "fixed_prices": entry.get("fixed_prices"),
+                    "linked_config": entry.get("linked_config"),
+                    "final_prices": entry.get("final_prices", {}),
+                    "price_ratio_adjusted": entry.get("price_ratio_adjusted", False),
+                    "price_ratio_adjusted_base": entry.get("price_ratio_adjusted_base", False),
+                    "is_capped": entry.get("is_capped", False),
+                    "nominal_avg_price": entry.get("nominal_avg_price", 0.0),
+                    "cap_price": entry.get("cap_price", 0.0),
+                },
+                "period_details": entry.get("period_details", []),
+                "tou_summary": entry.get("tou_summary", {}),
+                "pre_energy_mwh": entry.get("pre_energy_mwh", entry["daily_energy_mwh"]),
+                "pre_retail_fee": entry.get("pre_retail_fee", 0.0),
+                "pre_retail_unit_price": entry.get("pre_retail_unit_price", 0.0),
+                "pre_wholesale_fee": entry.get("pre_wholesale_fee", round(entry.get("total_allocated_cost", 0.0), 6)),
+                "pre_wholesale_unit_price": entry.get("pre_wholesale_unit_price", 0.0),
+                "pre_gross_profit": entry.get("pre_gross_profit", 0.0),
+                "pre_price_spread_per_mwh": entry.get("pre_price_spread_per_mwh", 0.0),
+                "sttl_balancing_energy_mwh": round(entry["balancing_energy_mwh"], 6),
+                "sttl_balancing_retail_fee": balancing_retail_fee,
+                "sttl_balancing_wholesale_fee": balancing_wholesale_fee,
+                "sttl_energy_mwh": round(entry["total_energy_mwh"], 6),
+                "sttl_retail_fee": post_balancing_retail_fee,
+                "sttl_retail_unit_price": round(post_balancing_retail_unit_price, 3),
+                "sttl_wholesale_fee": wholesale_total_fee,
+                "sttl_wholesale_unit_price": round(customer_wholesale_avg_price, 3),
+                "sttl_gross_profit": post_balancing_gross_profit,
+                "sttl_price_spread_per_mwh": round(post_balancing_spread, 3),
+                "final_excess_refund_fee": 0.0,
+                "final_energy_mwh": round(entry["total_energy_mwh"], 6),
+                "final_retail_fee": post_balancing_retail_fee,
+                "final_retail_unit_price": round(post_balancing_retail_unit_price, 3),
+                "final_wholesale_fee": wholesale_total_fee,
+                "final_wholesale_unit_price": round(customer_wholesale_avg_price, 3),
+                "final_gross_profit": post_balancing_gross_profit,
+                "final_price_spread_per_mwh": round(post_balancing_spread, 3),
                 "updated_at": now,
             }
             collection.update_one(
                 {"_id": doc_id},
-                {"$set": payload, "$setOnInsert": {"created_at": now}},
+                {
+                    "$set": payload,
+                    "$unset": {
+                        "reference_price": "",
+                        "fixed_prices": "",
+                        "linked_config": "",
+                        "final_prices": "",
+                        "price_ratio_adjusted": "",
+                        "price_ratio_adjusted_base": "",
+                        "nominal_avg_price": "",
+                        "cap_price": "",
+                        "is_capped": "",
+                        "period_load_values": "",
+                        "total_allocated_cost": "",
+                        "balancing_wholesale_fee": "",
+                        "wholesale_total_fee": "",
+                        "customer_wholesale_avg_price": "",
+                        "gross_profit": "",
+                        "daily_energy_mwh": "",
+                        "balancing_energy_mwh": "",
+                        "balancing_fee": "",
+                        "total_energy_mwh": "",
+                        "retail_total_fee": "",
+                        "total_fee": "",
+                        "wholesale_avg_price": "",
+                        "excess_refund_fee": "",
+                        "settlement_avg_price": "",
+                        "retail_fee": "",
+                        "retail_avg_price": "",
+                        "balancing_avg_price": "",
+                        "monthly_retail_total_fee_before_balancing": "",
+                        "monthly_retail_avg_price_before_balancing": "",
+                        "excess_refund_unit_price": "",
+                        "excess_refund_ratio": "",
+                        "refund_allocated_at": "",
+                        "stage_pre_balancing": "",
+                        "stage_post_balancing": "",
+                        "stage_post_refund": "",
+                    },
+                    "$setOnInsert": {"created_at": now},
+                },
                 upsert=True,
             )
 
@@ -460,33 +831,109 @@ class RetailMonthlySettlementService:
         if total_energy_for_ratio <= 0:
             return
 
-        # 使用状态表已确定的返还池，避免重复计算带来的口径/精度偏差
         refund_pool = float(status_doc.get("excess_refund_pool") or 0.0)
         now = datetime.utcnow()
 
         for entry in entries:
             ratio = entry["total_energy_mwh"] / total_energy_for_ratio if total_energy_for_ratio > 0 else 0.0
             refund_amount = refund_pool * ratio
-            refund_unit_price = refund_amount / entry["total_energy_mwh"] if entry["total_energy_mwh"] > 0 else 0.0
             settlement_fee = round(entry["total_fee_before_refund"] - refund_amount, 2)
-            # 结算均价：扣返还后的结算电费 / 总电量
-            settlement_avg_price = settlement_fee / (entry["total_energy_mwh"] * 1000) if entry["total_energy_mwh"] > 0 else 0.0
+            settlement_avg_price = settlement_fee / entry["total_energy_mwh"] if entry["total_energy_mwh"] > 0 else 0.0
+            
+            balancing_price = float(status_doc.get("balancing_price") or 0.0)
+            surplus_unit_price = float(status_doc.get("surplus_unit_price", 0.0))
+            
+            balancing_wholesale_fee = round(
+                entry["balancing_energy_mwh"] * balancing_price,
+                2,
+            )
+            surplus_fee = round(entry["total_energy_mwh"] * surplus_unit_price, 2)
+            
+            wholesale_total_fee = round(entry.get("total_allocated_cost", 0.0) + balancing_wholesale_fee + surplus_fee, 6)
+            customer_wholesale_avg_price = (
+                wholesale_total_fee / entry["total_energy_mwh"] if entry["total_energy_mwh"] > 0 else 0.0
+            )
+            post_refund_spread = settlement_avg_price - customer_wholesale_avg_price
+            gross_profit = round(
+                settlement_fee - wholesale_total_fee,
+                2,
+            )
 
             doc_id = self._build_customer_doc_id(month, entry["customer_name"])
             collection.update_one(
                 {"_id": doc_id},
                 {
                     "$set": {
-                        "total_fee": settlement_fee,
-                        "excess_refund_fee": round(refund_amount, 2),
-                        "excess_refund_unit_price": round(refund_unit_price, 6),
-                        "excess_refund_ratio": round(ratio, 6),
-                        "settlement_avg_price": round(settlement_avg_price, 6),
-                        "refund_allocated_at": now,
+                        "final_excess_refund_fee": round(refund_amount, 2),
+                        "final_energy_mwh": round(entry["total_energy_mwh"], 6),
+                        "final_retail_fee": settlement_fee,
+                        "final_retail_unit_price": round(settlement_avg_price, 3),
+                        "final_wholesale_fee": wholesale_total_fee,
+                        "final_wholesale_unit_price": round(customer_wholesale_avg_price, 3),
+                        "final_gross_profit": gross_profit,
+                        "final_price_spread_per_mwh": round(post_refund_spread, 3),
                         "updated_at": now,
                     }
                 },
             )
+
+    def _calculate_post_balancing_retail(self, entry: Dict[str, Any], balancing_price: float) -> Tuple[float, float, float]:
+        """计算调平后零售电费/单价。
+
+        规则：
+        1) 统一口径：调平前电费采用 sum(period_details.fee)；
+        2) 当 balancing_energy_mwh < 0 时，调平电价不参与，按调平前零售单价计算调平电费；
+        3) 当 balancing_energy_mwh >= 0 时，调平电费按批发侧月度调平电价执行；
+        2) 对原先触发封顶的客户，先回退到封顶前名义电价口径，再判断加调平后是否仍封顶；
+        3) 若仍封顶，调平后单价维持封顶价。
+        """
+        period_details = entry.get("period_details", []) or []
+        pre_retail_fee = float(sum(float(d.get("fee") or 0.0) for d in period_details))
+        if pre_retail_fee <= 0:
+            pre_retail_fee = float(entry.get("pre_retail_fee", 0.0))
+        pre_energy_mwh = float(entry.get("pre_energy_mwh", entry.get("daily_energy_mwh", 0.0)))
+        balancing_energy_mwh = float(entry.get("balancing_energy_mwh", 0.0))
+        total_energy_mwh = float(entry.get("total_energy_mwh", 0.0))
+        pre_retail_unit_price = (
+            pre_retail_fee / pre_energy_mwh if pre_energy_mwh > 0 else float(entry.get("pre_retail_unit_price", 0.0))
+        )
+
+        if total_energy_mwh <= 0:
+            return 0.0, 0.0, 0.0
+
+        is_capped = bool(entry.get("is_capped", False))
+        cap_price_kwh = float(entry.get("cap_price", 0.0))
+        nominal_avg_price_kwh = float(entry.get("nominal_avg_price", 0.0))
+
+        # 调平电费基础规则（负调平按调平前零售单价，正调平按批发侧调平电价）
+        balancing_retail_fee_candidate = (
+            balancing_energy_mwh * pre_retail_unit_price
+            if balancing_energy_mwh < 0
+            else balancing_energy_mwh * balancing_price
+        )
+
+        # 非封顶客户：直接按批发侧调平电价补调平电费
+        if not is_capped:
+            balancing_retail_fee = round(balancing_retail_fee_candidate, 2)
+            sttl_retail_fee = round(pre_retail_fee + balancing_retail_fee, 2)
+            sttl_retail_unit_price = sttl_retail_fee / total_energy_mwh
+            return balancing_retail_fee, sttl_retail_fee, sttl_retail_unit_price
+
+        # 封顶客户：先回退名义电价，再判断调平后是否仍封顶
+        nominal_pre_fee = nominal_avg_price_kwh * pre_energy_mwh * 1000.0
+        candidate_total_fee = nominal_pre_fee + balancing_retail_fee_candidate
+        candidate_unit_price_mwh = candidate_total_fee / total_energy_mwh if total_energy_mwh > 0 else 0.0
+        cap_unit_price_mwh = cap_price_kwh * 1000.0
+
+        if cap_unit_price_mwh > 0 and candidate_unit_price_mwh > cap_unit_price_mwh + 1e-9:
+            sttl_retail_unit_price = cap_unit_price_mwh
+            sttl_retail_fee = round(sttl_retail_unit_price * total_energy_mwh, 2)
+        else:
+            sttl_retail_fee = round(candidate_total_fee, 2)
+            sttl_retail_unit_price = sttl_retail_fee / total_energy_mwh if total_energy_mwh > 0 else 0.0
+
+        balancing_retail_fee = round(sttl_retail_fee - pre_retail_fee, 2)
+        return balancing_retail_fee, sttl_retail_fee, sttl_retail_unit_price
 
     def _build_customer_doc_id(self, month: str, customer_name: str) -> str:
         safe_name = re.sub(r"[^0-9A-Za-z\u4e00-\u9fa5_-]", "_", customer_name).strip("_")
@@ -500,23 +947,6 @@ class RetailMonthlySettlementService:
         last_day = inst.replace(day=calendar.monthrange(inst.year, inst.month)[1]).date()
         return first_day, last_day
 
-    def _resolve_customer(self, customer_no: str, fallback_name: str) -> Tuple[Optional[str], str]:
-        """按 account_id 查找（自动清理浮点 .0 后缀）。已被 _resolve_customer_ids 弃用，保留兼容。"""
-        if not customer_no:
-            return None, fallback_name
-
-        # 清理浮点后缀："3600188726280.0" -> "3600188726280"
-        clean_no = customer_no.rstrip('0').rstrip('.') if '.' in customer_no else customer_no
-
-        for no in {customer_no, clean_no}:
-            candidate = self.db.customer_archives.find_one(
-                {"accounts.account_id": no},
-                {"_id": 1, "user_name": 1},
-            )
-            if candidate:
-                return str(candidate["_id"]), candidate.get("user_name") or fallback_name
-        return None, fallback_name
-
     def _serialize_status(self, doc: Optional[Dict]) -> Optional[Dict]:
         if not doc:
             return None
@@ -525,6 +955,13 @@ class RetailMonthlySettlementService:
             if isinstance(payload.get(field), datetime):
                 payload[field] = payload[field].isoformat()
         return payload
+
+    def _to_plain(self, value: Any) -> Any:
+        if value is None:
+            return None
+        if hasattr(value, "model_dump"):
+            return value.model_dump()
+        return value
 
     def _set_job_failed(self, job_id: str, message: str) -> None:
         logger.error("月度结算任务失败 job_id=%s, message=%s", job_id, message)

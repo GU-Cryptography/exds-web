@@ -77,7 +77,7 @@ def trigger_monthly_calc(req: MonthlyCalcRequest, background_tasks: BackgroundTa
     except ValueError:
         return ResponseModel(code=400, message="月份格式错误，需 YYYY-MM", data=None)
 
-    ready, reason = monthly_service.validate_month_ready(req.month)
+    ready, reason = monthly_service.validate_month_ready(req.month, allow_fallback=req.force)
     if not ready:
         return ResponseModel(code=400, message=reason, data=None)
 

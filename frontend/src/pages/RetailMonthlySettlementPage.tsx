@@ -59,6 +59,18 @@ interface MonthlySummary {
 interface MonthlyCustomer {
     _id: string;
     customer_name: string;
+    pre_energy_mwh?: number;
+    pre_retail_fee?: number;
+    pre_retail_unit_price?: number;
+    sttl_balancing_energy_mwh?: number;
+    sttl_balancing_retail_fee?: number;
+    sttl_energy_mwh?: number;
+    sttl_retail_fee?: number;
+    sttl_retail_unit_price?: number;
+    final_excess_refund_fee?: number;
+    final_energy_mwh?: number;
+    final_retail_fee?: number;
+    final_retail_unit_price?: number;
     daily_energy_mwh: number;
     retail_fee: number;
     retail_avg_price: number;
@@ -112,8 +124,36 @@ const normalizeCustomers = (raw: any): MonthlyCustomer[] => {
     else if (Array.isArray(raw?.records)) result = raw.records;
     else if (Array.isArray(raw?.items)) result = raw.items;
 
-    // 默认按客户名称排序
-    return result.sort((a, b) => (a.customer_name || '').localeCompare(b.customer_name || ''));
+    const mapped = result.map((row: any) => {
+        const dailyEnergy = Number(row.daily_energy_mwh ?? row.pre_energy_mwh ?? 0);
+        const dailyFee = Number(row.retail_fee ?? row.pre_retail_fee ?? 0);
+        const balancingEnergy = Number(row.balancing_energy_mwh ?? row.sttl_balancing_energy_mwh ?? 0);
+        const balancingFee = Number(row.balancing_fee ?? row.sttl_balancing_retail_fee ?? 0);
+        const totalEnergy = Number(row.total_energy_mwh ?? row.final_energy_mwh ?? row.sttl_energy_mwh ?? 0);
+        const retailTotalFee = Number(row.retail_total_fee ?? row.sttl_retail_fee ?? 0);
+        const totalFee = Number(row.total_fee ?? row.final_retail_fee ?? row.sttl_retail_fee ?? 0);
+        const settlementAvgPrice = Number(
+            row.settlement_avg_price ?? row.final_retail_unit_price ?? row.sttl_retail_unit_price ?? 0
+        );
+        const excessRefundFee = Number(row.excess_refund_fee ?? row.final_excess_refund_fee ?? 0);
+        const retailAvgPrice = Number(row.retail_avg_price ?? row.pre_retail_unit_price ?? 0);
+
+        return {
+            ...row,
+            daily_energy_mwh: dailyEnergy,
+            retail_fee: dailyFee,
+            retail_avg_price: retailAvgPrice,
+            balancing_energy_mwh: balancingEnergy,
+            balancing_fee: balancingFee,
+            total_energy_mwh: totalEnergy,
+            retail_total_fee: retailTotalFee,
+            total_fee: totalFee,
+            excess_refund_fee: excessRefundFee,
+            settlement_avg_price: settlementAvgPrice,
+        } as MonthlyCustomer;
+    });
+
+    return mapped.sort((a, b) => (a.customer_name || '').localeCompare(b.customer_name || ''));
 };
 
 const RetailMonthlySettlementPage: React.FC = () => {

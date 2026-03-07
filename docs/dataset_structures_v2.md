@@ -998,7 +998,7 @@ critical_alerts = db.customer_anomaly_alerts.find({
 
 ### 19.1. 集合用途
 
-用于存储“零售月度结算”每个月的状态与核心汇总指标（按月一条），供月度结算台账读取。
+用于存储“零售月度结算”每个月的状态与核心汇总指标（按月一条），供月度结算台账读取，并与 `retail_settlement_monthly` 同批次同步更新。
 
 ### 19.2. 字段定义
 
@@ -1008,7 +1008,8 @@ critical_alerts = db.customer_anomaly_alerts.find({
 | `month` | `String` | 月份，格式 `YYYY-MM` |
 | `wholesale_settled` | `Boolean` | 批发月度结算是否已完成 |
 | `wholesale_avg_price` | `Number` | 批发月度结算均价（元/MWh） |
-| `retail_daily_recomputed` | `Boolean` | 是否完成该月客户日清重算 |
+| `balancing_price` | `Number` | 批发月度调平电价（元/MWh） |
+| `retail_daily_recomputed` | `Boolean` | 兼容字段（历史流程遗留），当前月结流程固定为 `false` |
 | `retail_avg_price` | `Number` | 零售月度均价（元/kWh） |
 | `retail_total_energy` | `Number` | 零售月度总电量（MWh，日清+调平口径） |
 | `retail_total_fee` | `Number` | 零售月度总电费（元，日清+调平口径，未扣返还） |
@@ -1025,11 +1026,15 @@ critical_alerts = db.customer_anomaly_alerts.find({
 
 ---
 
-## 20. `customer_retail_monthly_settlement` - 客户零售月度结算结果
+## 20. `retail_settlement_monthly` - 客户零售月度结算结果
 
 ### 20.1. 集合用途
 
-用于存储客户维度的零售月度结算结果明细（按“月份+客户”一条），作为月度结算页面客户明细数据源。
+用于存储客户维度的零售月度结算结果明细（按“月份+客户”一条），作为月度结算页面客户明细数据源。该结构对齐 `retail_settlement_daily`，保留月度48时段电量、尖峰平谷汇总及价格计算过程字段。月结流程不再写入 `retail_settlement_daily` 的 `settlement_type=monthly` 记录。
+
+> 约束：
+> 1. 与定价模型相关的字段统一封装在 `price_model` 对象中（保持原有口径与精度）。
+> 2. 三阶段字段中的价格（`retail_unit_price` / `wholesale_unit_price` / `price_spread_per_mwh`）统一使用元/MWh，保留3位小数。
 
 ### 20.2. 字段定义
 
@@ -1037,23 +1042,65 @@ critical_alerts = db.customer_anomaly_alerts.find({
 |--------|------|------|
 | `_id` | `String` | 文档主键，格式 `{month}_{safe_customer_name}` |
 | `month` | `String` | 月份，格式 `YYYY-MM` |
+| `settlement_type` | `String` | 固定为 `monthly` |
 | `customer_id` | `String\|Null` | 客户档案ID（若能解析） |
 | `customer_name` | `String` | 客户名称 |
-| `daily_energy_mwh` | `Number` | 日清重算电量合计（MWh） |
-| `retail_fee` | `Number` | 日清重算电费合计（元） |
-| `retail_avg_price` | `Number` | 日清均价（元/kWh） |
-| `balancing_energy_mwh` | `Number` | 调平电量（MWh） |
-| `balancing_fee` | `Number` | 调平电费（元） |
-| `balancing_avg_price` | `Number` | 调平均价（元/kWh） |
-| `total_energy_mwh` | `Number` | 结算总电量（MWh，日清+调平） |
-| `retail_total_fee` | `Number` | 零售总电费（元，日清+调平，未扣返还） |
-| `total_fee` | `Number` | 结算电费（元，扣减返还后） |
-| `wholesale_avg_price` | `Number` | 批发月度结算均价（元/MWh） |
-| `excess_refund_fee` | `Number` | 客户分摊返还金额（元） |
-| `excess_refund_unit_price` | `Number` | 客户返还单价（元/MWh） |
-| `excess_refund_ratio` | `Number` | 客户返还占比 |
-| `settlement_avg_price` | `Number` | 结算均价（元/kWh，`total_fee / total_energy_mwh / 1000`） |
-| `refund_allocated_at` | `DateTime\|Null` | 返还分配时间（UTC） |
+| `contract_id` | `String` | 关联合同ID |
+| `package_name` | `String` | 套餐名称 |
+| `model_code` | `String` | 定价模型代码 |
+| `price_model` | `Object` | 定价模型计算过程对象（保留原有口径） |
+| `price_model.reference_price` | `Object\|Null` | 参考价信息（价差分成类） |
+| `price_model.reference_price.type` | `String` | 参考价类型（如 `market_monthly_avg`） |
+| `price_model.reference_price.base_value` | `Number` | 参考价基准值（元/kWh） |
+| `price_model.reference_price.source` | `String` | 参考价来源（`official` / `fallback` 等） |
+| `price_model.reference_price.source_month` | `String` | 参考价所属月份（`YYYY-MM`） |
+| `price_model.fixed_prices` | `Object\|Null` | 固定分时价格（固定联动类）`{tip, peak, flat, valley, deep}` |
+| `price_model.linked_config` | `Object\|Null` | 联动配置（固定联动类） |
+| `price_model.linked_config.ratio` | `Number` | 联动比例 |
+| `price_model.linked_config.target` | `String` | 联动标的类型 |
+| `price_model.linked_config.target_prices` | `Object` | 联动标的分时价格 |
+| `price_model.final_prices` | `Object` | 最终结算分时价格 `{tip, peak, flat, valley, deep}` |
+| `price_model.price_ratio_adjusted` | `Boolean` | 是否触发463比例调节 |
+| `price_model.price_ratio_adjusted_base` | `Boolean` | 基准分时价是否触发463比例调节 |
+| `price_model.is_capped` | `Boolean` | 是否触发封顶保护 |
+| `price_model.nominal_avg_price` | `Number` | 封顶前名义均价（元/kWh） |
+| `price_model.cap_price` | `Number` | 月度封顶价（元/kWh） |
+| `period_details` | `Array` | 月度48时段明细 |
+| `period_details.period` | `Integer` | 时段号（1-48） |
+| `period_details.period_type` | `String` | 时段类型（尖峰/高峰/平段/低谷/深谷） |
+| `period_details.load_mwh` | `Number` | 时段电量（MWh） |
+| `period_details.unit_price` | `Number` | 时段单价（元/kWh） |
+| `period_details.fee` | `Number` | 时段电费（元） |
+| `period_details.allocated_cost` | `Number` | 时段采购金额（元，来自 `retail_settlement_daily` 按月聚合） |
+| `period_details.wholesale_price` | `Number` | 时段批发均价（元/MWh，`allocated_cost / load_mwh`） |
+| `tou_summary` | `Object` | 尖峰平谷汇总 `{tip, peak, flat, valley, deep}` |
+| `tou_summary.tip.load_mwh` | `Number` | 尖峰总电量（MWh） |
+| `tou_summary.tip.fee` | `Number` | 尖峰总电费（元） |
+| `pre_energy_mwh` | `Number` | 调平前电量（MWh） |
+| `pre_retail_fee` | `Number` | 调平前零售电费（元） |
+| `pre_retail_unit_price` | `Number` | 调平前零售单价（元/MWh，3位） |
+| `pre_wholesale_fee` | `Number` | 调平前采购金额（元） |
+| `pre_wholesale_unit_price` | `Number` | 调平前采购均价（元/MWh，3位） |
+| `pre_gross_profit` | `Number` | 调平前毛利（元） |
+| `pre_price_spread_per_mwh` | `Number` | 调平前价差（元/MWh，3位） |
+| `sttl_balancing_energy_mwh` | `Number` | 调平电量（MWh） |
+| `sttl_balancing_retail_fee` | `Number` | 调平零售电费（元） |
+| `sttl_balancing_wholesale_fee` | `Number` | 调平批发金额（元） |
+| `sttl_energy_mwh` | `Number` | 调平后电量（MWh） |
+| `sttl_retail_fee` | `Number` | 调平后零售电费（元，返还前） |
+| `sttl_retail_unit_price` | `Number` | 调平后零售单价（元/MWh，3位） |
+| `sttl_wholesale_fee` | `Number` | 调平后采购金额（元） |
+| `sttl_wholesale_unit_price` | `Number` | 调平后采购均价（元/MWh，3位） |
+| `sttl_gross_profit` | `Number` | 调平后毛利（元，返还前） |
+| `sttl_price_spread_per_mwh` | `Number` | 调平后价差（元/MWh，3位） |
+| `final_excess_refund_fee` | `Number` | 超额返还金额（元） |
+| `final_energy_mwh` | `Number` | 最终结算电量（MWh） |
+| `final_retail_fee` | `Number` | 最终零售电费（元，返还后） |
+| `final_retail_unit_price` | `Number` | 最终零售单价（元/MWh，3位） |
+| `final_wholesale_fee` | `Number` | 最终采购金额（元） |
+| `final_wholesale_unit_price` | `Number` | 最终采购均价（元/MWh，3位） |
+| `final_gross_profit` | `Number` | 最终毛利（元） |
+| `final_price_spread_per_mwh` | `Number` | 最终价差（元/MWh，3位） |
 | `created_at` | `DateTime` | 创建时间（UTC） |
 | `updated_at` | `DateTime` | 最后更新时间（UTC） |
 
@@ -1061,7 +1108,7 @@ critical_alerts = db.customer_anomaly_alerts.find({
 
 - `_id_`（默认主键索引）
 - `month`（建议索引，支持按月份查询）
-- `month + customer_name`（可选唯一索引，若需防重）
+- `month + customer_name`（建议唯一索引，防止同月同客户重复）
 
 ---
 

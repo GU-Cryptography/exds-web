@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # 最高限价常量 (元/kWh)
 UPPER_LIMIT_PRICE = 414.3 * 1.2 / 1000  # = 0.49716
 
-# 463号文标准比例 (默认兜底值)
+# 463号文标准比例（当前结算口径）：尖峰1.8、高峰1.6、平1、低谷0.4、深谷0.3
 DEFAULT_RATIOS = {"tip": 1.8, "peak": 1.6, "flat": 1.0, "valley": 0.4, "deep": 0.3}
 
 # 时段类型映射：tou_service 中文名 → 内部标识
@@ -493,8 +493,20 @@ class RetailSettlementService:
                 # 最终单价 = 参考价 - 价差 * 分成 + 浮动价 + 摊分后的浮动费
                 prices[period] = ref_val - spread * sharing / 100.0 + floating + floating_fee_per_kwh
 
-        # 463号文比例调节
+        # 463号文比例调节（以5时段均价校核）
         adjusted, was_adjusted = self._adjust_price_ratios(prices, date_str)
+
+        # 若使用48点参考价，需将校核结果同步映射回48点结算价，
+        # 否则会出现“price_ratio_adjusted=true 但计费仍走未校核48点价”的不一致。
+        if final_prices_48 and len(final_prices_48) == 48:
+            tou_48 = self._get_tou_48(date_str)
+            if tou_48 and len(tou_48) == 48:
+                period_delta: Dict[str, float] = {}
+                for pkey in DEFAULT_RATIOS:
+                    period_delta[pkey] = float(adjusted.get(pkey, 0.0)) - float(prices.get(pkey, 0.0))
+                for i in range(48):
+                    pkey = TOU_TYPE_MAP.get(tou_48[i], "flat")
+                    final_prices_48[i] = float(final_prices_48[i]) + float(period_delta.get(pkey, 0.0))
 
         return {
             "reference_price": ReferencePriceInfo(
@@ -721,24 +733,11 @@ class RetailSettlementService:
 
     def _get_tou_ratios(self, date_str: str) -> Dict[str, float]:
         """
-        获取当日对应的分时比例系数映射 (En Key -> Ratio)
+        获取分时比例系数映射（En Key -> Ratio）。
+        按当前业务要求，严格执行 463 固定比例，不随月度系数变化。
         """
-        from datetime import datetime
-        date_dt = datetime.strptime(date_str, "%Y-%m-%d")
-        tou_meta = get_month_tou_meta(date_dt, self.db["tou_rules"])
-        coefficients = tou_meta.get("coefficients", {})
-        
-        ratios = {}
-        for cn_key, val in coefficients.items():
-            en_key = TOU_TYPE_MAP.get(cn_key)
-            if en_key:
-                ratios[en_key] = float(val)
-
-        # 补全缺省值
-        for k, v in DEFAULT_RATIOS.items():
-            if k not in ratios:
-                ratios[k] = v
-        return ratios
+        _ = date_str
+        return dict(DEFAULT_RATIOS)
 
     # ========== 封顶价获取 ==========
 
@@ -791,6 +790,8 @@ class RetailSettlementService:
             return prices, False
             
         ratios = self._get_tou_ratios(date_str)
+        # 比例比较容差：避免边界值受浮点误差影响被误判触发
+        eps = 1e-6
 
         adjusted = dict(prices)
         was_adjusted = False
@@ -802,12 +803,12 @@ class RetailSettlementService:
 
             if period in ("tip", "peak"):
                 # 上浮时段: 仅在低于要求时上调
-                if adjusted.get(period, 0) < threshold:
+                if adjusted.get(period, 0) < threshold - eps:
                     adjusted[period] = threshold
                     was_adjusted = True
             elif period in ("valley", "deep"):
                 # 下浮时段: 仅在高于要求时下调
-                if adjusted.get(period, 0) > threshold:
+                if adjusted.get(period, 0) > threshold + eps:
                     adjusted[period] = threshold
                     was_adjusted = True
 
