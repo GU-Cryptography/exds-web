@@ -291,6 +291,44 @@ const StatCard: React.FC<{
     </Paper>
 );
 
+const EmptyState: React.FC<{ month: string; onExecute: () => void }> = ({ month, onExecute }) => (
+    <Paper
+        variant="outlined"
+        sx={{
+            p: 8,
+            textAlign: 'center',
+            borderRadius: 4,
+            bgcolor: 'background.paper',
+            border: '1px dashed',
+            borderColor: 'divider',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 2,
+            my: 4
+        }}
+    >
+        <Box sx={{ p: 2, borderRadius: '50%', bgcolor: 'action.hover', color: 'text.disabled', mb: 1 }}>
+            <CalculateIcon sx={{ fontSize: 48 }} />
+        </Box>
+        <Typography variant="h5" fontWeight={800} color="text.primary">
+            未找到 {month} 的结算数据
+        </Typography>
+        <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 450, mx: 'auto', mb: 2 }}>
+            该月份尚未执行月度零售结算，或相关的批发结算数据未导入。请先导入批发结算文件，然后执行零售结算任务。
+        </Typography>
+        <Button
+            variant="contained"
+            size="large"
+            startIcon={<CalculateIcon />}
+            onClick={onExecute}
+            sx={{ borderRadius: 3, px: 4, py: 1.2, fontWeight: 700, boxShadow: 'none', textTransform: 'none' }}
+        >
+            立即执行月度零售结算
+        </Button>
+    </Paper>
+);
+
 const MonthlySettlementAnalysisPage: React.FC = () => {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -344,6 +382,8 @@ const MonthlySettlementAnalysisPage: React.FC = () => {
         if (!month) return;
         setLoading(true);
         setError(null);
+        setWholesaleLedger(null);
+        setCustomers([]);
         try {
             const [wsRes, recRes, custRes, rSumRes] = await Promise.all([
                 apiClient.get(`/api/v1/wholesale-monthly-settlement/year/${month.split('-')[0]}`),
@@ -541,17 +581,22 @@ const MonthlySettlementAnalysisPage: React.FC = () => {
         }, 1500);
     }, [fetchData, stopPolling]);
 
-    const handleExecuteRetailSettlement = async () => {
+    const handleExecuteRetailSettlement = () => {
         if (!monthStr) return;
+        setJobInfo(null); // 清空旧任务，进入确认模式
         setProgressOpen(true);
+    };
+
+    const handleStartSettlement = async () => {
+        if (!monthStr) return;
         setJobInfo({ job_id: '', month: monthStr, status: 'pending', progress: 0, message: '正在启动月度结算任务...' });
         try {
             const res = await apiClient.post('/api/v1/retail-settlement/monthly-calc', { month: monthStr, force: true });
             const jobId = res.data?.data?.job_id;
             if (jobId) pollProgress(jobId, monthStr);
-            else setJobInfo(prev => prev ? { ...prev, status: 'failed', message: '未获取到任务ID' } : null);
+            else setJobInfo(prev => prev ? { ...prev, status: 'failed', message: '未获取到任务ID' } : { job_id: '', month: monthStr, status: 'failed', progress: 0, message: '未获取到任务ID' });
         } catch (err: any) {
-            setJobInfo(prev => prev ? { ...prev, status: 'failed', message: err.message } : null);
+            setJobInfo(prev => prev ? { ...prev, status: 'failed', message: err.message } : { job_id: '', month: monthStr, status: 'failed', progress: 0, message: err.message });
         }
     };
 
@@ -601,393 +646,435 @@ const MonthlySettlementAnalysisPage: React.FC = () => {
                     ))}
                 </Grid>
 
+                {/* 统一空状态提示 */}
+                {!loading && customers.length === 0 && (
+                    <EmptyState month={monthStr} onExecute={handleExecuteRetailSettlement} />
+                )}
+
                 {/* 板块一：批发结算明细与对账 */}
-                <Box sx={{ position: 'relative', mb: 3 }}>
-                    {loading && wholesaleLedger && (
-                        <Box sx={{
-                            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            backgroundColor: 'rgba(255, 255, 255, 0.7)', zIndex: 1000, borderRadius: 2
-                        }}>
-                            <CircularProgress />
-                        </Box>
-                    )}
+                {(customers.length > 0 || (loading && !wholesaleLedger)) && (
+                    <Box sx={{ position: 'relative', mb: 3 }}>
+                        {loading && wholesaleLedger && (
+                            <Box sx={{
+                                position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                backgroundColor: 'rgba(255, 255, 255, 0.7)', zIndex: 1000, borderRadius: 2
+                            }}>
+                                <CircularProgress />
+                            </Box>
+                        )}
 
-                    {loading && !wholesaleLedger ? (
-                        <Paper variant="outlined" sx={{ display: 'flex', justifyContent: 'center', py: 10, borderRadius: 2 }}><CircularProgress size={24} /></Paper>
-                    ) : !wholesaleLedger ? (
-                        <Paper variant="outlined" sx={{ p: 6, textAlign: 'center', borderRadius: 2 }}>
-                            <Alert severity="info" variant="outlined" sx={{ display: 'inline-flex' }}>暂无批发市场结算数据，请点击上方按钮导入。</Alert>
-                        </Paper>
-                    ) : (
-                        <Grid container spacing={2}>
-                            {/* 左侧：瀑布图 */}
-                            <Grid size={{ xs: 12, lg: 5 }} sx={{ display: 'flex', flexDirection: 'column' }}>
-                                <Paper variant="outlined" sx={{ p: 2, flexGrow: 1, display: 'flex', flexDirection: 'column', borderRadius: 2 }}>
-                                    <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'text.primary', mb: 2, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                        <Box sx={{ width: 3, height: 14, bgcolor: WHOLESALE_COLORS.accent, borderRadius: 1 }} />
-                                        批发侧月度结算瀑布图
-                                    </Typography>
-                                    <Box ref={waterfallChartRef} sx={{
-                                        flexGrow: 1,
-                                        minHeight: { xs: 350, lg: 300 },
-                                        position: 'relative',
-                                        backgroundColor: isFullscreen ? 'background.paper' : 'transparent',
-                                        p: isFullscreen ? 2 : 0,
-                                        ...(isFullscreen && { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1400 }),
-                                        '& .recharts-wrapper:focus': { outline: 'none' }
-                                    }}>
-                                        <FullscreenEnterButton />
-                                        <FullscreenExitButton />
-                                        <FullscreenTitle />
-                                        <Box sx={!isFullscreen ? { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 } : { height: '100%' }}>
-                                            <ResponsiveContainer width="100%" height="100%">
-                                                <BarChart data={getWaterfallData(wholesaleLedger.settlement_items)} margin={{ top: 20, right: 20, bottom: 40, left: 20 }}>
-                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                                    <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} tick={{ fontSize: 11 }} height={60} />
-                                                    <YAxis tickFormatter={(val) => `${(val / 10000).toFixed(0)}万`} width={60} tick={{ fontSize: 11 }} />
-                                                    <RechartsTooltip content={<WaterfallTooltip />} cursor={{ fill: 'transparent' }} />
-                                                    <ReferenceLine y={0} stroke="#000" />
-                                                    <Bar dataKey="range" minPointSize={3} isAnimationActive={false}>
-                                                        {getWaterfallData(wholesaleLedger.settlement_items).map((entry, index) => (
-                                                            <Cell key={`cell-${index}`} fill={entry.color} />
-                                                        ))}
-                                                    </Bar>
-                                                </BarChart>
-                                            </ResponsiveContainer>
-                                        </Box>
-                                    </Box>
-                                </Paper>
-                            </Grid>
+                        {loading && !wholesaleLedger ? (
+                            <Paper variant="outlined" sx={{ display: 'flex', justifyContent: 'center', py: 10, borderRadius: 2 }}><CircularProgress size={24} /></Paper>
+                        ) : !wholesaleLedger ? null : (
+                            <Grid container spacing={2}>
+                                {/* 左侧：明细宽表 */}
+                                <Grid size={{ xs: 12, lg: 7 }}>
+                                    <Paper variant="outlined" sx={{ p: 0, borderRadius: 2, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%' }}>
+                                        <TableContainer sx={{ overflowX: 'auto' }}>
+                                            <Table stickyHeader size="small" sx={{ minWidth: 600, '& .MuiTableCell-root': { fontSize: { xs: '0.75rem', sm: '0.875rem' }, py: 0.8, px: { xs: 0.5, sm: 1 }, whiteSpace: 'nowrap' } }}>
+                                                <TableHead>
+                                                    <TableRow sx={{ '& th': { bgcolor: alpha(WHOLESALE_COLORS.accent, 0.05), fontWeight: 800, color: 'text.primary', borderBottom: '2px solid', borderColor: 'divider' } }}>
+                                                        <TableCell colSpan={2} align="center">批发侧月度结算明细</TableCell>
+                                                        <TableCell align="right">电量 (MWh)</TableCell>
+                                                        <TableCell align="right">均价 (元/MWh)</TableCell>
+                                                        <TableCell align="right">电费金额 (元)</TableCell>
+                                                        <TableCell align="right">日清结算汇总差异 (元)</TableCell>
+                                                    </TableRow>
+                                                </TableHead>
+                                                <TableBody>
+                                                    {[
+                                                        { cat: '电能量电费', rowSpan: 5, label: '实时现货结算', volKey: 'actual_consumption_volume', priceKey: 'real_time_avg_price', feeKey: 'real_time_deviation_fee', reconGroup: '实时市场偏差', priceCalc: (items: any) => items.actual_consumption_volume ? items.real_time_deviation_fee / items.actual_consumption_volume : null },
+                                                        { cat: '电能量电费', label: '中长期合同偏差', volKey: 'contract_volume', priceKey: 'contract_avg_price', feeKey: 'contract_fee', reconGroup: '中长期合约' },
+                                                        { cat: '电能量电费', label: '日前现货偏差', volKey: 'day_ahead_declared_volume', priceKey: 'day_ahead_avg_price', feeKey: 'day_ahead_deviation_fee', reconGroup: '日前市场偏差', priceCalc: (items: any) => items.day_ahead_declared_volume ? items.day_ahead_deviation_fee / items.day_ahead_declared_volume : null },
+                                                        { cat: '电能量电费', label: '偏差电量调平电费', volKey: 'monthly_balancing_volume', priceKey: 'balancing_price', feeKey: 'balancing_fee' },
+                                                        { cat: '电能量电费', label: '电能量合计', volKey: 'actual_monthly_volume', priceKey: 'energy_avg_price', feeKey: 'energy_fee_total', reconGroup: '电能量合计', isTotal: true },
 
-                            {/* 右侧：明细宽表 */}
-                            <Grid size={{ xs: 12, lg: 7 }}>
-                                <Paper variant="outlined" sx={{ p: 0, borderRadius: 2, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%' }}>
-                                    <TableContainer sx={{ overflowX: 'auto' }}>
-                                        <Table stickyHeader size="small" sx={{ minWidth: 600, '& .MuiTableCell-root': { fontSize: { xs: '0.75rem', sm: '0.875rem' }, py: 0.8, px: { xs: 0.5, sm: 1 }, whiteSpace: 'nowrap' } }}>
-                                            <TableHead>
-                                                <TableRow sx={{ '& th': { bgcolor: alpha(WHOLESALE_COLORS.accent, 0.05), fontWeight: 800, color: 'text.primary', borderBottom: '2px solid', borderColor: 'divider' } }}>
-                                                    <TableCell colSpan={2} align="center">批发侧月度结算明细</TableCell>
-                                                    <TableCell align="right">电量 (MWh)</TableCell>
-                                                    <TableCell align="right">均价 (元/MWh)</TableCell>
-                                                    <TableCell align="right">电费金额 (元)</TableCell>
-                                                    <TableCell align="right">日清结算汇总差异 (元)</TableCell>
-                                                </TableRow>
-                                            </TableHead>
-                                            <TableBody>
-                                                {[
-                                                    { cat: '电能量电费', rowSpan: 5, label: '实时现货结算', volKey: 'actual_consumption_volume', priceKey: 'real_time_avg_price', feeKey: 'real_time_deviation_fee', reconGroup: '实时市场偏差', priceCalc: (items: any) => items.actual_consumption_volume ? items.real_time_deviation_fee / items.actual_consumption_volume : null },
-                                                    { cat: '电能量电费', label: '中长期合同偏差', volKey: 'contract_volume', priceKey: 'contract_avg_price', feeKey: 'contract_fee', reconGroup: '中长期合约' },
-                                                    { cat: '电能量电费', label: '日前现货偏差', volKey: 'day_ahead_declared_volume', priceKey: 'day_ahead_avg_price', feeKey: 'day_ahead_deviation_fee', reconGroup: '日前市场偏差', priceCalc: (items: any) => items.day_ahead_declared_volume ? items.day_ahead_deviation_fee / items.day_ahead_declared_volume : null },
-                                                    { cat: '电能量电费', label: '偏差电量调平电费', volKey: 'monthly_balancing_volume', priceKey: 'balancing_price', feeKey: 'balancing_fee' },
-                                                    { cat: '电能量电费', label: '电能量合计', volKey: 'actual_monthly_volume', priceKey: 'energy_avg_price', feeKey: 'energy_fee_total', reconGroup: '电能量合计', isTotal: true },
+                                                        { cat: '资金余缺费用', rowSpan: 6, label: '发电侧成本类费用分摊', colSpanEmpty: 2, feeKey: 'gen_side_cost_allocation' },
+                                                        { cat: '资金余缺费用', label: '阻塞费分摊', colSpanEmpty: 2, feeKey: 'congestion_fee_allocation' },
+                                                        { cat: '资金余缺费用', label: '不平衡资金分摊', colSpanEmpty: 2, feeKey: 'imbalance_fund_allocation' },
+                                                        { cat: '资金余缺费用', label: '偏差回收费', colSpanEmpty: 2, feeKey: 'deviation_recovery_fee', reconGroup: '资金余缺费用' },
+                                                        { cat: '资金余缺费用', label: '偏差回收费返还', colSpanEmpty: 2, feeKey: 'deviation_recovery_return_fee' },
+                                                        { cat: '资金余缺费用', label: '资金余缺费用合计', colSpanEmpty: 2, feeKey: 'fund_surplus_deficit_total', isTotal: true },
 
-                                                    { cat: '资金余缺费用', rowSpan: 6, label: '发电侧成本类费用分摊', colSpanEmpty: 2, feeKey: 'gen_side_cost_allocation' },
-                                                    { cat: '资金余缺费用', label: '阻塞费分摊', colSpanEmpty: 2, feeKey: 'congestion_fee_allocation' },
-                                                    { cat: '资金余缺费用', label: '不平衡资金分摊', colSpanEmpty: 2, feeKey: 'imbalance_fund_allocation' },
-                                                    { cat: '资金余缺费用', label: '偏差回收费', colSpanEmpty: 2, feeKey: 'deviation_recovery_fee', reconGroup: '资金余缺费用' },
-                                                    { cat: '资金余缺费用', label: '偏差回收费返还', colSpanEmpty: 2, feeKey: 'deviation_recovery_return_fee' },
-                                                    { cat: '资金余缺费用', label: '资金余缺费用合计', colSpanEmpty: 2, feeKey: 'fund_surplus_deficit_total', isTotal: true },
+                                                        { cat: '结算合计', colSpanCat: 2, label: '结算合计', volKey: 'actual_monthly_volume', priceKey: 'settlement_avg_price', feeKey: 'settlement_fee_total', isGrandTotal: true },
+                                                    ].map((row, idx) => {
+                                                        const items = wholesaleLedger.settlement_items;
+                                                        const vol = items[row.volKey || ''] ?? null;
+                                                        const price = row.priceCalc ? row.priceCalc(items) : (items[row.priceKey || ''] ?? null);
+                                                        const fee = items[row.feeKey || ''] ?? null;
 
-                                                    { cat: '结算合计', colSpanCat: 2, label: '结算合计', volKey: 'actual_monthly_volume', priceKey: 'settlement_avg_price', feeKey: 'settlement_fee_total', isGrandTotal: true },
-                                                ].map((row, idx) => {
-                                                    const items = wholesaleLedger.settlement_items;
-                                                    const vol = items[row.volKey || ''] ?? null;
-                                                    const price = row.priceCalc ? row.priceCalc(items) : (items[row.priceKey || ''] ?? null);
-                                                    const fee = items[row.feeKey || ''] ?? null;
+                                                        const diffRow = row.reconGroup ? reconciliation?.rows.find(r => r.group_label === row.reconGroup && r.metric === (row.cat === '资金余缺费用' ? '偏差回收费' : '电费')) : undefined;
+                                                        const diffValue = diffRow?.diff ?? 0;
+                                                        const hasDiff = !!diffRow && Math.abs(diffValue) > 0.01;
 
-                                                    const diffRow = row.reconGroup ? reconciliation?.rows.find(r => r.group_label === row.reconGroup && r.metric === (row.cat === '资金余缺费用' ? '偏差回收费' : '电费')) : undefined;
-                                                    const diffValue = diffRow?.diff ?? 0;
-                                                    const hasDiff = !!diffRow && Math.abs(diffValue) > 0.01;
+                                                        const bg = row.isGrandTotal ? '#f0f4f8' : (row.isTotal ? '#f8f9fa' : 'transparent');
+                                                        const fw = row.isGrandTotal || row.isTotal ? 800 : 400;
 
-                                                    const bg = row.isGrandTotal ? '#f0f4f8' : (row.isTotal ? '#f8f9fa' : 'transparent');
-                                                    const fw = row.isGrandTotal || row.isTotal ? 800 : 400;
+                                                        return (
+                                                            <TableRow key={idx} sx={{ '& td': { bgcolor: bg, fontWeight: fw } }}>
+                                                                {row.rowSpan ? (
+                                                                    <TableCell rowSpan={row.rowSpan} align="center" sx={{ bgcolor: alpha(WHOLESALE_COLORS.headerBg, 0.5), fontWeight: 700, borderRight: '1px solid', borderColor: 'divider' }}>
+                                                                        {row.cat}
+                                                                    </TableCell>
+                                                                ) : row.colSpanCat ? (
+                                                                    <TableCell colSpan={row.colSpanCat} align="center" sx={{ fontWeight: 800 }}>{row.cat}</TableCell>
+                                                                ) : null}
 
-                                                    return (
-                                                        <TableRow key={idx} sx={{ '& td': { bgcolor: bg, fontWeight: fw } }}>
-                                                            {row.rowSpan ? (
-                                                                <TableCell rowSpan={row.rowSpan} align="center" sx={{ bgcolor: alpha(WHOLESALE_COLORS.headerBg, 0.5), fontWeight: 700, borderRight: '1px solid', borderColor: 'divider' }}>
-                                                                    {row.cat}
-                                                                </TableCell>
-                                                            ) : row.colSpanCat ? (
-                                                                <TableCell colSpan={row.colSpanCat} align="center" sx={{ fontWeight: 800 }}>{row.cat}</TableCell>
-                                                            ) : null}
+                                                                {!row.colSpanCat && <TableCell>{row.label}</TableCell>}
 
-                                                            {!row.colSpanCat && <TableCell>{row.label}</TableCell>}
-
-                                                            {row.colSpanEmpty ? (
-                                                                <TableCell colSpan={row.colSpanEmpty} align="center" sx={{ color: 'text.disabled' }}>-</TableCell>
-                                                            ) : (
-                                                                <>
-                                                                    <TableCell align="right">{formatNumber(vol, 3)}</TableCell>
-                                                                    <TableCell align="right">{formatNumber(price, 3)}</TableCell>
-                                                                </>
-                                                            )}
-
-                                                            <TableCell align="right" sx={{ color: fee !== null && fee < 0 ? 'error.main' : 'inherit' }}>{formatNumber(fee, 2)}</TableCell>
-
-                                                            <TableCell align="right">
-                                                                {hasDiff ? (
-                                                                    <Typography variant="caption" sx={{ color: 'error.main', fontWeight: 800, bgcolor: alpha(theme.palette.error.main, 0.1), px: 0.8, py: 0.2, borderRadius: 1 }}>
-                                                                        {diffValue > 0 ? '+' : ''}{formatNumber(diffValue, 2)}
-                                                                    </Typography>
+                                                                {row.colSpanEmpty ? (
+                                                                    <TableCell colSpan={row.colSpanEmpty} align="center" sx={{ color: 'text.disabled' }}>-</TableCell>
                                                                 ) : (
-                                                                    <Typography variant="caption" sx={{ color: 'text.disabled' }}>{row.colSpanCat ? '' : (row.isTotal || row.isGrandTotal ? '-' : (diffRow ? 0 : '-'))}</Typography>
+                                                                    <>
+                                                                        <TableCell align="right">{formatNumber(vol, 3)}</TableCell>
+                                                                        <TableCell align="right">{formatNumber(price, 3)}</TableCell>
+                                                                    </>
                                                                 )}
-                                                            </TableCell>
-                                                        </TableRow>
-                                                    );
-                                                })}
-                                            </TableBody>
-                                        </Table>
-                                    </TableContainer>
-                                </Paper>
+
+                                                                <TableCell align="right" sx={{ color: fee !== null && fee < 0 ? 'error.main' : 'inherit' }}>{formatNumber(fee, 2)}</TableCell>
+
+                                                                <TableCell align="right">
+                                                                    {hasDiff ? (
+                                                                        <Typography variant="caption" sx={{ color: 'error.main', fontWeight: 800, bgcolor: alpha(theme.palette.error.main, 0.1), px: 0.8, py: 0.2, borderRadius: 1 }}>
+                                                                            {diffValue > 0 ? '+' : ''}{formatNumber(diffValue, 2)}
+                                                                        </Typography>
+                                                                    ) : (
+                                                                        <Typography variant="caption" sx={{ color: 'text.disabled' }}>{row.colSpanCat ? '' : (row.isTotal || row.isGrandTotal ? '-' : (diffRow ? 0 : '-'))}</Typography>
+                                                                    )}
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        );
+                                                    })}
+                                                </TableBody>
+                                            </Table>
+                                        </TableContainer>
+                                    </Paper>
+                                </Grid>
+
+                                {/* 右侧：瀑布图 */}
+                                <Grid size={{ xs: 12, lg: 5 }} sx={{ display: 'flex', flexDirection: 'column' }}>
+                                    <Paper variant="outlined" sx={{ p: 2, flexGrow: 1, display: 'flex', flexDirection: 'column', borderRadius: 2 }}>
+                                        <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'text.primary', mb: 2, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                            <Box sx={{ width: 3, height: 14, bgcolor: WHOLESALE_COLORS.accent, borderRadius: 1 }} />
+                                            批发侧月度结算瀑布图
+                                        </Typography>
+                                        <Box ref={waterfallChartRef} sx={{
+                                            flexGrow: 1,
+                                            minHeight: { xs: 350, lg: 300 },
+                                            position: 'relative',
+                                            backgroundColor: isFullscreen ? 'background.paper' : 'transparent',
+                                            p: isFullscreen ? 2 : 0,
+                                            ...(isFullscreen && { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1400 }),
+                                            '& .recharts-wrapper:focus': { outline: 'none' }
+                                        }}>
+                                            <FullscreenEnterButton />
+                                            <FullscreenExitButton />
+                                            <FullscreenTitle />
+                                            <Box sx={!isFullscreen ? { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 } : { height: '100%' }}>
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <BarChart data={getWaterfallData(wholesaleLedger.settlement_items)} margin={{ top: 20, right: 20, bottom: 40, left: 20 }}>
+                                                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                                        <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} tick={{ fontSize: 11 }} height={60} />
+                                                        <YAxis tickFormatter={(val) => `${(val / 10000).toFixed(0)}万`} width={60} tick={{ fontSize: 11 }} />
+                                                        <RechartsTooltip content={<WaterfallTooltip />} cursor={{ fill: 'transparent' }} />
+                                                        <ReferenceLine y={0} stroke="#000" />
+                                                        <Bar dataKey="range" minPointSize={3} isAnimationActive={false}>
+                                                            {getWaterfallData(wholesaleLedger.settlement_items).map((entry, index) => (
+                                                                <Cell key={`cell-${index}`} fill={entry.color} />
+                                                            ))}
+                                                        </Bar>
+                                                    </BarChart>
+                                                </ResponsiveContainer>
+                                            </Box>
+                                        </Box>
+                                    </Paper>
+                                </Grid>
                             </Grid>
-                        </Grid>
-                    )}
-                </Box>
+                        )}
+                    </Box>
+                )}
 
                 {/* 板块二：零售侧客户台账 */}
-                <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
-                    <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1.5, borderBottom: '1px solid', borderColor: 'divider', bgcolor: alpha(theme.palette.primary.main, 0.02) }}>
-                        <Box sx={{ bgcolor: theme.palette.primary.main, color: 'white', p: 0.5, borderRadius: 1.5, display: 'flex' }}>
-                            <PeopleIcon sx={{ fontSize: 20 }} />
+                {(customers.length > 0 || (loading && customers.length === 0 && wholesaleLedger)) && (
+                    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
+                        <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1.5, borderBottom: '1px solid', borderColor: 'divider', bgcolor: alpha(theme.palette.primary.main, 0.02) }}>
+                            <Box sx={{ bgcolor: theme.palette.primary.main, color: 'white', p: 0.5, borderRadius: 1.5, display: 'flex' }}>
+                                <PeopleIcon sx={{ fontSize: 20 }} />
+                            </Box>
+                            <Box>
+                                <Typography variant="subtitle1" sx={{ fontWeight: 800, color: 'text.primary', lineHeight: 1 }}>客户月度结算明细台账</Typography>
+                                <Typography variant="caption" color="text.secondary">统计周期: {monthStr}</Typography>
+                            </Box>
+                            <Box sx={{ flexGrow: 1 }} />
+                            <Typography variant="caption" sx={{ fontWeight: 600, color: 'primary.main', bgcolor: alpha(theme.palette.primary.main, 0.1), px: 1, py: 0.5, borderRadius: 1 }}>
+                                共 {customers.length} 家客户
+                            </Typography>
                         </Box>
-                        <Box>
-                            <Typography variant="subtitle1" sx={{ fontWeight: 800, color: 'text.primary', lineHeight: 1 }}>客户月度结算明细台账</Typography>
-                            <Typography variant="caption" color="text.secondary">统计周期: {monthStr}</Typography>
+
+                        <Box sx={{ px: 2, py: 1, display: 'flex', justifyContent: 'flex-end', bgcolor: alpha(theme.palette.primary.main, 0.01), borderBottom: '1px solid', borderColor: 'divider' }}>
+                            <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 500 }}>
+                                <Box component="span" sx={{ mr: 2 }}>单位说明：</Box>
+                                电量: MWh
+                                <Box component="span" sx={{ mx: 1 }}>|</Box>
+                                单价/价差: 元/MWh
+                                <Box component="span" sx={{ mx: 1 }}>|</Box>
+                                电费/毛利/返还: 元
+                            </Typography>
                         </Box>
-                        <Box sx={{ flexGrow: 1 }} />
-                        <Typography variant="caption" sx={{ fontWeight: 600, color: 'primary.main', bgcolor: alpha(theme.palette.primary.main, 0.1), px: 1, py: 0.5, borderRadius: 1 }}>
-                            共 {customers.length} 家客户
-                        </Typography>
-                    </Box>
 
-                    <Box sx={{ px: 2, py: 1, display: 'flex', justifyContent: 'flex-end', bgcolor: alpha(theme.palette.primary.main, 0.01), borderBottom: '1px solid', borderColor: 'divider' }}>
-                        <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 500 }}>
-                            <Box component="span" sx={{ mr: 2 }}>单位说明：</Box>
-                            电量: MWh
-                            <Box component="span" sx={{ mx: 1 }}>|</Box>
-                            单价/价差: 元/MWh
-                            <Box component="span" sx={{ mx: 1 }}>|</Box>
-                            电费/毛利/返还: 元
-                        </Typography>
-                    </Box>
-
-                    {loading && customers.length === 0 ? (
-                        <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}><CircularProgress /></Box>
-                    ) : customers.length === 0 ? (
-                        <Box sx={{ p: 6, textAlign: 'center' }}>
-                            <Alert severity="info" variant="outlined" sx={{ display: 'inline-flex' }}>当前月份暂无零售结算记录，请执行结算任务。</Alert>
-                        </Box>
-                    ) : (
-                        <TableContainer sx={{ overflowX: 'auto' }}>
-                            <Table size="small" sx={{ minWidth: 1000, '& .MuiTableCell-root': { fontSize: { xs: '0.75rem', sm: '0.875rem' }, px: { xs: 0.5, sm: 1 }, whiteSpace: 'nowrap' } }}>
-                                <TableHead>
-                                    <TableRow>
-                                        <TableCell colSpan={2} align="center" sx={{ backgroundColor: GROUP_COLORS['基本信息'], fontWeight: '800', borderRight: '1px solid', borderColor: 'divider', py: 1 }}>基本信息</TableCell>
-                                        <TableCell colSpan={3} align="center" sx={{ backgroundColor: GROUP_COLORS['零售结算（价格申报）'], fontWeight: '800', borderRight: '1px solid', borderColor: 'divider', py: 1 }}>零售结算（价格申报）</TableCell>
-                                        <TableCell colSpan={3} align="center" sx={{ backgroundColor: GROUP_COLORS['月度结算（账单结果）'], fontWeight: '800', borderRight: '1px solid', borderColor: 'divider', py: 1 }}>月度结算（账单结果）</TableCell>
-                                        <TableCell colSpan={4} align="center" sx={{ backgroundColor: GROUP_COLORS['月度收益'], fontWeight: '800', borderRight: '1px solid', borderColor: 'divider', py: 1 }}>月度收益</TableCell>
-                                        <TableCell align="center" sx={{ backgroundColor: GROUP_COLORS['操作'], fontWeight: '800', py: 1 }} rowSpan={2}>操作</TableCell>
-                                    </TableRow>
-                                    <TableRow sx={{ '& th': { fontSize: '0.7rem', whiteSpace: 'nowrap', py: 1, fontWeight: '700', color: 'text.secondary' } }}>
-                                        <TableCell sx={{ backgroundColor: GROUP_COLORS['基本信息'] }}>序号</TableCell>
-                                        <TableCell sx={{ backgroundColor: GROUP_COLORS['基本信息'], borderRight: '1px solid', borderColor: 'divider' }}>
-                                            <TableSortLabel
-                                                active={orderBy === 'customer_name'}
-                                                direction={orderBy === 'customer_name' ? order : 'asc'}
-                                                onClick={() => handleRequestSort('customer_name')}
-                                            >
-                                                客户名称
-                                            </TableSortLabel>
-                                        </TableCell>
-
-                                        <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['零售结算（价格申报）'] }}>
-                                            <TableSortLabel
-                                                active={orderBy === 'total_energy_mwh'}
-                                                direction={orderBy === 'total_energy_mwh' ? order : 'asc'}
-                                                onClick={() => handleRequestSort('total_energy_mwh')}
-                                            >
-                                                电量
-                                            </TableSortLabel>
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['零售结算（价格申报）'] }}>
-                                            <TableSortLabel
-                                                active={orderBy === 'retail_avg_price' as any}
-                                                direction={orderBy === 'retail_avg_price' as any ? order : 'asc'}
-                                                onClick={() => handleRequestSort('retail_avg_price' as any)}
-                                            >
-                                                均价
-                                            </TableSortLabel>
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['零售结算（价格申报）'], borderRight: '1px solid', borderColor: 'divider' }}>
-                                            <TableSortLabel
-                                                active={orderBy === 'retail_total_fee'}
-                                                direction={orderBy === 'retail_total_fee' ? order : 'asc'}
-                                                onClick={() => handleRequestSort('retail_total_fee')}
-                                            >
-                                                电费
-                                            </TableSortLabel>
-                                        </TableCell>
-
-                                        <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['月度结算（账单结果）'] }}>
-                                            <TableSortLabel
-                                                active={orderBy === 'excess_refund_fee'}
-                                                direction={orderBy === 'excess_refund_fee' ? order : 'asc'}
-                                                onClick={() => handleRequestSort('excess_refund_fee')}
-                                            >
-                                                超额返还
-                                            </TableSortLabel>
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['月度结算（账单结果）'] }}>
-                                            <TableSortLabel
-                                                active={orderBy === 'total_fee'}
-                                                direction={orderBy === 'total_fee' ? order : 'asc'}
-                                                onClick={() => handleRequestSort('total_fee')}
-                                            >
-                                                结算总额
-                                            </TableSortLabel>
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['月度结算（账单结果）'], borderRight: '1px solid', borderColor: 'divider' }}>
-                                            <TableSortLabel
-                                                active={orderBy === 'settlement_avg_price'}
-                                                direction={orderBy === 'settlement_avg_price' ? order : 'asc'}
-                                                onClick={() => handleRequestSort('settlement_avg_price')}
-                                            >
-                                                结算均价
-                                            </TableSortLabel>
-                                        </TableCell>
-
-                                        <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['月度收益'] }}>
-                                            <TableSortLabel
-                                                active={orderBy === 'final_wholesale_fee'}
-                                                direction={orderBy === 'final_wholesale_fee' ? order : 'asc'}
-                                                onClick={() => handleRequestSort('final_wholesale_fee')}
-                                            >
-                                                采购成本
-                                            </TableSortLabel>
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['月度收益'] }}>
-                                            <TableSortLabel
-                                                active={orderBy === 'final_wholesale_unit_price'}
-                                                direction={orderBy === 'final_wholesale_unit_price' ? order : 'asc'}
-                                                onClick={() => handleRequestSort('final_wholesale_unit_price')}
-                                            >
-                                                采购单价
-                                            </TableSortLabel>
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['月度收益'] }}>
-                                            <TableSortLabel
-                                                active={orderBy === 'final_gross_profit'}
-                                                direction={orderBy === 'final_gross_profit' ? order : 'asc'}
-                                                onClick={() => handleRequestSort('final_gross_profit')}
-                                            >
-                                                毛利
-                                            </TableSortLabel>
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['月度收益'], borderRight: '1px solid', borderColor: 'divider' }}>
-                                            <TableSortLabel
-                                                active={orderBy === 'final_price_spread_per_mwh'}
-                                                direction={orderBy === 'final_price_spread_per_mwh' ? order : 'asc'}
-                                                onClick={() => handleRequestSort('final_price_spread_per_mwh')}
-                                            >
-                                                批零价差
-                                            </TableSortLabel>
-                                        </TableCell>
-                                    </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                    {sortedCustomers.map((item, index) => (
-                                        <TableRow key={item._id} hover sx={{ '& td': { fontSize: '0.75rem', whiteSpace: 'nowrap', py: 1 } }}>
-                                            <TableCell sx={{ color: 'text.secondary' }}>{index + 1}</TableCell>
-                                            <TableCell sx={{ fontWeight: 800, borderRight: '1px solid', borderColor: 'divider' }}>{item.customer_name}</TableCell>
-
-                                            <TableCell align="right">{formatNumber(item.total_energy_mwh, 3)}</TableCell>
-                                            <TableCell align="right">{formatNumber(item.total_energy_mwh ? item.retail_total_fee / item.total_energy_mwh : 0, 3)}</TableCell>
-                                            <TableCell align="right" sx={{ borderRight: '1px solid', borderColor: 'divider' }}>{formatNumber(item.retail_total_fee, 2)}</TableCell>
-
-                                            <TableCell align="right" sx={{ color: item.excess_refund_fee > 0 ? 'success.main' : 'inherit', fontWeight: 700 }}>
-                                                {formatNumber(item.excess_refund_fee, 2)}
-                                            </TableCell>
-                                            <TableCell align="right" sx={{ fontWeight: 800, bgcolor: alpha(theme.palette.primary.main, 0.02) }}>{formatNumber(item.total_fee, 2)}</TableCell>
-                                            <TableCell align="right" sx={{ fontWeight: 800, color: 'primary.main', bgcolor: alpha(theme.palette.primary.main, 0.02), borderRight: '1px solid', borderColor: 'divider' }}>
-                                                {formatNumber(item.total_energy_mwh ? item.total_fee / item.total_energy_mwh : 0, 3)}
+                        {loading && customers.length === 0 ? (
+                            <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}><CircularProgress /></Box>
+                        ) : (
+                            <TableContainer sx={{ overflowX: 'auto' }}>
+                                <Table size="small" sx={{ minWidth: 1000, '& .MuiTableCell-root': { fontSize: { xs: '0.75rem', sm: '0.875rem' }, px: { xs: 0.5, sm: 1 }, whiteSpace: 'nowrap' } }}>
+                                    <TableHead>
+                                        <TableRow>
+                                            <TableCell colSpan={2} align="center" sx={{ backgroundColor: GROUP_COLORS['基本信息'], fontWeight: '800', borderRight: '1px solid', borderColor: 'divider', py: 1 }}>基本信息</TableCell>
+                                            <TableCell colSpan={3} align="center" sx={{ backgroundColor: GROUP_COLORS['零售结算（价格申报）'], fontWeight: '800', borderRight: '1px solid', borderColor: 'divider', py: 1 }}>零售结算（价格申报）</TableCell>
+                                            <TableCell colSpan={3} align="center" sx={{ backgroundColor: GROUP_COLORS['月度结算（账单结果）'], fontWeight: '800', borderRight: '1px solid', borderColor: 'divider', py: 1 }}>月度结算（账单结果）</TableCell>
+                                            <TableCell colSpan={4} align="center" sx={{ backgroundColor: GROUP_COLORS['月度收益'], fontWeight: '800', borderRight: '1px solid', borderColor: 'divider', py: 1 }}>月度收益</TableCell>
+                                            <TableCell align="center" sx={{ backgroundColor: GROUP_COLORS['操作'], fontWeight: '800', py: 1 }} rowSpan={2}>操作</TableCell>
+                                        </TableRow>
+                                        <TableRow sx={{ '& th': { fontSize: '0.7rem', whiteSpace: 'nowrap', py: 1, fontWeight: '700', color: 'text.secondary' } }}>
+                                            <TableCell sx={{ backgroundColor: GROUP_COLORS['基本信息'] }}>序号</TableCell>
+                                            <TableCell sx={{ backgroundColor: GROUP_COLORS['基本信息'], borderRight: '1px solid', borderColor: 'divider' }}>
+                                                <TableSortLabel
+                                                    active={orderBy === 'customer_name'}
+                                                    direction={orderBy === 'customer_name' ? order : 'asc'}
+                                                    onClick={() => handleRequestSort('customer_name')}
+                                                >
+                                                    客户名称
+                                                </TableSortLabel>
                                             </TableCell>
 
-                                            <TableCell align="right">{formatNumber(item.final_wholesale_fee, 2)}</TableCell>
-                                            <TableCell align="right">{formatNumber(item.final_wholesale_unit_price, 3)}</TableCell>
-                                            <TableCell align="right" sx={{ fontWeight: 800, color: (item.final_gross_profit || 0) > 0 ? 'success.main' : 'error.main' }}>{formatNumber(item.final_gross_profit, 2)}</TableCell>
-                                            <TableCell align="right" sx={{ fontWeight: 800, color: (item.final_price_spread_per_mwh || 0) > 0 ? 'success.main' : 'error.main', borderRight: '1px solid', borderColor: 'divider' }}>{formatNumber(item.final_price_spread_per_mwh, 3)}</TableCell>
+                                            <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['零售结算（价格申报）'] }}>
+                                                <TableSortLabel
+                                                    active={orderBy === 'total_energy_mwh'}
+                                                    direction={orderBy === 'total_energy_mwh' ? order : 'asc'}
+                                                    onClick={() => handleRequestSort('total_energy_mwh')}
+                                                >
+                                                    电量
+                                                </TableSortLabel>
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['零售结算（价格申报）'] }}>
+                                                <TableSortLabel
+                                                    active={orderBy === 'retail_avg_price' as any}
+                                                    direction={orderBy === 'retail_avg_price' as any ? order : 'asc'}
+                                                    onClick={() => handleRequestSort('retail_avg_price' as any)}
+                                                >
+                                                    均价
+                                                </TableSortLabel>
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['零售结算（价格申报）'], borderRight: '1px solid', borderColor: 'divider' }}>
+                                                <TableSortLabel
+                                                    active={orderBy === 'retail_total_fee'}
+                                                    direction={orderBy === 'retail_total_fee' ? order : 'asc'}
+                                                    onClick={() => handleRequestSort('retail_total_fee')}
+                                                >
+                                                    电费
+                                                </TableSortLabel>
+                                            </TableCell>
 
-                                            <TableCell align="center">
-                                                <Button size="small" variant="text" color="primary" sx={{ py: 0, minWidth: 60, fontSize: '0.75rem' }}>查看明细</Button>
+                                            <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['月度结算（账单结果）'] }}>
+                                                <TableSortLabel
+                                                    active={orderBy === 'excess_refund_fee'}
+                                                    direction={orderBy === 'excess_refund_fee' ? order : 'asc'}
+                                                    onClick={() => handleRequestSort('excess_refund_fee')}
+                                                >
+                                                    超额返还
+                                                </TableSortLabel>
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['月度结算（账单结果）'] }}>
+                                                <TableSortLabel
+                                                    active={orderBy === 'total_fee'}
+                                                    direction={orderBy === 'total_fee' ? order : 'asc'}
+                                                    onClick={() => handleRequestSort('total_fee')}
+                                                >
+                                                    结算总额
+                                                </TableSortLabel>
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['月度结算（账单结果）'], borderRight: '1px solid', borderColor: 'divider' }}>
+                                                <TableSortLabel
+                                                    active={orderBy === 'settlement_avg_price'}
+                                                    direction={orderBy === 'settlement_avg_price' ? order : 'asc'}
+                                                    onClick={() => handleRequestSort('settlement_avg_price')}
+                                                >
+                                                    结算均价
+                                                </TableSortLabel>
+                                            </TableCell>
+
+                                            <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['月度收益'] }}>
+                                                <TableSortLabel
+                                                    active={orderBy === 'final_wholesale_fee'}
+                                                    direction={orderBy === 'final_wholesale_fee' ? order : 'asc'}
+                                                    onClick={() => handleRequestSort('final_wholesale_fee')}
+                                                >
+                                                    采购成本
+                                                </TableSortLabel>
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['月度收益'] }}>
+                                                <TableSortLabel
+                                                    active={orderBy === 'final_wholesale_unit_price'}
+                                                    direction={orderBy === 'final_wholesale_unit_price' ? order : 'asc'}
+                                                    onClick={() => handleRequestSort('final_wholesale_unit_price')}
+                                                >
+                                                    采购单价
+                                                </TableSortLabel>
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['月度收益'] }}>
+                                                <TableSortLabel
+                                                    active={orderBy === 'final_gross_profit'}
+                                                    direction={orderBy === 'final_gross_profit' ? order : 'asc'}
+                                                    onClick={() => handleRequestSort('final_gross_profit')}
+                                                >
+                                                    毛利
+                                                </TableSortLabel>
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ backgroundColor: GROUP_COLORS['月度收益'], borderRight: '1px solid', borderColor: 'divider' }}>
+                                                <TableSortLabel
+                                                    active={orderBy === 'final_price_spread_per_mwh'}
+                                                    direction={orderBy === 'final_price_spread_per_mwh' ? order : 'asc'}
+                                                    onClick={() => handleRequestSort('final_price_spread_per_mwh')}
+                                                >
+                                                    批零价差
+                                                </TableSortLabel>
                                             </TableCell>
                                         </TableRow>
-                                    ))}
-                                    {/* 合计行 */}
-                                    <TableRow sx={{ bgcolor: theme.palette.grey[200], '& td': { fontWeight: '900', fontSize: '0.75rem', py: 1.2 } }}>
-                                        <TableCell colSpan={2} align="center" sx={{ borderRight: '1px solid', borderColor: 'divider' }}>全量合计</TableCell>
+                                    </TableHead>
+                                    <TableBody>
+                                        {sortedCustomers.map((item, index) => (
+                                            <TableRow key={item._id} hover sx={{ '& td': { fontSize: '0.75rem', whiteSpace: 'nowrap', py: 1 } }}>
+                                                <TableCell sx={{ color: 'text.secondary' }}>{index + 1}</TableCell>
+                                                <TableCell sx={{ fontWeight: 800, borderRight: '1px solid', borderColor: 'divider' }}>{item.customer_name}</TableCell>
 
-                                        <TableCell align="right">{formatNumber(customers.reduce((s, c) => s + c.total_energy_mwh, 0), 3)}</TableCell>
-                                        <TableCell align="right">
-                                            {formatNumber(customers.reduce((s, c) => s + c.total_energy_mwh, 0) > 0 ?
-                                                customers.reduce((s, c) => s + c.retail_total_fee, 0) / customers.reduce((s, c) => s + c.total_energy_mwh, 0) : 0, 3)}
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ borderRight: '1px solid', borderColor: 'divider' }}>{formatNumber(customers.reduce((s, c) => s + c.retail_total_fee, 0), 2)}</TableCell>
+                                                <TableCell align="right">{formatNumber(item.total_energy_mwh, 3)}</TableCell>
+                                                <TableCell align="right">{formatNumber(item.total_energy_mwh ? item.retail_total_fee / item.total_energy_mwh : 0, 3)}</TableCell>
+                                                <TableCell align="right" sx={{ borderRight: '1px solid', borderColor: 'divider' }}>{formatNumber(item.retail_total_fee, 2)}</TableCell>
 
-                                        <TableCell align="right">{formatNumber(customers.reduce((s, c) => s + c.excess_refund_fee, 0), 2)}</TableCell>
-                                        <TableCell align="right" sx={{ color: 'primary.dark' }}>{formatNumber(customers.reduce((s, c) => s + c.total_fee, 0), 2)}</TableCell>
-                                        <TableCell align="right" sx={{ color: 'primary.main', borderRight: '1px solid', borderColor: 'divider' }}>
-                                            {formatNumber(customers.reduce((s, c) => s + (c.total_energy_mwh || 0), 0) > 0 ?
-                                                customers.reduce((s, c) => s + (c.total_fee || 0), 0) / customers.reduce((s, c) => s + (c.total_energy_mwh || 0), 0) : 0, 3)}
-                                        </TableCell>
+                                                <TableCell align="right" sx={{ color: item.excess_refund_fee > 0 ? 'success.main' : 'inherit', fontWeight: 700 }}>
+                                                    {formatNumber(item.excess_refund_fee, 2)}
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ fontWeight: 800, bgcolor: alpha(theme.palette.primary.main, 0.02) }}>{formatNumber(item.total_fee, 2)}</TableCell>
+                                                <TableCell align="right" sx={{ fontWeight: 800, color: 'primary.main', bgcolor: alpha(theme.palette.primary.main, 0.02), borderRight: '1px solid', borderColor: 'divider' }}>
+                                                    {formatNumber(item.total_energy_mwh ? item.total_fee / item.total_energy_mwh : 0, 3)}
+                                                </TableCell>
 
-                                        <TableCell align="right">{formatNumber(customers.reduce((s, c) => s + (c.final_wholesale_fee || 0), 0), 2)}</TableCell>
-                                        <TableCell align="right">
-                                            {formatNumber(customers.reduce((s, c) => s + (c.total_energy_mwh || 0), 0) > 0 ?
-                                                customers.reduce((s, c) => s + (c.final_wholesale_fee || 0), 0) / customers.reduce((s, c) => s + (c.total_energy_mwh || 0), 0) : 0, 3)}
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ color: customers.reduce((s, c) => s + (c.final_gross_profit || 0), 0) > 0 ? 'success.main' : 'error.main' }}>
-                                            {formatNumber(customers.reduce((s, c) => s + (c.final_gross_profit || 0), 0), 2)}
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ color: customers.reduce((s, c) => s + (c.final_gross_profit || 0), 0) > 0 ? 'success.main' : 'error.main', borderRight: '1px solid', borderColor: 'divider' }}>
-                                            {formatNumber(customers.reduce((s, c) => s + (c.total_energy_mwh || 0), 0) > 0 ?
-                                                customers.reduce((s, c) => s + (c.final_gross_profit || 0), 0) / customers.reduce((s, c) => s + (c.total_energy_mwh || 0), 0) : 0, 3)}
-                                        </TableCell>
-                                        <TableCell align="center"></TableCell>
-                                    </TableRow>
-                                </TableBody>
-                            </Table>
-                        </TableContainer>
-                    )}
-                </Paper>
+                                                <TableCell align="right">{formatNumber(item.final_wholesale_fee, 2)}</TableCell>
+                                                <TableCell align="right">{formatNumber(item.final_wholesale_unit_price, 3)}</TableCell>
+                                                <TableCell align="right" sx={{ fontWeight: 800, color: (item.final_gross_profit || 0) > 0 ? 'success.main' : 'error.main' }}>{formatNumber(item.final_gross_profit, 2)}</TableCell>
+                                                <TableCell align="right" sx={{ fontWeight: 800, color: (item.final_price_spread_per_mwh || 0) > 0 ? 'success.main' : 'error.main', borderRight: '1px solid', borderColor: 'divider' }}>{formatNumber(item.final_price_spread_per_mwh, 3)}</TableCell>
+
+                                                <TableCell align="center">
+                                                    <Button size="small" variant="text" color="primary" sx={{ py: 0, minWidth: 60, fontSize: '0.75rem' }}>查看明细</Button>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                        {/* 合计行 */}
+                                        <TableRow sx={{ bgcolor: theme.palette.grey[200], '& td': { fontWeight: '900', fontSize: '0.75rem', py: 1.2 } }}>
+                                            <TableCell colSpan={2} align="center" sx={{ borderRight: '1px solid', borderColor: 'divider' }}>全量合计</TableCell>
+
+                                            <TableCell align="right">{formatNumber(customers.reduce((s, c) => s + c.total_energy_mwh, 0), 3)}</TableCell>
+                                            <TableCell align="right">
+                                                {formatNumber(customers.reduce((s, c) => s + c.total_energy_mwh, 0) > 0 ?
+                                                    customers.reduce((s, c) => s + c.retail_total_fee, 0) / customers.reduce((s, c) => s + c.total_energy_mwh, 0) : 0, 3)}
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ borderRight: '1px solid', borderColor: 'divider' }}>{formatNumber(customers.reduce((s, c) => s + c.retail_total_fee, 0), 2)}</TableCell>
+
+                                            <TableCell align="right">{formatNumber(customers.reduce((s, c) => s + c.excess_refund_fee, 0), 2)}</TableCell>
+                                            <TableCell align="right" sx={{ color: 'primary.dark' }}>{formatNumber(customers.reduce((s, c) => s + c.total_fee, 0), 2)}</TableCell>
+                                            <TableCell align="right" sx={{ color: 'primary.main', borderRight: '1px solid', borderColor: 'divider' }}>
+                                                {formatNumber(customers.reduce((s, c) => s + (c.total_energy_mwh || 0), 0) > 0 ?
+                                                    customers.reduce((s, c) => s + (c.total_fee || 0), 0) / customers.reduce((s, c) => s + (c.total_energy_mwh || 0), 0) : 0, 3)}
+                                            </TableCell>
+
+                                            <TableCell align="right">{formatNumber(customers.reduce((s, c) => s + (c.final_wholesale_fee || 0), 0), 2)}</TableCell>
+                                            <TableCell align="right">
+                                                {formatNumber(customers.reduce((s, c) => s + (c.total_energy_mwh || 0), 0) > 0 ?
+                                                    customers.reduce((s, c) => s + (c.final_wholesale_fee || 0), 0) / customers.reduce((s, c) => s + (c.total_energy_mwh || 0), 0) : 0, 3)}
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ color: customers.reduce((s, c) => s + (c.final_gross_profit || 0), 0) > 0 ? 'success.main' : 'error.main' }}>
+                                                {formatNumber(customers.reduce((s, c) => s + (c.final_gross_profit || 0), 0), 2)}
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ color: customers.reduce((s, c) => s + (c.final_gross_profit || 0), 0) > 0 ? 'success.main' : 'error.main', borderRight: '1px solid', borderColor: 'divider' }}>
+                                                {formatNumber(customers.reduce((s, c) => s + (c.total_energy_mwh || 0), 0) > 0 ?
+                                                    customers.reduce((s, c) => s + (c.final_gross_profit || 0), 0) / customers.reduce((s, c) => s + (c.total_energy_mwh || 0), 0) : 0, 3)}
+                                            </TableCell>
+                                            <TableCell align="center"></TableCell>
+                                        </TableRow>
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+                        )}
+                    </Paper>
+                )}
 
                 {/* 结算进度弹窗 */}
                 <Dialog open={progressOpen} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 3 } }}>
-                    <DialogTitle sx={{ fontWeight: 800 }}>月度结算进度 - {jobInfo?.month}</DialogTitle>
+                    <DialogTitle sx={{ fontWeight: 800 }}>
+                        {jobInfo ? `月度结算进度 - ${jobInfo.month}` : '月度零售结算确认'}
+                    </DialogTitle>
                     <DialogContent>
-                        <Box sx={{ mt: 2 }}>
-                            <Box sx={{ mb: 2, p: 2, bgcolor: alpha(theme.palette.primary.main, 0.05), borderRadius: 2 }}>
-                                <Typography variant="body2" color="text.secondary" gutterBottom>当前状态</Typography>
-                                <Typography variant="subtitle1" fontWeight="bold">{jobInfo?.message}</Typography>
+                        {!jobInfo ? (
+                            <Box sx={{ py: 2 }}>
+                                <Alert severity="info" variant="outlined" sx={{ borderRadius: 2 }}>
+                                    确认要开始 <strong>{monthStr}</strong> 的零售月度结算吗？
+                                    <br />
+                                    系统将重新计算该月份所有客户的电量分配、零售电费及超额返还。
+                                </Alert>
+                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2, px: 1, fontWeight: 500 }}>
+                                    开始前请务必确认以下数据已成功导入：
+                                    <br />
+                                    • 月度批发结算数据
+                                    <br />
+                                    • 零售客户月度结算电量
+                                    <br />
+                                    • 现货市场_零售侧结算_价格定义文件
+                                </Typography>
                             </Box>
-                            <LinearProgress variant="determinate" value={jobInfo?.progress || 0} sx={{ height: 10, borderRadius: 5, mb: 1 }} />
-                            <Box sx={{ display: 'flex', justifyContent: 'space-end' }}>
-                                <Typography variant="h6" fontWeight="bold" color="primary">{jobInfo?.progress}%</Typography>
+                        ) : (
+                            <Box sx={{ mt: 2 }}>
+                                <Box sx={{ mb: 2, p: 2, bgcolor: alpha(theme.palette.primary.main, 0.05), borderRadius: 2 }}>
+                                    <Typography variant="body2" color="text.secondary" gutterBottom>当前状态</Typography>
+                                    <Typography variant="subtitle1" fontWeight="bold">{jobInfo?.message}</Typography>
+                                </Box>
+                                <LinearProgress variant="determinate" value={jobInfo?.progress || 0} sx={{ height: 10, borderRadius: 5, mb: 1 }} />
+                                <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                    <Typography variant="h6" fontWeight="bold" color="primary">{jobInfo?.progress}%</Typography>
+                                </Box>
                             </Box>
-                        </Box>
+                        )}
                     </DialogContent>
-                    <DialogActions sx={{ p: 2 }}>
-                        <Button
-                            variant="contained"
-                            disableElevation
-                            onClick={() => setProgressOpen(false)}
-                            disabled={jobInfo?.status === 'pending' || jobInfo?.status === 'running'}
-                            sx={{ borderRadius: 2, px: 4 }}
-                        >
-                            确定
-                        </Button>
+                    <DialogActions sx={{ p: 2, px: 3 }}>
+                        {!jobInfo ? (
+                            <>
+                                <Button
+                                    onClick={() => setProgressOpen(false)}
+                                    color="inherit"
+                                    sx={{ borderRadius: 2, fontWeight: 600 }}
+                                >
+                                    取消
+                                </Button>
+                                <Button
+                                    variant="contained"
+                                    onClick={handleStartSettlement}
+                                    startIcon={<CalculateIcon />}
+                                    sx={{ borderRadius: 2, px: 3, fontWeight: 600, boxShadow: 'none' }}
+                                >
+                                    开始结算
+                                </Button>
+                            </>
+                        ) : (
+                            <Button
+                                variant="contained"
+                                disableElevation
+                                onClick={() => setProgressOpen(false)}
+                                disabled={jobInfo?.status === 'pending' || jobInfo?.status === 'running'}
+                                sx={{ borderRadius: 2, px: 4, fontWeight: 600 }}
+                            >
+                                {jobInfo?.status === 'completed' || jobInfo?.status === 'failed' ? '完成' : '计算中...'}
+                            </Button>
+                        )}
                     </DialogActions>
                 </Dialog>
 
