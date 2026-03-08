@@ -644,7 +644,8 @@ critical_alerts = db.customer_anomaly_alerts.find({
 | `contract_id` | `String` | 关联合同ID |
 | `package_name` | `String` | 套餐名称 |
 | `model_code` | `String` | 定价模型代码 |
-| `settlement_type` | `String` | 结算类型: "daily" (预结算) / "monthly" (正式结算) |
+| `settlement_type` | `String` | 结算类型: "daily" (预结算) / "monthly" (月结口径重算，不含调平电量) |
+| `actual_monthly_volume` | `Number` | **[注]** 仅 `monthly` 记录存在，用于计算资金余缺分摊的月度总电量基准 |
 | `reference_price` | `Object` | 参考价信息 (价差分成类) |
 | `reference_price.type` | `String` | 类型: market_monthly_avg / upper_limit_price |
 | `reference_price.base_value` | `Number` | 基准值 (元/kWh) |
@@ -1030,7 +1031,7 @@ critical_alerts = db.customer_anomaly_alerts.find({
 
 ### 20.1. 集合用途
 
-用于存储客户维度的零售月度结算结果明细（按“月份+客户”一条），作为月度结算页面客户明细数据源。该结构对齐 `retail_settlement_daily`，保留月度48时段电量、尖峰平谷汇总及价格计算过程字段。月结流程不再写入 `retail_settlement_daily` 的 `settlement_type=monthly` 记录。
+用于存储客户维度的零售月度结算结果明细（按“月份+客户”一条），作为月度结算页面客户明细数据源。该结构对齐 `retail_settlement_daily`，保留月度48时段电量、尖峰平谷汇总及价格计算过程字段。月结流程完成后，会自动触发对 `retail_settlement_daily` 集合中 `settlement_type=monthly` 记录的重算生成。
 
 > 约束：
 > 1. 与定价模型相关的字段统一封装在 `price_model` 对象中（保持原有口径与精度）。

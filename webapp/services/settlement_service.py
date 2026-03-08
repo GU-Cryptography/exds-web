@@ -532,7 +532,7 @@ class SettlementService:
             {"$set": data},
             upsert=True
         )
-    async def get_settlement_detail(self, date_str: str, version: SettlementVersion) -> Optional[Dict]:
+    async def get_settlement_detail(self, date_str: str, version: SettlementVersion, settlement_type: str = "daily") -> Optional[Dict]:
         """
         获取指定日期和版本的结算详情数据
         包括：批发侧日摘要、批发侧48点明细、零售侧客户汇总列表
@@ -551,7 +551,7 @@ class SettlementService:
 
         # 2. 获取零售侧数据并聚合 (优化：增加 projection 排除重型 period_details)
         retail_cursor = self.db.retail_settlement_daily.find(
-            {"date": date_str},
+            {"date": date_str, "settlement_type": settlement_type},
             projection={"period_details": 0}
         )
         retail_docs = list(retail_cursor)
@@ -623,13 +623,14 @@ class SettlementService:
             "customer_list": customer_list
         }
 
-    async def get_settlement_customer_detail(self, date_str: str, customer_id: str) -> Optional[Dict]:
+    async def get_settlement_customer_detail(self, date_str: str, customer_id: str, settlement_type: str = "daily") -> Optional[Dict]:
         """
         获取指定日期和客户的零售侧结算详情
         """
         doc = self.db.retail_settlement_daily.find_one({
             "date": date_str,
-            "customer_id": customer_id
+            "customer_id": customer_id,
+            "settlement_type": settlement_type
         })
         if not doc:
             return None

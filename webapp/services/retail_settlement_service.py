@@ -55,14 +55,16 @@ class RetailSettlementService:
     async def get_latest_results_date(self) -> Optional[str]:
         """查询零售结算结果的最新日期"""
         latest_doc = self.db.retail_settlement_daily.find_one(
-            {}, 
+            {"settlement_type": "daily"},
             sort=[("date", -1)]
         )
         return latest_doc.get("date") if latest_doc else None
 
-    async def get_settled_count(self, date_str: str) -> int:
+    async def get_settled_count(self, date_str: str, settlement_type: str = "daily") -> int:
         """统计指定日期已结算的客户数量"""
-        return self.db.retail_settlement_daily.count_documents({"date": date_str})
+        return self.db.retail_settlement_daily.count_documents(
+            {"date": date_str, "settlement_type": settlement_type}
+        )
 
     def calculate_customer_daily(
         self,

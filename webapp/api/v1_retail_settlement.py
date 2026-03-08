@@ -50,9 +50,13 @@ def get_retail_daily_settlement(
     end_date: str = Query(..., regex=r"^\d{4}-\d{2}-\d{2}$"),
     customer_id: Optional[str] = None,
     include_details: bool = False,
+    settlement_type: str = Query("daily", description="结算类型：daily（预结算）或 monthly（月结口径）"),
 ):
     try:
-        query = {"date": {"$gte": start_date, "$lte": end_date}}
+        query = {
+            "date": {"$gte": start_date, "$lte": end_date},
+            "settlement_type": settlement_type,
+        }
         if customer_id:
             query["customer_id"] = customer_id
 

@@ -183,7 +183,7 @@ class RetailMonthlySettlementService:
                 "failed_count": 0,
                 "progress": 0,
                 "current_customer": "",
-                "message": "步骤1/2：按客户聚合月度48时段电量并计算零售结算",
+                "message": "步骤1/3：按客户聚合月度48时段电量并计算零售结算",
             },
             initialize=False,
         )
@@ -203,7 +203,7 @@ class RetailMonthlySettlementService:
                     "processed_customers": processed,
                     "current_customer": customer_name,
                     "progress": int((processed / total_customers) * 70),
-                    "message": "步骤1/2：按客户聚合月度48时段电量并计算零售结算",
+                    "message": "步骤1/3：按客户聚合月度48时段电量并计算零售结算",
                 },
                 initialize=False,
             )
@@ -231,7 +231,7 @@ class RetailMonthlySettlementService:
         self._update_job(
             job_id,
             {
-                "message": "步骤2/2：正在计算超额返还并更新客户月度结算",
+                "message": "步骤2/3：正在计算超额返还并更新客户月度结算",
                 "progress": 80,
             },
             initialize=False,
@@ -248,6 +248,19 @@ class RetailMonthlySettlementService:
         # 最后写状态，保证状态与客户月结同批次同步
         self._upsert_status(status_doc)
 
+        # 步骤3：重算该月客户日清月结版本
+        self._update_job(
+            job_id,
+            {
+                "message": "步骤3/3：正在重算月结口径日清数据",
+                "progress": 92,
+            },
+            initialize=False,
+        )
+        recompute_result = self._recompute_monthly_daily_settlements(month, force=force)
+        recompute_success = recompute_result.get("success", 0)
+        recompute_failed = recompute_result.get("failed", 0)
+
         self._update_job(
             job_id,
             {
@@ -257,7 +270,7 @@ class RetailMonthlySettlementService:
                 "failed_count": failed,
                 "processed_customers": processed,
                 "current_customer": "",
-                "message": f"完成 {success} 个客户月度结算",
+                "message": f"完成 {success} 个客户月度结算，日清重算 {recompute_success} 个客户（失败 {recompute_failed} 个）",
             },
             initialize=False,
         )
@@ -1101,6 +1114,257 @@ class RetailMonthlySettlementService:
             {"_id": job_id},
             {"$set": payload},
             upsert=initialize,
+        )
+
+    # ========== 月结口径日清重算 ==========
+
+    def _recompute_monthly_daily_settlements(self, month: str, force: bool = True) -> Dict[str, Any]:
+        """月结完成后，为该月所有客户写入 settlement_type='monthly' 的日清记录。
+
+        规则（参见实施方案 4.1/4.2）：
+        - 采购侧：当天 PLATFORM_DAILY 时段批发价 + surplus_unit_price（度电资金余缺分摊，元/MWh）
+        - 零售侧：月结 final_prices（5时段，元/kWh）- refund_unit_price_kwh（度电超额返还，元/kWh），允许负价
+        - 调平电量不参与（批零同价，价差收益为0）
+        """
+        status_doc = self.get_month_status(month)
+        if not status_doc:
+            logger.error("月结日清重算失败：月结状态不存在 month=%s", month)
+            return {"success": 0, "failed": 0, "error": "月结状态不存在"}
+
+        surplus_unit_price = float(status_doc.get("surplus_unit_price", 0.0))
+
+        customer_docs = self.get_customer_records(month)
+        if not customer_docs:
+            logger.warning("月结日清重算：month=%s 无客户月结记录", month)
+            return {"success": 0, "failed": 0, "error": "无客户月结记录"}
+
+        start_date, end_date = self._parse_month(month)
+        date_keys = self._build_date_keys(start_date, end_date)
+
+        success = 0
+        failed = 0
+        failed_customers: List[str] = []
+
+        for monthly_doc in customer_docs:
+            customer_name = monthly_doc.get("customer_name", "")
+            try:
+                self._recompute_customer_daily(
+                    monthly_doc=monthly_doc,
+                    date_keys=date_keys,
+                    surplus_unit_price=surplus_unit_price,
+                    force=force,
+                )
+                success += 1
+            except Exception as exc:
+                logger.exception(
+                    "月结日清重算客户失败 month=%s customer=%s err=%s", month, customer_name, exc
+                )
+                failed += 1
+                failed_customers.append(customer_name)
+
+        # 更新月结状态
+        now = datetime.utcnow()
+        self.db[self.STATUS_COLLECTION].update_one(
+            {"_id": month},
+            {
+                "$set": {
+                    "retail_daily_recomputed": True,
+                    "retail_daily_recomputed_at": now,
+                    "retail_daily_recomputed_count": success,
+                    "retail_daily_recomputed_failed": failed,
+                }
+            },
+        )
+        logger.info(
+            "月结日清重算完成 month=%s success=%s failed=%s failed_customers=%s",
+            month,
+            success,
+            failed,
+            failed_customers,
+        )
+        return {"success": success, "failed": failed, "failed_customers": failed_customers}
+
+    def _recompute_customer_daily(
+        self,
+        monthly_doc: Dict[str, Any],
+        date_keys: List[str],
+        surplus_unit_price: float,
+        force: bool = True,
+    ) -> None:
+        """对单个客户按月重算日清月结版本，按日循环调用 _upsert_customer_monthly_daily_record。"""
+        customer_id = monthly_doc.get("customer_id")
+        customer_name = monthly_doc.get("customer_name", "")
+
+        if not customer_id:
+            raise ValueError(f"客户 {customer_name} 月结记录中缺少 customer_id")
+
+        # 1. 读取月结 5 时段价格（元/kWh），来自 price_model.final_prices
+        price_model = monthly_doc.get("price_model", {}) or {}
+        final_prices_5: Dict[str, float] = price_model.get("final_prices", {}) or {}
+        if not final_prices_5:
+            raise ValueError(f"客户 {customer_name} 月结记录 price_model.final_prices 为空")
+
+        # 2. 计算度电返还价差（元/kWh）
+        #    分母使用 final_energy_mwh（与方案 4.2 公式一致），允许结果为 0
+        final_excess_refund_fee = float(monthly_doc.get("final_excess_refund_fee", 0.0))
+        final_energy_mwh = float(monthly_doc.get("final_energy_mwh", 0.0))
+        refund_unit_price_kwh = (
+            final_excess_refund_fee / (final_energy_mwh * 1000) if final_energy_mwh > 0 else 0.0
+        )
+
+        # 3. 批量读取客户整月每日 48 时段负荷（MP_ONLY）
+        start_dt = datetime.strptime(date_keys[0], "%Y-%m-%d").date()
+        end_dt = datetime.strptime(date_keys[-1], "%Y-%m-%d").date()
+        customer_daily_loads = self._aggregate_customer_monthly_daily_load_values(
+            customer_id=customer_id,
+            start_date=start_dt,
+            end_date=end_dt,
+        )
+
+        # 4. 逐日重算写库
+        for date_str in date_keys:
+            try:
+                load_values = customer_daily_loads.get(date_str, [])
+                if not load_values or sum(load_values) <= 0:
+                    logger.debug(
+                        "月结日清重算：客户 %s 在 %s 无负荷，跳过", customer_name, date_str
+                    )
+                    continue
+                self._upsert_customer_monthly_daily_record(
+                    customer_id=customer_id,
+                    customer_name=customer_name,
+                    contract_id=monthly_doc.get("contract_id", ""),
+                    package_name=monthly_doc.get("package_name", ""),
+                    model_code=monthly_doc.get("model_code", ""),
+                    date_str=date_str,
+                    load_values=load_values,
+                    final_prices_5=final_prices_5,
+                    refund_unit_price_kwh=refund_unit_price_kwh,
+                    surplus_unit_price=surplus_unit_price,
+                    actual_monthly_volume=final_energy_mwh,
+                    force=force,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "月结日清重算单日失败 customer=%s date=%s err=%s", customer_name, date_str, exc
+                )
+
+    def _upsert_customer_monthly_daily_record(
+        self,
+        customer_id: str,
+        customer_name: str,
+        contract_id: str,
+        package_name: str,
+        model_code: str,
+        date_str: str,
+        load_values: List[float],
+        final_prices_5: Dict[str, float],
+        refund_unit_price_kwh: float,
+        surplus_unit_price: float,
+        actual_monthly_volume: float = 0.0,
+        force: bool = True,
+    ) -> None:
+        """计算并写入单客户单日月结口径日清记录（settlement_type='monthly'）。
+
+        采购侧（元/MWh）：procure_price_p = day_wholesale_price_p + surplus_unit_price
+        零售侧（元/kWh）：unit_price_p = final_prices_5[period_type_p] - refund_unit_price_kwh（允许负价）
+        调平不含：仅写入当日 MP_ONLY 负荷，不包含调平电量。
+        """
+        collection = self.db["retail_settlement_daily"]
+
+        if not force:
+            existing = collection.find_one(
+                {"customer_id": customer_id, "date": date_str, "settlement_type": "monthly"}
+            )
+            if existing:
+                return
+
+        # 获取当日峰谷时段（与月结计算逻辑一致，按该日实际定义）
+        tou_48 = self.retail_service._get_tou_48(date_str)
+        if not tou_48 or len(tou_48) != 48:
+            raise ValueError(f"{date_str} 峰谷时段定义异常")
+
+        # 获取当日 PLATFORM_DAILY 批发时段价格（元/MWh）
+        try:
+            wholesale_prices_48 = self.retail_service._get_wholesale_period_prices(date_str)
+        except Exception as exc:
+            raise ValueError(f"{date_str} 无法获取批发时段价格：{exc}") from exc
+
+        # 逐时段计算
+        period_details: List[Dict[str, Any]] = []
+        tou_summary: Dict[str, Dict[str, float]] = {
+            k: {"load_mwh": 0.0, "fee": 0.0} for k in DEFAULT_RATIOS
+        }
+        total_fee = 0.0
+        total_allocated_cost = 0.0
+        total_load = 0.0
+
+        for i in range(48):
+            load_mwh = float(load_values[i] if i < len(load_values) else 0.0)
+            period_type_cn = tou_48[i]
+            period_key = TOU_TYPE_MAP.get(period_type_cn, "flat")
+
+            # 零售单价（元/kWh）= 月结5时段价格 - 度电返还价差（允许负价）
+            unit_price_kwh = float(final_prices_5.get(period_key, 0.0)) - refund_unit_price_kwh
+            fee = unit_price_kwh * load_mwh * 1000
+
+            # 采购单价（元/MWh）= 当日现货时段价 + 月度资金余缺度电分摊（允许负值）
+            day_wholesale_price = float(
+                wholesale_prices_48[i] if i < len(wholesale_prices_48) else 0.0
+            )
+            procure_price_mwh = day_wholesale_price + surplus_unit_price
+            allocated_cost = load_mwh * procure_price_mwh
+
+            total_fee += fee
+            total_allocated_cost += allocated_cost
+            total_load += load_mwh
+
+            tou_summary[period_key]["load_mwh"] += load_mwh
+            tou_summary[period_key]["fee"] += fee
+
+            period_details.append(
+                {
+                    "period": i + 1,
+                    "period_type": period_type_cn,
+                    "load_mwh": round(load_mwh, 6),
+                    "unit_price": round(unit_price_kwh, 6),
+                    "fee": round(fee, 2),
+                    "wholesale_price": round(procure_price_mwh, 6),
+                    "allocated_cost": round(allocated_cost, 6),
+                }
+            )
+
+        avg_price = total_fee / (total_load * 1000) if total_load > 0 else 0.0
+        gross_profit = total_fee - total_allocated_cost
+        tou_summary_out = {
+            k: {"load_mwh": round(v["load_mwh"], 6), "fee": round(v["fee"], 2)}
+            for k, v in tou_summary.items()
+        }
+
+        now = datetime.utcnow()
+        doc = {
+            "customer_id": customer_id,
+            "customer_name": customer_name,
+            "date": date_str,
+            "contract_id": contract_id,
+            "package_name": package_name,
+            "model_code": model_code,
+            "settlement_type": "monthly",
+            "actual_monthly_volume": round(actual_monthly_volume, 6),
+            "period_details": period_details,
+            "tou_summary": tou_summary_out,
+            "total_load_mwh": round(total_load, 6),
+            "total_fee": round(total_fee, 2),
+            "avg_price": round(avg_price, 6),
+            "total_allocated_cost": round(total_allocated_cost, 6),
+            "gross_profit": round(gross_profit, 2),
+            "updated_at": now,
+        }
+
+        collection.update_one(
+            {"customer_id": customer_id, "date": date_str, "settlement_type": "monthly"},
+            {"$set": doc, "$setOnInsert": {"created_at": now}},
+            upsert=True,
         )
 
     def _upsert_status(self, doc: Dict) -> None:

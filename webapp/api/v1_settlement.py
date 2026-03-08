@@ -158,9 +158,12 @@ async def get_settlement_overview(
                 "wholesale_avg_price": doc.get("predicted_wholesale_price", 0) or 0,
             }
 
-        # ====== 零售侧（聚合全客户）======
+        # ====== 零售侧（聚合全客户，仅统计预结算口径）======
         retail_pipeline = [
-            {"$match": {"date": {"$gte": start_date, "$lte": end_date}}},
+            {"$match": {
+                "date": {"$gte": start_date, "$lte": end_date},
+                "settlement_type": "daily",  # 明确过滤，避免混入 monthly 版本
+            }},
             {"$group": {
                 "_id": "$date",
                 "total_fee": {"$sum": "$total_fee"},
@@ -266,12 +269,13 @@ async def get_settlement_overview(
 async def get_settlement_detail(
     date: str = Query(..., regex=r"^\d{4}-\d{2}-\d{2}$", description="结算日期 YYYY-MM-DD"),
     version: SettlementVersion = Query(SettlementVersion.PRELIMINARY, description="结算版本"),
+    settlement_type: str = Query("daily", description="结算类型：daily 或 monthly"),
 ):
     """
     获取指定日期的结算详情（包含批发侧和零售侧列表）
     """
     try:
-        data = await service.get_settlement_detail(date, version)
+        data = await service.get_settlement_detail(date, version, settlement_type=settlement_type)
         if not data:
             return ResponseModel(code=404, message="No settlement data found for this date/version", data=None)
         
@@ -285,12 +289,13 @@ async def get_settlement_detail(
 async def get_settlement_customer_detail(
     date: str = Query(..., regex=r"^\d{4}-\d{2}-\d{2}$", description="结算日期 YYYY-MM-DD"),
     customer_id: str = Query(..., description="客户ID"),
+    settlement_type: str = Query("daily", description="结算类型：daily 或 monthly"),
 ):
     """
     获取单个客户在指定日期的零售详情数据
     """
     try:
-        data = await service.get_settlement_customer_detail(date, customer_id)
+        data = await service.get_settlement_customer_detail(date, customer_id, settlement_type=settlement_type)
         if not data:
             return ResponseModel(code=404, message="No retail settlement data found for this customer/date", data=None)
         
