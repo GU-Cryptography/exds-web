@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
     Box, Grid, Paper, Typography, CircularProgress, Alert, IconButton,
     Button, Divider, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-    Tooltip as MuiTooltip,
+    Tooltip as MuiTooltip, Tabs, Tab,
     useTheme, useMediaQuery
 } from '@mui/material';
 import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
@@ -14,7 +14,7 @@ import {
     Refresh as RefreshIcon,
 } from '@mui/icons-material';
 import { useSearchParams } from 'react-router-dom';
-import { format, addMonths, parse } from 'date-fns';
+import { format, addMonths, parse, addDays } from 'date-fns';
 import apiClient from '../api/client';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
 
@@ -95,8 +95,11 @@ const SingleCustomerMonthlyDetailPage: React.FC<{
 
     const [monthStr, setMonthStr] = useState(resolvedMonth);
     const [loading, setLoading] = useState(false);
+    const [loadingDaily, setLoadingDaily] = useState(false);
     const [data, setData] = useState<any>(null);
+    const [dailyData, setDailyData] = useState<any[]>([]);
     const [error, setError] = useState<string | null>(null);
+    const [tabValue, setTabValue] = useState(0);
 
     const chartRef = useRef<HTMLDivElement>(null);
     const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle } = useChartFullscreen({
@@ -130,6 +133,33 @@ const SingleCustomerMonthlyDetailPage: React.FC<{
             fetchData(monthStr, resolvedCustomerName);
         }
     }, [monthStr]);
+
+    useEffect(() => {
+        if (resolvedCustomerName && data?.customer_id) {
+            // 获取日结算数据 (月结口径)
+            setLoadingDaily(true);
+            const d = parse(monthStr, 'yyyy-MM', new Date());
+            const startDate = format(d, 'yyyy-MM-01');
+            const nextMonth = addMonths(d, 1);
+            const endDate = format(addDays(nextMonth, -1), 'yyyy-MM-dd');
+
+            apiClient.get('/api/v1/retail-settlement/daily', {
+                params: {
+                    start_date: startDate,
+                    end_date: endDate,
+                    customer_id: data.customer_id,
+                    settlement_type: 'monthly'
+                }
+            }).then(res => {
+                if (res.data.code === 200) {
+                    setDailyData(res.data.data);
+                }
+            }).catch(console.error)
+                .finally(() => setLoadingDaily(false));
+        } else {
+            setDailyData([]);
+        }
+    }, [monthStr, data?.customer_id]);
 
     const handleShiftMonth = (months: number) => {
         const d = parse(monthStr, 'yyyy-MM', new Date());
@@ -562,172 +592,329 @@ const SingleCustomerMonthlyDetailPage: React.FC<{
                     </Grid>
                 </Grid>
 
-                {/* 第三层：48 时段明细 */}
-                <Paper variant="outlined" sx={{ p: isMobile ? 1 : 2, mt: 2 }}>
-                    {/* 图表 */}
-                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                            <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', borderRadius: 1, mr: 1 }} />
-                            <Typography variant="subtitle1" fontWeight="bold">月度 48 时段结算明细</Typography>
+                {/* 第三层：48 时段明细与图表 Tab 面板 */}
+                <Paper variant="outlined" sx={{ mt: 2, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                    <Box sx={{ borderBottom: 1, borderColor: 'divider', px: 2, py: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 3 }, flexWrap: 'wrap' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', borderRadius: 1, mr: 1 }} />
+                                <Typography variant="subtitle1" fontWeight="bold">48 时段结算明细</Typography>
+                            </Box>
+                            <Tabs value={tabValue} onChange={(_, v) => setTabValue(v)} aria-label="settlement details tabs" sx={{ minHeight: 'unset' }}>
+                                <Tab label="图表分析" id="tab-0" sx={{ minHeight: 'unset', py: 0.5, fontSize: '0.875rem' }} />
+                                <Tab label="数据明细" id="tab-1" sx={{ minHeight: 'unset', py: 0.5, fontSize: '0.875rem' }} />
+                            </Tabs>
                         </Box>
-                        <FullscreenEnterButton />
+                        {tabValue === 0 && <FullscreenEnterButton />}
                     </Box>
 
-                    <Box ref={chartRef} sx={{
-                        height: { xs: 300, sm: 360 }, position: 'relative',
-                        bgcolor: isFullscreen ? 'background.paper' : 'transparent',
-                        p: isFullscreen ? 2 : 0,
-                        ...(isFullscreen && { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1400 }),
-                        '& .recharts-wrapper:focus': { outline: 'none' }
+                    <Box sx={{
+                        height: { xs: 350, sm: 400 },
+                        position: 'relative',
+                        display: tabValue === 0 ? 'block' : 'none'
                     }}>
-                        <FullscreenExitButton /><FullscreenTitle />
-                        <ResponsiveContainer width="100%" height="100%">
-                            <ComposedChart data={chartData}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                <XAxis dataKey="period" tick={{ fontSize: 10 }} interval={isFullscreen ? 1 : 3} />
-                                <YAxis yAxisId="left" label={{ value: '电量 (MWh)', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} tick={{ fontSize: 10 }} />
-                                <YAxis yAxisId="right" orientation="right" label={{ value: '价格 (元/MWh)', angle: 90, position: 'insideRight', style: { fontSize: 10 } }} tick={{ fontSize: 10 }} />
-                                <Tooltip content={({ active, payload, label }) => {
-                                    if (active && payload && payload.length) {
-                                        return (
-                                            <Paper sx={{ p: 1, border: '1px solid', borderColor: 'grey.300', boxShadow: 3 }}>
-                                                <Typography variant="caption" sx={{ fontWeight: 'bold', display: 'block', mb: 0.5 }}>时段: {label}</Typography>
-                                                {payload.map((entry: any, idx: number) => (
-                                                    <Box key={idx} sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
-                                                        <Typography variant="caption" sx={{ color: entry.color }}>{entry.name}:</Typography>
-                                                        <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
-                                                            {entry.dataKey === 'load' ? entry.value.toFixed(3) : entry.value.toFixed(2)}
-                                                        </Typography>
-                                                    </Box>
-                                                ))}
-                                            </Paper>
-                                        );
-                                    }
-                                    return null;
-                                }} />
-                                <Legend />
-                                <Bar yAxisId="left" dataKey="load" name="月累计电量" barSize={20}>
-                                    {chartData.map((entry: any, index: number) => (
-                                        <Cell key={`cell-${index}`} fill={(PERIOD_TYPE_COLORS[entry.periodType] || '#ccc') + '88'} />
-                                    ))}
-                                </Bar>
-                                <Line yAxisId="right" type="monotone" dataKey="unitPrice" name="零售单价" stroke="#2e7d32" strokeWidth={2} dot={false} />
-                                <Line yAxisId="right" type="monotone" dataKey="wholesalePrice" name="批发均价" stroke="#1565c0" strokeWidth={2} strokeDasharray="5 5" dot={false} />
-                            </ComposedChart>
-                        </ResponsiveContainer>
+                        <Box ref={chartRef} sx={{
+                            height: '100%', width: '100%',
+                            position: 'relative',
+                            bgcolor: isFullscreen ? 'background.paper' : 'transparent',
+                            p: isFullscreen ? 2 : 0,
+                            ...(isFullscreen && { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1400 }),
+                            '& .recharts-wrapper:focus': { outline: 'none' }
+                        }}>
+                            <FullscreenExitButton /><FullscreenTitle />
+                            <ResponsiveContainer width="100%" height="100%">
+                                <ComposedChart data={chartData}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                    <XAxis dataKey="period" tick={{ fontSize: 10 }} interval={isFullscreen ? 1 : 3} />
+                                    <YAxis yAxisId="left" label={{ value: '电量 (MWh)', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} tick={{ fontSize: 10 }} />
+                                    <YAxis yAxisId="right" orientation="right" label={{ value: '价格 (元/MWh)', angle: 90, position: 'insideRight', style: { fontSize: 10 } }} tick={{ fontSize: 10 }} />
+                                    <Tooltip content={({ active, payload, label }) => {
+                                        if (active && payload && payload.length) {
+                                            return (
+                                                <Paper sx={{ p: 1, border: '1px solid', borderColor: 'grey.300', boxShadow: 3 }}>
+                                                    <Typography variant="caption" sx={{ fontWeight: 'bold', display: 'block', mb: 0.5 }}>时段: {label}</Typography>
+                                                    {payload.map((entry: any, idx: number) => (
+                                                        <Box key={idx} sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
+                                                            <Typography variant="caption" sx={{ color: entry.color }}>{entry.name}:</Typography>
+                                                            <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
+                                                                {entry.dataKey === 'load' ? entry.value.toFixed(3) : entry.value.toFixed(2)}
+                                                            </Typography>
+                                                        </Box>
+                                                    ))}
+                                                </Paper>
+                                            );
+                                        }
+                                        return null;
+                                    }} />
+                                    <Legend />
+                                    <Bar yAxisId="left" dataKey="load" name="月累计电量" barSize={20}>
+                                        {chartData.map((entry: any, index: number) => (
+                                            <Cell key={`cell-${index}`} fill={(PERIOD_TYPE_COLORS[entry.periodType] || '#ccc') + '88'} />
+                                        ))}
+                                    </Bar>
+                                    <Line yAxisId="right" type="monotone" dataKey="unitPrice" name="零售单价" stroke="#2e7d32" strokeWidth={2} dot={false} />
+                                    <Line yAxisId="right" type="monotone" dataKey="wholesalePrice" name="批发均价" stroke="#1565c0" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+                                </ComposedChart>
+                            </ResponsiveContainer>
+                        </Box>
                     </Box>
 
-                    {/* 表格 / 卡片 */}
-                    <Divider sx={{ my: 2 }} />
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                        <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', borderRadius: 1, mr: 1 }} />
-                        <Typography variant="subtitle1" fontWeight="bold">48 时段结算明细表</Typography>
-                    </Box>
-                    {isMobile ? (
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                            {chartData.map((p: any) => (
-                                <Paper key={p.period} variant="outlined" sx={{ p: 1.5, borderColor: 'divider' }}>
-                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                                        <Typography variant="subtitle2" fontWeight="bold">时段: {p.period}</Typography>
-                                        {p.periodType !== 'period_type_mix' ? (
-                                            <Box sx={{ px: 1, py: 0.2, borderRadius: 1, bgcolor: (PERIOD_TYPE_COLORS[p.periodType] || '#ccc') + '22', color: PERIOD_TYPE_COLORS[p.periodType] || '#999', fontSize: '0.75rem', fontWeight: 'bold' }}>
-                                                {p.periodType}
-                                            </Box>
-                                        ) : (
-                                            <Box sx={{ px: 1, py: 0.2, borderRadius: 1, bgcolor: '#f5f5f5', color: '#666', fontSize: '0.75rem', fontWeight: 'bold' }}>
-                                                混合
-                                            </Box>
-                                        )}
-                                    </Box>
-                                    <Divider sx={{ mb: 1 }} />
-                                    <Grid container spacing={1}>
-                                        <Grid size={{ xs: 6 }}>
-                                            <Typography variant="caption" color="text.secondary">电量 (MWh)</Typography>
-                                            <Typography variant="body2" fontWeight="bold">{p.load.toFixed(3)}</Typography>
+                    <Box sx={{
+                        height: { xs: 350, sm: 400 },
+                        overflowY: 'auto',
+                        display: tabValue === 1 ? 'block' : 'none',
+                        p: isMobile ? 1 : 0
+                    }}>
+                        {isMobile ? (
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                {chartData.map((p: any) => (
+                                    <Paper key={p.period} variant="outlined" sx={{ p: 1.5, borderColor: 'divider' }}>
+                                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                                            <Typography variant="subtitle2" fontWeight="bold">时段: {p.period}</Typography>
+                                            {p.periodType !== 'period_type_mix' ? (
+                                                <Box sx={{ px: 1, py: 0.2, borderRadius: 1, bgcolor: (PERIOD_TYPE_COLORS[p.periodType] || '#ccc') + '22', color: PERIOD_TYPE_COLORS[p.periodType] || '#999', fontSize: '0.75rem', fontWeight: 'bold' }}>
+                                                    {p.periodType}
+                                                </Box>
+                                            ) : (
+                                                <Box sx={{ px: 1, py: 0.2, borderRadius: 1, bgcolor: '#f5f5f5', color: '#666', fontSize: '0.75rem', fontWeight: 'bold' }}>
+                                                    混合
+                                                </Box>
+                                            )}
+                                        </Box>
+                                        <Divider sx={{ mb: 1 }} />
+                                        <Grid container spacing={1}>
+                                            <Grid size={{ xs: 6 }}>
+                                                <Typography variant="caption" color="text.secondary">电量 (MWh)</Typography>
+                                                <Typography variant="body2" fontWeight="bold">{p.load.toFixed(3)}</Typography>
+                                            </Grid>
+                                            <Grid size={{ xs: 6 }}>
+                                                <Typography variant="caption" color="text.secondary">零售单价 (元/MWh)</Typography>
+                                                <Typography variant="body2" sx={{ color: 'success.dark', fontWeight: 'bold' }}>{p.unitPrice.toFixed(2)}</Typography>
+                                            </Grid>
+                                            <Grid size={{ xs: 6 }}>
+                                                <Typography variant="caption" color="text.secondary">零售电费 (元)</Typography>
+                                                <Typography variant="body2" sx={{ color: 'success.dark', fontWeight: 'bold' }}>{p.fee.toFixed(2)}</Typography>
+                                            </Grid>
+                                            <Grid size={{ xs: 6 }}>
+                                                <Typography variant="caption" color="text.secondary">批发均价 (元/MWh)</Typography>
+                                                <Typography variant="body2" sx={{ color: 'primary.dark', fontWeight: 'bold' }}>{p.wholesalePrice.toFixed(2)}</Typography>
+                                            </Grid>
+                                            <Grid size={{ xs: 6 }}>
+                                                <Typography variant="caption" color="text.secondary">采购金额 (元)</Typography>
+                                                <Typography variant="body2" sx={{ color: 'primary.dark', fontWeight: 'bold' }}>{p.allocatedCost.toFixed(2)}</Typography>
+                                            </Grid>
                                         </Grid>
-                                        <Grid size={{ xs: 6 }}>
-                                            <Typography variant="caption" color="text.secondary">零售单价 (元/MWh)</Typography>
-                                            <Typography variant="body2" sx={{ color: 'success.dark', fontWeight: 'bold' }}>{p.unitPrice.toFixed(2)}</Typography>
-                                        </Grid>
-                                        <Grid size={{ xs: 6 }}>
-                                            <Typography variant="caption" color="text.secondary">零售电费 (元)</Typography>
-                                            <Typography variant="body2" sx={{ color: 'success.dark', fontWeight: 'bold' }}>{p.fee.toFixed(2)}</Typography>
-                                        </Grid>
-                                        <Grid size={{ xs: 6 }}>
-                                            <Typography variant="caption" color="text.secondary">批发均价 (元/MWh)</Typography>
-                                            <Typography variant="body2" sx={{ color: 'primary.dark', fontWeight: 'bold' }}>{p.wholesalePrice.toFixed(2)}</Typography>
-                                        </Grid>
-                                        <Grid size={{ xs: 6 }}>
-                                            <Typography variant="caption" color="text.secondary">采购金额 (元)</Typography>
-                                            <Typography variant="body2" sx={{ color: 'primary.dark', fontWeight: 'bold' }}>{p.allocatedCost.toFixed(2)}</Typography>
-                                        </Grid>
-                                    </Grid>
-                                </Paper>
-                            ))}
-                        </Box>
-                    ) : (
-                        <TableContainer sx={{ maxHeight: 600 }}>
-                            <Table size="small" stickyHeader>
-                                <TableHead>
-                                    <TableRow>
-                                        <TableCell sx={{ position: 'sticky', left: 0, zIndex: 3, bgcolor: 'background.paper' }}>时段</TableCell>
-                                        <TableCell>类型</TableCell>
-                                        <TableCell align="right">电量(MWh)</TableCell>
-                                        <TableCell align="right" sx={{ color: 'success.dark' }}>零售单价<br />(元/MWh)</TableCell>
-                                        <TableCell align="right" sx={{ color: 'success.dark' }}>零售电费(元)</TableCell>
-                                        <TableCell align="right" sx={{ color: 'primary.dark' }}>批发均价<br />(元/MWh)</TableCell>
-                                        <TableCell align="right" sx={{ color: 'primary.dark' }}>采购金额(元)</TableCell>
-                                    </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                    {chartData.map((p: any) => (
-                                        <TableRow key={p.period} hover>
-                                            <TableCell sx={{ position: 'sticky', left: 0, zIndex: 1, bgcolor: 'background.paper' }}>{p.period}</TableCell>
-                                            <TableCell>
-                                                {p.periodType !== 'period_type_mix' ? (
-                                                    <Box sx={{ px: 1, borderRadius: 1, bgcolor: (PERIOD_TYPE_COLORS[p.periodType] || '#ccc') + '22', color: PERIOD_TYPE_COLORS[p.periodType] || '#999', fontSize: '0.75rem', textAlign: 'center' }}>
-                                                        {p.periodType}
-                                                    </Box>
-                                                ) : (
-                                                    <MuiTooltip title="当月该时段存在多种峰谷类型" arrow>
-                                                        <Box sx={{ px: 1, borderRadius: 1, bgcolor: '#f5f5f5', color: '#666', fontSize: '0.75rem', textAlign: 'center', cursor: 'help' }}>
-                                                            混合
-                                                        </Box>
-                                                    </MuiTooltip>
-                                                )}
-                                            </TableCell>
-                                            <TableCell align="right">{p.load.toFixed(3)}</TableCell>
-                                            <TableCell align="right">{p.unitPrice.toFixed(3)}</TableCell>
-                                            <TableCell align="right">{p.fee.toFixed(2)}</TableCell>
-                                            <TableCell align="right">{p.wholesalePrice.toFixed(3)}</TableCell>
-                                            <TableCell align="right">{p.allocatedCost.toFixed(2)}</TableCell>
+                                    </Paper>
+                                ))}
+                            </Box>
+                        ) : (
+                            <TableContainer sx={{ height: '100%' }}>
+                                <Table size="small" stickyHeader>
+                                    <TableHead>
+                                        <TableRow>
+                                            <TableCell sx={{ position: 'sticky', left: 0, zIndex: 3, bgcolor: 'background.paper' }}>时段</TableCell>
+                                            <TableCell>类型</TableCell>
+                                            <TableCell align="right">电量(MWh)</TableCell>
+                                            <TableCell align="right" sx={{ color: 'success.dark' }}>零售单价<br />(元/MWh)</TableCell>
+                                            <TableCell align="right" sx={{ color: 'success.dark' }}>零售电费(元)</TableCell>
+                                            <TableCell align="right" sx={{ color: 'primary.dark' }}>批发均价<br />(元/MWh)</TableCell>
+                                            <TableCell align="right" sx={{ color: 'primary.dark' }}>采购金额(元)</TableCell>
                                         </TableRow>
-                                    ))}
-                                    <TableRow sx={{ bgcolor: 'grey.100', '& .MuiTableCell-root': { fontWeight: 'bold' } }}>
-                                        <TableCell align="right">合计</TableCell>
-                                        <TableCell>-</TableCell>
-                                        <TableCell align="right">{chartData.reduce((s: number, p: any) => s + p.load, 0).toFixed(3)}</TableCell>
-                                        <TableCell align="right">
-                                            {(() => {
-                                                const totalLoad = chartData.reduce((s: number, p: any) => s + p.load, 0);
-                                                const totalFee = chartData.reduce((s: number, p: any) => s + p.fee, 0);
-                                                return totalLoad > 0 ? (totalFee / totalLoad).toFixed(3) : '0.000';
-                                            })()}
-                                        </TableCell>
-                                        <TableCell align="right">{formatYuan(chartData.reduce((s: number, p: any) => s + p.fee, 0))}</TableCell>
-                                        <TableCell align="right">
-                                            {(() => {
-                                                const totalLoad = chartData.reduce((s: number, p: any) => s + p.load, 0);
-                                                const totalCost = chartData.reduce((s: number, p: any) => s + p.allocatedCost, 0);
-                                                return totalLoad > 0 ? (totalCost / totalLoad).toFixed(3) : '0.000';
-                                            })()}
-                                        </TableCell>
-                                        <TableCell align="right">{formatYuan(chartData.reduce((s: number, p: any) => s + p.allocatedCost, 0))}</TableCell>
-                                    </TableRow>
-                                </TableBody>
-                            </Table>
-                        </TableContainer>
+                                    </TableHead>
+                                    <TableBody>
+                                        {chartData.map((p: any) => (
+                                            <TableRow key={p.period} hover>
+                                                <TableCell sx={{ position: 'sticky', left: 0, zIndex: 1, bgcolor: 'background.paper' }}>{p.period}</TableCell>
+                                                <TableCell>
+                                                    {p.periodType !== 'period_type_mix' ? (
+                                                        <Box sx={{ px: 1, borderRadius: 1, bgcolor: (PERIOD_TYPE_COLORS[p.periodType] || '#ccc') + '22', color: PERIOD_TYPE_COLORS[p.periodType] || '#999', fontSize: '0.75rem', textAlign: 'center' }}>
+                                                            {p.periodType}
+                                                        </Box>
+                                                    ) : (
+                                                        <MuiTooltip title="当月该时段存在多种峰谷类型" arrow>
+                                                            <Box sx={{ px: 1, borderRadius: 1, bgcolor: '#f5f5f5', color: '#666', fontSize: '0.75rem', textAlign: 'center', cursor: 'help' }}>
+                                                                混合
+                                                            </Box>
+                                                        </MuiTooltip>
+                                                    )}
+                                                </TableCell>
+                                                <TableCell align="right">{p.load.toFixed(3)}</TableCell>
+                                                <TableCell align="right">{p.unitPrice.toFixed(3)}</TableCell>
+                                                <TableCell align="right">{p.fee.toFixed(2)}</TableCell>
+                                                <TableCell align="right">{p.wholesalePrice.toFixed(3)}</TableCell>
+                                                <TableCell align="right">{p.allocatedCost.toFixed(2)}</TableCell>
+                                            </TableRow>
+                                        ))}
+                                        <TableRow sx={{ bgcolor: 'grey.100', '& .MuiTableCell-root': { fontWeight: 'bold' }, position: 'sticky', bottom: 0, zIndex: 2 }}>
+                                            <TableCell align="right">合计</TableCell>
+                                            <TableCell>-</TableCell>
+                                            <TableCell align="right">{chartData.reduce((s: number, p: any) => s + p.load, 0).toFixed(3)}</TableCell>
+                                            <TableCell align="right">
+                                                {(() => {
+                                                    const totalLoad = chartData.reduce((s: number, p: any) => s + p.load, 0);
+                                                    const totalFee = chartData.reduce((s: number, p: any) => s + p.fee, 0);
+                                                    return totalLoad > 0 ? (totalFee / totalLoad).toFixed(3) : '0.000';
+                                                })()}
+                                            </TableCell>
+                                            <TableCell align="right">{formatYuan(chartData.reduce((s: number, p: any) => s + p.fee, 0))}</TableCell>
+                                            <TableCell align="right">
+                                                {(() => {
+                                                    const totalLoad = chartData.reduce((s: number, p: any) => s + p.load, 0);
+                                                    const totalCost = chartData.reduce((s: number, p: any) => s + p.allocatedCost, 0);
+                                                    return totalLoad > 0 ? (totalCost / totalLoad).toFixed(3) : '0.000';
+                                                })()}
+                                            </TableCell>
+                                            <TableCell align="right">{formatYuan(chartData.reduce((s: number, p: any) => s + p.allocatedCost, 0))}</TableCell>
+                                        </TableRow>
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+                        )}
+                    </Box>
+                </Paper>
+
+                {/* 第四层：每日结算数据明细 */}
+                <Paper variant="outlined" sx={{ mt: 2, p: 2, position: 'relative' }}>
+                    {loadingDaily && (
+                        <Box sx={{
+                            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            bgcolor: 'rgba(255, 255, 255, 0.6)', zIndex: 10, borderRadius: 1
+                        }}>
+                            <CircularProgress size={24} />
+                        </Box>
                     )}
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                        <Box sx={{ width: 4, height: 16, bgcolor: 'primary.main', borderRadius: 1, mr: 1 }} />
+                        <Typography variant="subtitle1" fontWeight="bold">月度日度结算明细 (月结口径)</Typography>
+                    </Box>
+
+                    <TableContainer sx={{ maxHeight: 500 }}>
+                        <Table size="small" stickyHeader>
+                            <TableHead>
+                                <TableRow>
+                                    <TableCell sx={{ bgcolor: 'background.paper', zIndex: 3 }}>日期</TableCell>
+                                    <TableCell align="right">日电量<br />(MWh)</TableCell>
+                                    <TableCell align="right">批发均价<br />(元/MWh)</TableCell>
+                                    <TableCell align="right">零售均价<br />(元/MWh)</TableCell>
+                                    <TableCell align="right">批发成本<br />(元)</TableCell>
+                                    <TableCell align="right">零售收入<br />(元)</TableCell>
+                                    <TableCell align="right">毛利<br />(元)</TableCell>
+                                    <TableCell align="right">毛利率</TableCell>
+                                    <TableCell align="right">批零价差<br />(元/MWh)</TableCell>
+                                </TableRow>
+                            </TableHead>
+                            <TableBody>
+                                {dailyData.length > 0 ? (
+                                    <>
+                                        {dailyData.map((d: any) => {
+                                            const profit = d.gross_profit || 0;
+                                            const revenue = d.total_fee || 0;
+                                            const margin = revenue !== 0 ? (profit / revenue) * 100 : 0;
+                                            const spread = d.total_load_mwh !== 0 ? (profit / d.total_load_mwh) : 0;
+                                            const wholesaleAvg = d.total_load_mwh !== 0 ? (d.total_allocated_cost / d.total_load_mwh) : 0;
+                                            const retailAvg = d.total_load_mwh !== 0 ? (revenue / d.total_load_mwh) : 0;
+
+                                            return (
+                                                <TableRow key={d.date} hover>
+                                                    <TableCell>{d.date}</TableCell>
+                                                    <TableCell align="right">{formatMwh(d.total_load_mwh || 0)}</TableCell>
+                                                    <TableCell align="right">{formatPrice(wholesaleAvg)}</TableCell>
+                                                    <TableCell align="right">{formatPrice(retailAvg)}</TableCell>
+                                                    <TableCell align="right">{formatYuan(d.total_allocated_cost || 0)}</TableCell>
+                                                    <TableCell align="right">{formatYuan(revenue)}</TableCell>
+                                                    <TableCell align="right" sx={{ color: profitColor(profit), fontWeight: 'bold' }}>
+                                                        {formatYuan(profit)}
+                                                    </TableCell>
+                                                    <TableCell align="right" sx={{ color: profitColor(margin) }}>
+                                                        {margin.toFixed(2)}%
+                                                    </TableCell>
+                                                    <TableCell align="right" sx={{ color: profitColor(spread) }}>
+                                                        {formatPrice(spread)}
+                                                    </TableCell>
+                                                </TableRow>
+                                            );
+                                        })}
+
+                                        {/* 调平电量行 */}
+                                        {(() => {
+                                            const balEnergy = cd.sttl_balancing_energy_mwh || 0;
+                                            const balFee = cd.sttl_balancing_retail_fee || 0;
+                                            if (balEnergy === 0 && balFee === 0) return null;
+                                            const balPrice = balEnergy !== 0 ? balFee / balEnergy : 0;
+                                            return (
+                                                <TableRow hover sx={{ bgcolor: 'rgba(255, 167, 38, 0.05)' }}>
+                                                    <TableCell sx={{ color: 'warning.dark', fontWeight: 'medium' }}>调平电量</TableCell>
+                                                    <TableCell align="right">{formatMwh(balEnergy)}</TableCell>
+                                                    <TableCell align="right">{formatPrice(balPrice)}</TableCell>
+                                                    <TableCell align="right">{formatPrice(balPrice)}</TableCell>
+                                                    <TableCell align="right">{formatYuan(balFee)}</TableCell>
+                                                    <TableCell align="right">{formatYuan(balFee)}</TableCell>
+                                                    <TableCell align="right">0.00</TableCell>
+                                                    <TableCell align="right">0.00%</TableCell>
+                                                    <TableCell align="right">0.00</TableCell>
+                                                </TableRow>
+                                            );
+                                        })()}
+
+                                        {/* 合计栏 */}
+                                        <TableRow sx={{ bgcolor: 'grey.100', '& .MuiTableCell-root': { fontWeight: 'bold' }, position: 'sticky', bottom: 0, zIndex: 2 }}>
+                                            <TableCell>合计</TableCell>
+                                            <TableCell align="right">
+                                                {(() => {
+                                                    const base = dailyData.reduce((s, x) => s + (x.total_load_mwh || 0), 0);
+                                                    return formatMwh(base + (cd.sttl_balancing_energy_mwh || 0));
+                                                })()}
+                                            </TableCell>
+                                            <TableCell align="right">
+                                                {(() => {
+                                                    const totalLoad = dailyData.reduce((s, x) => s + (x.total_load_mwh || 0), 0) + (cd.sttl_balancing_energy_mwh || 0);
+                                                    const totalCost = dailyData.reduce((s, x) => s + (x.total_allocated_cost || 0), 0) + (cd.sttl_balancing_retail_fee || 0);
+                                                    return totalLoad !== 0 ? formatPrice(totalCost / totalLoad) : '0.000';
+                                                })()}
+                                            </TableCell>
+                                            <TableCell align="right">
+                                                {(() => {
+                                                    const totalLoad = dailyData.reduce((s, x) => s + (x.total_load_mwh || 0), 0) + (cd.sttl_balancing_energy_mwh || 0);
+                                                    const totalRev = dailyData.reduce((s, x) => s + (x.total_fee || 0), 0) + (cd.sttl_balancing_retail_fee || 0);
+                                                    return totalLoad !== 0 ? formatPrice(totalRev / totalLoad) : '0.000';
+                                                })()}
+                                            </TableCell>
+                                            <TableCell align="right">
+                                                {formatYuan(dailyData.reduce((s, x) => s + (x.total_allocated_cost || 0), 0) + (cd.sttl_balancing_retail_fee || 0))}
+                                            </TableCell>
+                                            <TableCell align="right">
+                                                {formatYuan(dailyData.reduce((s, x) => s + (x.total_fee || 0), 0) + (cd.sttl_balancing_retail_fee || 0))}
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ color: profitColor(dailyData.reduce((s, x) => s + (x.gross_profit || 0), 0)) }}>
+                                                {formatYuan(dailyData.reduce((s, x) => s + (x.gross_profit || 0), 0))}
+                                            </TableCell>
+                                            <TableCell align="right">
+                                                {(() => {
+                                                    const totalRev = dailyData.reduce((s, x) => s + (x.total_fee || 0), 0) + (cd.sttl_balancing_retail_fee || 0);
+                                                    const totalProfit = dailyData.reduce((s, x) => s + (x.gross_profit || 0), 0);
+                                                    return totalRev !== 0 ? ((totalProfit / totalRev) * 100).toFixed(2) + '%' : '0.00%';
+                                                })()}
+                                            </TableCell>
+                                            <TableCell align="right">
+                                                {(() => {
+                                                    const totalLoad = dailyData.reduce((s, x) => s + (x.total_load_mwh || 0), 0) + (cd.sttl_balancing_energy_mwh || 0);
+                                                    const totalProfit = dailyData.reduce((s, x) => s + (x.gross_profit || 0), 0);
+                                                    return totalLoad !== 0 ? formatPrice(totalProfit / totalLoad) : '0.000';
+                                                })()}
+                                            </TableCell>
+                                        </TableRow>
+                                    </>
+                                ) : (
+                                    <TableRow>
+                                        <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
+                                            <Typography variant="body2" color="text.secondary">暂无每日明细数据</Typography>
+                                        </TableCell>
+                                    </TableRow>
+                                )}
+                            </TableBody>
+                        </Table>
+                    </TableContainer>
                 </Paper>
             </Box>
         </LocalizationProvider>
