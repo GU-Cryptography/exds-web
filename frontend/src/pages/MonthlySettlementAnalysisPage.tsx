@@ -291,11 +291,122 @@ const StatCard: React.FC<{
     </Paper>
 );
 
+// 移动端专用组件：批发侧列表
+const WholesaleMobileList: React.FC<{ items: any; reconciliation?: ReconciliationData }> = ({ items, reconciliation }) => {
+    const theme = useTheme();
+
+    const sections = [
+        {
+            title: '电能量电费',
+            rows: [
+                { label: '实时现货结算', volKey: 'actual_consumption_volume', priceKey: 'real_time_avg_price', feeKey: 'real_time_deviation_fee', reconGroup: '实时市场偏差', priceCalc: (items: any) => items.actual_consumption_volume ? items.real_time_deviation_fee / items.actual_consumption_volume : null },
+                { label: '中长期合同偏差', volKey: 'contract_volume', priceKey: 'contract_avg_price', feeKey: 'contract_fee', reconGroup: '中长期合约' },
+                { label: '日前现货偏差', volKey: 'day_ahead_declared_volume', priceKey: 'day_ahead_avg_price', feeKey: 'day_ahead_deviation_fee', reconGroup: '日前市场偏差', priceCalc: (items: any) => items.day_ahead_declared_volume ? items.day_ahead_deviation_fee / items.day_ahead_declared_volume : null },
+                { label: '偏差电量调平电费', volKey: 'monthly_balancing_volume', priceKey: 'balancing_price', feeKey: 'balancing_fee' },
+                { label: '电能量合计', volKey: 'actual_monthly_volume', priceKey: 'energy_avg_price', feeKey: 'energy_fee_total', isTotal: true },
+            ]
+        },
+        {
+            title: '资金余缺费用',
+            rows: [
+                { label: '发电侧成本类费用分摊', feeKey: 'gen_side_cost_allocation' },
+                { label: '阻塞费分摊', feeKey: 'congestion_fee_allocation' },
+                { label: '不平衡资金分摊', feeKey: 'imbalance_fund_allocation' },
+                { label: '偏差回收费', feeKey: 'deviation_recovery_fee' },
+                { label: '偏差回收费返还', feeKey: 'deviation_recovery_return_fee' },
+                { label: '资金余缺费用合计', feeKey: 'fund_surplus_deficit_total', isTotal: true },
+            ]
+        },
+        {
+            title: '结算合计',
+            rows: [
+                { label: '结算合计', volKey: 'actual_monthly_volume', priceKey: 'settlement_avg_price', feeKey: 'settlement_fee_total', isGrandTotal: true },
+            ]
+        }
+    ];
+
+    return (
+        <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+            {sections.map((section, sIdx) => (
+                <Box key={sIdx}>
+                    <Box sx={{ bgcolor: alpha(WHOLESALE_COLORS.accent, 0.05), px: 2, py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
+                        <Typography variant="caption" sx={{ fontWeight: 800, color: WHOLESALE_COLORS.accent }}>{section.title}</Typography>
+                    </Box>
+                    {section.rows.map((row: any, rIdx) => {
+                        const vol = items[row.volKey || ''] ?? null;
+                        const price = row.priceCalc ? row.priceCalc(items) : (items[row.priceKey || ''] ?? null);
+                        const fee = items[row.feeKey || ''] ?? null;
+                        const isHighlight = row.isTotal || row.isGrandTotal;
+
+                        return (
+                            <Box key={rIdx} sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider', bgcolor: isHighlight ? alpha(theme.palette.primary.main, 0.02) : 'transparent' }}>
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.5 }}>
+                                    <Typography variant="body2" sx={{ fontWeight: isHighlight ? 800 : 500 }}>{row.label}</Typography>
+                                    <Typography variant="body2" sx={{ fontWeight: 800, color: fee !== null && fee < 0 ? 'error.main' : 'text.primary' }}>
+                                        {formatNumber(fee, 2)}
+                                    </Typography>
+                                </Box>
+                                <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+                                    {row.volKey && (
+                                        <Typography variant="caption" color="text.secondary">电量: {formatNumber(vol, 3)}</Typography>
+                                    )}
+                                    {row.priceKey && (
+                                        <Typography variant="caption" color="text.secondary">均价: {formatNumber(price, 3)}</Typography>
+                                    )}
+                                </Box>
+                            </Box>
+                        );
+                    })}
+                </Box>
+            ))}
+        </Box>
+    );
+};
+
+// 移动端专用组件：客户结算卡片
+const CustomerMobileCard: React.FC<{ customer: MonthlyCustomer; index: number }> = ({ customer, index }) => {
+    const theme = useTheme();
+    return (
+        <Paper variant="outlined" sx={{ p: 2, mb: 1.5, borderRadius: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{ px: 0.8, py: 0.2, bgcolor: alpha(theme.palette.primary.main, 0.1), color: 'primary.main', borderRadius: 1, fontSize: '0.7rem', fontWeight: 800 }}>
+                        {index + 1}
+                    </Box>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{customer.customer_name}</Typography>
+                </Box>
+                <Typography variant="caption" sx={{ fontWeight: 800, color: customer.final_gross_profit && customer.final_gross_profit >= 0 ? 'error.main' : 'success.main' }}>
+                    毛利: {formatNumber(customer.final_gross_profit, 2)}
+                </Typography>
+            </Box>
+
+            <Grid container spacing={2}>
+                <Grid size={{ xs: 6 }}>
+                    <Typography variant="caption" color="text.secondary" display="block">结算电量 (MWh)</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>{formatNumber(customer.total_energy_mwh, 3)}</Typography>
+                </Grid>
+                <Grid size={{ xs: 6 }}>
+                    <Typography variant="caption" color="text.secondary" display="block">结算均价 (元)</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>{formatNumber(customer.settlement_avg_price, 3)}</Typography>
+                </Grid>
+                <Grid size={{ xs: 6 }}>
+                    <Typography variant="caption" color="text.secondary" display="block">结算电费 (元)</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>{formatNumber(customer.total_fee, 2)}</Typography>
+                </Grid>
+                <Grid size={{ xs: 6 }}>
+                    <Typography variant="caption" color="text.secondary" display="block">超额返还 (元)</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: 'success.main' }}>{formatNumber(customer.excess_refund_fee, 2)}</Typography>
+                </Grid>
+            </Grid>
+        </Paper>
+    );
+};
+
 const EmptyState: React.FC<{ month: string; onExecute: () => void }> = ({ month, onExecute }) => (
     <Paper
         variant="outlined"
         sx={{
-            p: 8,
+            p: { xs: 4, sm: 8 },
             textAlign: 'center',
             borderRadius: 4,
             bgcolor: 'background.paper',
@@ -309,12 +420,12 @@ const EmptyState: React.FC<{ month: string; onExecute: () => void }> = ({ month,
         }}
     >
         <Box sx={{ p: 2, borderRadius: '50%', bgcolor: 'action.hover', color: 'text.disabled', mb: 1 }}>
-            <CalculateIcon sx={{ fontSize: 48 }} />
+            <CalculateIcon sx={{ fontSize: { xs: 32, sm: 48 } }} />
         </Box>
-        <Typography variant="h5" fontWeight={800} color="text.primary">
+        <Typography variant="h5" fontWeight={800} color="text.primary" sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }}>
             未找到 {month} 的结算数据
         </Typography>
-        <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 450, mx: 'auto', mb: 2 }}>
+        <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 450, mx: 'auto', mb: 2 }}>
             该月份尚未执行月度零售结算，或相关的批发结算数据未导入。请先导入批发结算文件，然后执行零售结算任务。
         </Typography>
         <Button
@@ -671,84 +782,94 @@ const MonthlySettlementAnalysisPage: React.FC = () => {
                                 {/* 左侧：明细宽表 */}
                                 <Grid size={{ xs: 12, lg: 7 }}>
                                     <Paper variant="outlined" sx={{ p: 0, borderRadius: 2, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%' }}>
-                                        <TableContainer sx={{ overflowX: 'auto' }}>
-                                            <Table stickyHeader size="small" sx={{ minWidth: 600, '& .MuiTableCell-root': { fontSize: { xs: '0.75rem', sm: '0.875rem' }, py: 0.8, px: { xs: 0.5, sm: 1 }, whiteSpace: 'nowrap' } }}>
-                                                <TableHead>
-                                                    <TableRow sx={{ '& th': { bgcolor: alpha(WHOLESALE_COLORS.accent, 0.05), fontWeight: 800, color: 'text.primary', borderBottom: '2px solid', borderColor: 'divider' } }}>
-                                                        <TableCell colSpan={2} align="center">批发侧月度结算明细</TableCell>
-                                                        <TableCell align="right">电量 (MWh)</TableCell>
-                                                        <TableCell align="right">均价 (元/MWh)</TableCell>
-                                                        <TableCell align="right">电费金额 (元)</TableCell>
-                                                        <TableCell align="right">日清结算汇总差异 (元)</TableCell>
-                                                    </TableRow>
-                                                </TableHead>
-                                                <TableBody>
-                                                    {[
-                                                        { cat: '电能量电费', rowSpan: 5, label: '实时现货结算', volKey: 'actual_consumption_volume', priceKey: 'real_time_avg_price', feeKey: 'real_time_deviation_fee', reconGroup: '实时市场偏差', priceCalc: (items: any) => items.actual_consumption_volume ? items.real_time_deviation_fee / items.actual_consumption_volume : null },
-                                                        { cat: '电能量电费', label: '中长期合同偏差', volKey: 'contract_volume', priceKey: 'contract_avg_price', feeKey: 'contract_fee', reconGroup: '中长期合约' },
-                                                        { cat: '电能量电费', label: '日前现货偏差', volKey: 'day_ahead_declared_volume', priceKey: 'day_ahead_avg_price', feeKey: 'day_ahead_deviation_fee', reconGroup: '日前市场偏差', priceCalc: (items: any) => items.day_ahead_declared_volume ? items.day_ahead_deviation_fee / items.day_ahead_declared_volume : null },
-                                                        { cat: '电能量电费', label: '偏差电量调平电费', volKey: 'monthly_balancing_volume', priceKey: 'balancing_price', feeKey: 'balancing_fee' },
-                                                        { cat: '电能量电费', label: '电能量合计', volKey: 'actual_monthly_volume', priceKey: 'energy_avg_price', feeKey: 'energy_fee_total', reconGroup: '电能量合计', isTotal: true },
+                                        <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1.5, borderBottom: '1px solid', borderColor: 'divider', bgcolor: alpha(WHOLESALE_COLORS.accent, 0.02) }}>
+                                            <Box sx={{ bgcolor: WHOLESALE_COLORS.accent, color: 'white', p: 0.5, borderRadius: 1.5, display: 'flex' }}>
+                                                <AnalyticsOutlined sx={{ fontSize: 20 }} />
+                                            </Box>
+                                            <Typography variant="subtitle1" sx={{ fontWeight: 800, color: 'text.primary', lineHeight: 1 }}>批发侧月度结算明细</Typography>
+                                        </Box>
+                                        {isMobile ? (
+                                            <WholesaleMobileList items={wholesaleLedger.settlement_items} reconciliation={reconciliation || undefined} />
+                                        ) : (
+                                            <TableContainer sx={{ overflowX: 'auto' }}>
+                                                <Table stickyHeader size="small" sx={{ minWidth: 600, '& .MuiTableCell-root': { fontSize: { xs: '0.75rem', sm: '0.875rem' }, py: 0.8, px: { xs: 0.5, sm: 1 }, whiteSpace: 'nowrap' } }}>
+                                                    <TableHead>
+                                                        <TableRow sx={{ '& th': { bgcolor: alpha(WHOLESALE_COLORS.accent, 0.05), fontWeight: 800, color: 'text.primary', borderBottom: '2px solid', borderColor: 'divider' } }}>
+                                                            <TableCell colSpan={2} align="center">项目类别 / 结算项目</TableCell>
+                                                            <TableCell align="right">电量 (MWh)</TableCell>
+                                                            <TableCell align="right">均价 (元/MWh)</TableCell>
+                                                            <TableCell align="right">电费金额 (元)</TableCell>
+                                                            <TableCell align="right">日清汇总差异 (元)</TableCell>
+                                                        </TableRow>
+                                                    </TableHead>
+                                                    <TableBody>
+                                                        {[
+                                                            { cat: '电能量电费', rowSpan: 5, label: '实时现货结算', volKey: 'actual_consumption_volume', priceKey: 'real_time_avg_price', feeKey: 'real_time_deviation_fee', reconGroup: '实时市场偏差', priceCalc: (items: any) => items.actual_consumption_volume ? items.real_time_deviation_fee / items.actual_consumption_volume : null },
+                                                            { cat: '电能量电费', label: '中长期合同偏差', volKey: 'contract_volume', priceKey: 'contract_avg_price', feeKey: 'contract_fee', reconGroup: '中长期合约' },
+                                                            { cat: '电能量电费', label: '日前现货偏差', volKey: 'day_ahead_declared_volume', priceKey: 'day_ahead_avg_price', feeKey: 'day_ahead_deviation_fee', reconGroup: '日前市场偏差', priceCalc: (items: any) => items.day_ahead_declared_volume ? items.day_ahead_deviation_fee / items.day_ahead_declared_volume : null },
+                                                            { cat: '电能量电费', label: '偏差电量调平电费', volKey: 'monthly_balancing_volume', priceKey: 'balancing_price', feeKey: 'balancing_fee' },
+                                                            { cat: '电能量电费', label: '电能量合计', volKey: 'actual_monthly_volume', priceKey: 'energy_avg_price', feeKey: 'energy_fee_total', reconGroup: '电能量合计', isTotal: true },
 
-                                                        { cat: '资金余缺费用', rowSpan: 6, label: '发电侧成本类费用分摊', colSpanEmpty: 2, feeKey: 'gen_side_cost_allocation' },
-                                                        { cat: '资金余缺费用', label: '阻塞费分摊', colSpanEmpty: 2, feeKey: 'congestion_fee_allocation' },
-                                                        { cat: '资金余缺费用', label: '不平衡资金分摊', colSpanEmpty: 2, feeKey: 'imbalance_fund_allocation' },
-                                                        { cat: '资金余缺费用', label: '偏差回收费', colSpanEmpty: 2, feeKey: 'deviation_recovery_fee', reconGroup: '资金余缺费用' },
-                                                        { cat: '资金余缺费用', label: '偏差回收费返还', colSpanEmpty: 2, feeKey: 'deviation_recovery_return_fee' },
-                                                        { cat: '资金余缺费用', label: '资金余缺费用合计', colSpanEmpty: 2, feeKey: 'fund_surplus_deficit_total', isTotal: true },
+                                                            { cat: '资金余缺费用', rowSpan: 6, label: '发电侧成本类费用分摊', colSpanEmpty: 2, feeKey: 'gen_side_cost_allocation' },
+                                                            { cat: '资金余缺费用', label: '阻塞费分摊', colSpanEmpty: 2, feeKey: 'congestion_fee_allocation' },
+                                                            { cat: '资金余缺费用', label: '不平衡资金分摊', colSpanEmpty: 2, feeKey: 'imbalance_fund_allocation' },
+                                                            { cat: '资金余缺费用', label: '偏差回收费', colSpanEmpty: 2, feeKey: 'deviation_recovery_fee', reconGroup: '资金余缺费用' },
+                                                            { cat: '资金余缺费用', label: '偏差回收费返还', colSpanEmpty: 2, feeKey: 'deviation_recovery_return_fee' },
+                                                            { cat: '资金余缺费用', label: '资金余缺费用合计', colSpanEmpty: 2, feeKey: 'fund_surplus_deficit_total', isTotal: true },
 
-                                                        { cat: '结算合计', colSpanCat: 2, label: '结算合计', volKey: 'actual_monthly_volume', priceKey: 'settlement_avg_price', feeKey: 'settlement_fee_total', isGrandTotal: true },
-                                                    ].map((row, idx) => {
-                                                        const items = wholesaleLedger.settlement_items;
-                                                        const vol = items[row.volKey || ''] ?? null;
-                                                        const price = row.priceCalc ? row.priceCalc(items) : (items[row.priceKey || ''] ?? null);
-                                                        const fee = items[row.feeKey || ''] ?? null;
+                                                            { cat: '结算合计', colSpanCat: 2, label: '结算合计', volKey: 'actual_monthly_volume', priceKey: 'settlement_avg_price', feeKey: 'settlement_fee_total', isGrandTotal: true },
+                                                        ].map((row, idx) => {
+                                                            const items = wholesaleLedger.settlement_items;
+                                                            const vol = items[row.volKey || ''] ?? null;
+                                                            const price = row.priceCalc ? row.priceCalc(items) : (items[row.priceKey || ''] ?? null);
+                                                            const fee = items[row.feeKey || ''] ?? null;
 
-                                                        const diffRow = row.reconGroup ? reconciliation?.rows.find(r => r.group_label === row.reconGroup && r.metric === (row.cat === '资金余缺费用' ? '偏差回收费' : '电费')) : undefined;
-                                                        const diffValue = diffRow?.diff ?? 0;
-                                                        const hasDiff = !!diffRow && Math.abs(diffValue) > 0.01;
+                                                            const diffRow = row.reconGroup ? reconciliation?.rows.find(r => r.group_label === row.reconGroup && r.metric === (row.cat === '资金余缺费用' ? '偏差回收费' : '电费')) : undefined;
+                                                            const diffValue = diffRow?.diff ?? 0;
+                                                            const hasDiff = !!diffRow && Math.abs(diffValue) > 0.01;
 
-                                                        const bg = row.isGrandTotal ? '#f0f4f8' : (row.isTotal ? '#f8f9fa' : 'transparent');
-                                                        const fw = row.isGrandTotal || row.isTotal ? 800 : 400;
+                                                            const bg = row.isGrandTotal ? '#f0f4f8' : (row.isTotal ? '#f8f9fa' : 'transparent');
+                                                            const fw = row.isGrandTotal || row.isTotal ? 800 : 400;
 
-                                                        return (
-                                                            <TableRow key={idx} sx={{ '& td': { bgcolor: bg, fontWeight: fw } }}>
-                                                                {row.rowSpan ? (
-                                                                    <TableCell rowSpan={row.rowSpan} align="center" sx={{ bgcolor: alpha(WHOLESALE_COLORS.headerBg, 0.5), fontWeight: 700, borderRight: '1px solid', borderColor: 'divider' }}>
-                                                                        {row.cat}
-                                                                    </TableCell>
-                                                                ) : row.colSpanCat ? (
-                                                                    <TableCell colSpan={row.colSpanCat} align="center" sx={{ fontWeight: 800 }}>{row.cat}</TableCell>
-                                                                ) : null}
+                                                            return (
+                                                                <TableRow key={idx} sx={{ '& td': { bgcolor: bg, fontWeight: fw } }}>
+                                                                    {row.rowSpan ? (
+                                                                        <TableCell rowSpan={row.rowSpan} align="center" sx={{ bgcolor: alpha(WHOLESALE_COLORS.headerBg, 0.5), fontWeight: 700, borderRight: '1px solid', borderColor: 'divider' }}>
+                                                                            {row.cat}
+                                                                        </TableCell>
+                                                                    ) : row.colSpanCat ? (
+                                                                        <TableCell colSpan={row.colSpanCat} align="center" sx={{ fontWeight: 800 }}>{row.cat}</TableCell>
+                                                                    ) : null}
 
-                                                                {!row.colSpanCat && <TableCell>{row.label}</TableCell>}
+                                                                    {!row.colSpanCat && <TableCell>{row.label}</TableCell>}
 
-                                                                {row.colSpanEmpty ? (
-                                                                    <TableCell colSpan={row.colSpanEmpty} align="center" sx={{ color: 'text.disabled' }}>-</TableCell>
-                                                                ) : (
-                                                                    <>
-                                                                        <TableCell align="right">{formatNumber(vol, 3)}</TableCell>
-                                                                        <TableCell align="right">{formatNumber(price, 3)}</TableCell>
-                                                                    </>
-                                                                )}
-
-                                                                <TableCell align="right" sx={{ color: fee !== null && fee < 0 ? 'error.main' : 'inherit' }}>{formatNumber(fee, 2)}</TableCell>
-
-                                                                <TableCell align="right">
-                                                                    {hasDiff ? (
-                                                                        <Typography variant="caption" sx={{ color: 'error.main', fontWeight: 800, bgcolor: alpha(theme.palette.error.main, 0.1), px: 0.8, py: 0.2, borderRadius: 1 }}>
-                                                                            {diffValue > 0 ? '+' : ''}{formatNumber(diffValue, 2)}
-                                                                        </Typography>
+                                                                    {row.colSpanEmpty ? (
+                                                                        <TableCell colSpan={row.colSpanEmpty} align="center" sx={{ color: 'text.disabled' }}>-</TableCell>
                                                                     ) : (
-                                                                        <Typography variant="caption" sx={{ color: 'text.disabled' }}>{row.colSpanCat ? '' : (row.isTotal || row.isGrandTotal ? '-' : (diffRow ? 0 : '-'))}</Typography>
+                                                                        <>
+                                                                            <TableCell align="right">{formatNumber(vol, 3)}</TableCell>
+                                                                            <TableCell align="right">{formatNumber(price, 3)}</TableCell>
+                                                                        </>
                                                                     )}
-                                                                </TableCell>
-                                                            </TableRow>
-                                                        );
-                                                    })}
-                                                </TableBody>
-                                            </Table>
-                                        </TableContainer>
+
+                                                                    <TableCell align="right" sx={{ color: fee !== null && fee < 0 ? 'error.main' : 'inherit' }}>{formatNumber(fee, 2)}</TableCell>
+
+                                                                    <TableCell align="right">
+                                                                        {hasDiff ? (
+                                                                            <Typography variant="caption" sx={{ color: 'error.main', fontWeight: 800, bgcolor: alpha(theme.palette.error.main, 0.1), px: 0.8, py: 0.2, borderRadius: 1 }}>
+                                                                                {diffValue > 0 ? '+' : ''}{formatNumber(diffValue, 2)}
+                                                                            </Typography>
+                                                                        ) : (
+                                                                            <Typography variant="caption" sx={{ color: 'text.disabled' }}>{row.colSpanCat ? '' : (row.isTotal || row.isGrandTotal ? '-' : (diffRow ? 0 : '-'))}</Typography>
+                                                                        )}
+                                                                    </TableCell>
+                                                                </TableRow>
+                                                            );
+                                                        })}
+                                                    </TableBody>
+                                                </Table>
+                                            </TableContainer>
+                                        )}
                                     </Paper>
                                 </Grid>
 
@@ -804,7 +925,6 @@ const MonthlySettlementAnalysisPage: React.FC = () => {
                             </Box>
                             <Box>
                                 <Typography variant="subtitle1" sx={{ fontWeight: 800, color: 'text.primary', lineHeight: 1 }}>客户月度结算明细台账</Typography>
-                                <Typography variant="caption" color="text.secondary">统计周期: {monthStr}</Typography>
                             </Box>
                             <Box sx={{ flexGrow: 1 }} />
                             <Typography variant="caption" sx={{ fontWeight: 600, color: 'primary.main', bgcolor: alpha(theme.palette.primary.main, 0.1), px: 1, py: 0.5, borderRadius: 1 }}>
@@ -825,6 +945,12 @@ const MonthlySettlementAnalysisPage: React.FC = () => {
 
                         {loading && customers.length === 0 ? (
                             <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}><CircularProgress /></Box>
+                        ) : isMobile ? (
+                            <Box sx={{ p: 2 }}>
+                                {sortedCustomers.map((customer, idx) => (
+                                    <CustomerMobileCard key={customer._id} customer={customer} index={idx} />
+                                ))}
+                            </Box>
                         ) : (
                             <TableContainer sx={{ overflowX: 'auto' }}>
                                 <Table size="small" sx={{ minWidth: 1000, '& .MuiTableCell-root': { fontSize: { xs: '0.75rem', sm: '0.875rem' }, px: { xs: 0.5, sm: 1 }, whiteSpace: 'nowrap' } }}>
