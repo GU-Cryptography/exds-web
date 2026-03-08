@@ -41,6 +41,7 @@ import SingleCustomerSettlementDetailPage from './pages/SingleCustomerSettlement
 import MonthlyManualDataPage from './pages/MonthlyManualDataPage';
 import MonthlySettlementAnalysisPage from './pages/MonthlySettlementAnalysisPage';
 import SingleCustomerMonthlyDetailPage from './pages/SingleCustomerMonthlyDetailPage';
+import { MonthlySettlementOverviewPage } from './pages/MonthlySettlementOverviewPage';
 import { TabProvider } from './contexts/TabContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { DesktopTabLayout } from './layouts/DesktopTabLayout';
@@ -118,6 +119,7 @@ const ResponsiveLayout: React.FC = () => {
                     <Route path="risk-management/exposure" element={<PlaceholderPage />} />
 
                     {/* 结算管理 */}
+                    <Route path="settlement/monthly-overview" element={<MonthlySettlementOverviewPage />} />
                     <Route path="settlement/pre-settlement-overview" element={<PreSettlementOverviewPage />} />
                     <Route path="settlement/pre-settlement-detail" element={<PreSettlementDetailPage />} />
                     <Route path="settlement/customer-settlement-detail" element={<SingleCustomerSettlementDetailPage />} />

@@ -12,9 +12,10 @@ import InsightsIcon from '@mui/icons-material/Insights';
 import MenuIcon from '@mui/icons-material/Menu';
 import CloseIcon from '@mui/icons-material/Close';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar } from '../components/Sidebar';
 import { useTabContext } from '../contexts/TabContext';
+import { routeConfigs } from '../config/routes';
 
 const drawerWidth = 260;
 
@@ -24,7 +25,9 @@ const drawerWidth = 260;
  */
 export const MobileSimpleLayout: React.FC = () => {
     const [mobileOpen, setMobileOpen] = useState(false);
-    const { openTabs, activeTabKey, setActiveTab, removeTab } = useTabContext();
+    const { openTabs, activeTabKey, removeTab } = useTabContext();
+    const location = useLocation();
+    const navigate = useNavigate();
 
     const handleDrawerToggle = () => {
         setMobileOpen(!mobileOpen);
@@ -33,12 +36,31 @@ export const MobileSimpleLayout: React.FC = () => {
     // 获取当前激活的Tab
     const activeTab = openTabs.find(tab => tab.key === activeTabKey);
 
-    // 关闭当前Tab并返回
-    const handleCloseTab = () => {
+    // 根据路径获取页面标题（当没有激活Tab时）
+    const getPageTitle = () => {
+        if (activeTab) return activeTab.title;
+        const currentPath = location.pathname;
+        if (currentPath === '/' || currentPath === '') return '电力交易辅助分析系统';
+
+        // 尝试匹配路由配置中的标题
+        const config = routeConfigs.find(c => {
+            const pattern = c.path.replace(/:\w+/g, '.*');
+            return new RegExp(`^${pattern}$`).test(currentPath);
+        });
+        return config ? config.title : '交易系统';
+    };
+
+    // 关闭当前Tab或返回上一页
+    const handleBack = () => {
         if (activeTabKey) {
             removeTab(activeTabKey);
+        } else {
+            navigate(-1);
         }
     };
+
+    const isRoot = location.pathname === '/' || location.pathname === '';
+    const showBackButton = activeTab || !isRoot;
 
     return (
         <Box sx={{ display: 'flex', bgcolor: 'background.default', minHeight: '100vh' }}>
@@ -53,18 +75,18 @@ export const MobileSimpleLayout: React.FC = () => {
                 }}
             >
                 <Toolbar>
-                    {activeTab ? (
-                        // 有Tab时显示返回按钮
+                    {showBackButton ? (
+                        // 有Tab或不在首页时显示返回按钮
                         <IconButton
                             color="inherit"
                             edge="start"
-                            onClick={handleCloseTab}
+                            onClick={handleBack}
                             sx={{ mr: 1 }}
                         >
                             <ArrowBackIcon />
                         </IconButton>
                     ) : (
-                        // 无Tab时显示菜单按钮
+                        // 首页且无Tab时显示菜单按钮
                         <IconButton
                             color="inherit"
                             aria-label="open drawer"
@@ -76,11 +98,11 @@ export const MobileSimpleLayout: React.FC = () => {
                         </IconButton>
                     )}
                     <InsightsIcon sx={{ mr: 1.5 }} />
-                    <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-                        {activeTab ? activeTab.title : '电力交易辅助分析系统'}
+                    <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1, fontSize: '1.1rem', fontWeight: 700 }}>
+                        {getPageTitle()}
                     </Typography>
                     {activeTab && (
-                        <IconButton color="inherit" onClick={handleCloseTab}>
+                        <IconButton color="inherit" onClick={handleBack}>
                             <CloseIcon />
                         </IconButton>
                     )}
@@ -107,7 +129,7 @@ export const MobileSimpleLayout: React.FC = () => {
                         },
                     }}
                 >
-                    <Sidebar isMobile={true} />
+                    <Sidebar isMobile={true} onItemClick={handleDrawerToggle} />
                 </Drawer>
                 {/* 桌面端抽屉 */}
                 <Drawer
@@ -122,7 +144,7 @@ export const MobileSimpleLayout: React.FC = () => {
                     }}
                     open
                 >
-                    <Sidebar isMobile={true} />
+                    <Sidebar isMobile={true} onItemClick={handleDrawerToggle} />
                 </Drawer>
             </Box>
 

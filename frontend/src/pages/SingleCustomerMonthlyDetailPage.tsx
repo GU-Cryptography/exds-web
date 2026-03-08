@@ -250,20 +250,53 @@ const SingleCustomerMonthlyDetailPage: React.FC<{
     return (
         <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
             <Box sx={{ p: { xs: 1, sm: 2 } }}>
+                {/* 移动端面包屑标题 */}
+                {isMobile && (
+                    <Typography
+                        variant="subtitle1"
+                        sx={{
+                            mb: 2,
+                            fontWeight: 'bold',
+                            color: 'text.primary'
+                        }}
+                    >
+                        结算管理 / 单客户月度结算详情
+                    </Typography>
+                )}
                 {/* 顶部控制栏 */}
                 <Paper variant="outlined" sx={{ p: 1.5, mb: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <IconButton size="small" onClick={() => handleShiftMonth(-1)} disabled={loading}><ArrowLeftIcon /></IconButton>
-                        <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>{monthStr}</Typography>
-                        <IconButton size="small" onClick={() => handleShiftMonth(1)} disabled={loading}><ArrowRightIcon /></IconButton>
-                        <Typography variant="body2" color="text.secondary" sx={{ ml: 1 }}>
-                            {resolvedCustomerName}
-                        </Typography>
-                        {cd.package_name && (
-                            <Box sx={{ px: 0.8, py: 0.1, bgcolor: 'primary.50', color: 'primary.dark', border: '1px solid', borderColor: 'primary.100', borderRadius: 0.5, fontSize: '10px', whiteSpace: 'nowrap' }}>
-                                {cd.package_name}
-                            </Box>
-                        )}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <IconButton size="small" onClick={() => handleShiftMonth(-1)} disabled={loading}><ArrowLeftIcon /></IconButton>
+                            <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>{monthStr}</Typography>
+                            <IconButton size="small" onClick={() => handleShiftMonth(1)} disabled={loading}><ArrowRightIcon /></IconButton>
+                        </Box>
+                        <Box sx={{
+                            display: 'flex',
+                            flexDirection: { xs: 'column', sm: 'row' },
+                            alignItems: { xs: 'flex-start', sm: 'center' },
+                            gap: { xs: 0.5, sm: 1 },
+                            ml: { xs: 0.5, sm: 1 }
+                        }}>
+                            <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
+                                {resolvedCustomerName}
+                            </Typography>
+                            {cd.package_name && (
+                                <Box sx={{
+                                    px: 0.8,
+                                    py: 0.1,
+                                    bgcolor: 'primary.50',
+                                    color: 'primary.dark',
+                                    border: '1px solid',
+                                    borderColor: 'primary.100',
+                                    borderRadius: 0.5,
+                                    fontSize: '10px',
+                                    whiteSpace: 'nowrap'
+                                }}>
+                                    {cd.package_name}
+                                </Box>
+                            )}
+                        </Box>
                     </Box>
                     <Button size="small" startIcon={<RefreshIcon />} onClick={() => fetchData(monthStr, resolvedCustomerName)} disabled={loading}>刷新</Button>
                 </Paper>

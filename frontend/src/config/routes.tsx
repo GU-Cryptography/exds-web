@@ -25,6 +25,7 @@ import MonthlyManualDataPage from '../pages/MonthlyManualDataPage';
 import SingleCustomerSettlementDetailPage from '../pages/SingleCustomerSettlementDetailPage';
 import SingleCustomerMonthlyDetailPage from '../pages/SingleCustomerMonthlyDetailPage';
 import MonthlySettlementAnalysisPage from '../pages/MonthlySettlementAnalysisPage';
+import { MonthlySettlementOverviewPage } from '../pages/MonthlySettlementOverviewPage';
 import { LoadForecastWorkbench } from '../pages/LoadForecastWorkbench';
 
 export interface RouteConfig {
@@ -74,6 +75,7 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/risk-management/exposure', title: '风险敞口分析', component: PlaceholderPage },
 
     // 结算管理
+    { path: '/settlement/monthly-overview', title: '月度结算总览', component: MonthlySettlementOverviewPage },
     { path: '/settlement/pre-settlement-overview', title: '日清结算总览', component: PreSettlementOverviewPage },
     { path: '/settlement/pre-settlement-detail', title: '日清结算详情', component: PreSettlementDetailPage },
     { path: '/settlement/customer-settlement-detail', title: '单客户结算详情', component: SingleCustomerSettlementDetailPage as any },

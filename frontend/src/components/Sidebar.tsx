@@ -126,6 +126,7 @@ const menuItems: MenuItem[] = [
         subItems: [
             { text: '日清结算总览', path: '/settlement/pre-settlement-overview', icon: <RequestQuoteOutlined /> },
             { text: '日清结算详情', path: '/settlement/pre-settlement-detail', icon: <FactCheckOutlined /> },
+            { text: '月度结算总览', path: '/settlement/monthly-overview', icon: <AssessmentOutlined /> },
             { text: '月度结算详情', path: '/settlement/monthly-analysis', icon: <PaymentIcon /> },
             { text: '经营利润分析', path: '/settlement/profit-analysis', icon: <ShowChartOutlined /> },
         ],
@@ -153,7 +154,10 @@ const menuItems: MenuItem[] = [
     },
 ];
 
-export const Sidebar: React.FC<{ isMobile?: boolean }> = ({ isMobile = false }) => {
+export const Sidebar: React.FC<{
+    isMobile?: boolean;
+    onItemClick?: () => void;
+}> = ({ isMobile = false, onItemClick }) => {
     const location = useLocation();
     const navigate = useNavigate();
     const [open, setOpen] = useState<{ [key: string]: boolean }>({});
@@ -166,6 +170,7 @@ export const Sidebar: React.FC<{ isMobile?: boolean }> = ({ isMobile = false }) 
     const handleMenuItemClick = (path: string) => {
         if (isMobile) {
             navigate(path);
+            if (onItemClick) onItemClick();
             return;
         }
 
@@ -181,6 +186,7 @@ export const Sidebar: React.FC<{ isMobile?: boolean }> = ({ isMobile = false }) 
                 });
             }
         }
+        if (onItemClick) onItemClick();
     };
 
     const activePath = isMobile

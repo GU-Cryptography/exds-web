@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTabContext } from '../contexts/TabContext';
 import SingleCustomerMonthlyDetailPage from './SingleCustomerMonthlyDetailPage';
 
@@ -40,6 +40,7 @@ import ArrowRightIcon from '@mui/icons-material/ArrowRight';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import CalculateIcon from '@mui/icons-material/Calculate';
 import PeopleIcon from '@mui/icons-material/People';
+import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
 import BoltIcon from '@mui/icons-material/Bolt';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import PriceCheckIcon from '@mui/icons-material/PriceCheck';
@@ -369,7 +370,11 @@ const WholesaleMobileList: React.FC<{ items: any; reconciliation?: Reconciliatio
 };
 
 // 移动端专用组件：客户结算卡片
-const CustomerMobileCard: React.FC<{ customer: MonthlyCustomer; index: number }> = ({ customer, index }) => {
+const CustomerMobileCard: React.FC<{
+    customer: MonthlyCustomer;
+    index: number;
+    onClick?: (name: string) => void;
+}> = ({ customer, index, onClick }) => {
     const theme = useTheme();
     return (
         <Paper variant="outlined" sx={{ p: 2, mb: 1.5, borderRadius: 2 }}>
@@ -380,9 +385,16 @@ const CustomerMobileCard: React.FC<{ customer: MonthlyCustomer; index: number }>
                     </Box>
                     <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{customer.customer_name}</Typography>
                 </Box>
-                <Typography variant="caption" sx={{ fontWeight: 800, color: customer.final_gross_profit && customer.final_gross_profit >= 0 ? 'error.main' : 'success.main' }}>
-                    毛利: {formatNumber(customer.final_gross_profit, 2)}
-                </Typography>
+                <Button
+                    size="small"
+                    variant="text"
+                    color="primary"
+                    endIcon={<ArrowForwardIosIcon sx={{ fontSize: '10px !important' }} />}
+                    onClick={() => onClick?.(customer.customer_name)}
+                    sx={{ p: 0, minWidth: 'auto', fontWeight: 800, fontSize: '0.75rem' }}
+                >
+                    查看明细
+                </Button>
             </Box>
 
             <Grid container spacing={2}>
@@ -401,6 +413,11 @@ const CustomerMobileCard: React.FC<{ customer: MonthlyCustomer; index: number }>
                 <Grid size={{ xs: 6 }}>
                     <Typography variant="caption" color="text.secondary" display="block">超额返还 (元)</Typography>
                     <Typography variant="body2" sx={{ fontWeight: 700, color: 'success.main' }}>{formatNumber(customer.excess_refund_fee, 2)}</Typography>
+                </Grid>
+                <Grid size={{ xs: 12 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 800, color: customer.final_gross_profit && customer.final_gross_profit >= 0 ? 'error.main' : 'success.main', display: 'flex', justifyContent: 'flex-end' }}>
+                        月度毛利: {formatNumber(customer.final_gross_profit, 2)}
+                    </Typography>
                 </Grid>
             </Grid>
         </Paper>
@@ -445,18 +462,24 @@ const EmptyState: React.FC<{ month: string; onExecute: () => void }> = ({ month,
     </Paper>
 );
 
-const MonthlySettlementAnalysisPage: React.FC = () => {
+const MonthlySettlementAnalysisPage: React.FC<{ initialMonth?: string }> = ({ initialMonth }) => {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const isMd = useMediaQuery(theme.breakpoints.down('md'));
     const fileInputRef = useRef<HTMLInputElement>(null);
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const tabContext = useTabContext();
 
 
 
     // 状态管理
-    const [selectedDate, setSelectedDate] = useState<Date | null>(addMonths(new Date(), -1));
+    const [selectedDate, setSelectedDate] = useState<Date | null>(() => {
+        if (initialMonth) return new Date(`${initialMonth}-01`);
+        const monthParam = new URLSearchParams(window.location.search).get('month');
+        if (monthParam) return new Date(`${monthParam}-01`);
+        return addMonths(new Date(), -1);
+    });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -564,6 +587,30 @@ const MonthlySettlementAnalysisPage: React.FC = () => {
             setLoading(false);
         }
     }, []);
+
+    useEffect(() => {
+        const monthParam = searchParams.get('month');
+        if (monthParam) {
+            try {
+                const date = new Date(`${monthParam}-01`);
+                if (!isNaN(date.getTime())) {
+                    setSelectedDate(prev => {
+                        // 避免重复设置导致不必要的刷新
+                        if (prev && format(prev, 'yyyy-MM') === monthParam) return prev;
+                        return date;
+                    });
+                }
+            } catch (e) {
+                console.error('Invalid month parameter:', monthParam);
+            }
+        }
+    }, [searchParams]);
+
+    useEffect(() => {
+        if (initialMonth) {
+            setSelectedDate(new Date(`${initialMonth}-01`));
+        }
+    }, [initialMonth]);
 
     useEffect(() => {
         if (monthStr) {
@@ -739,7 +786,20 @@ const MonthlySettlementAnalysisPage: React.FC = () => {
 
     return (
         <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
-            <Box sx={{ pb: 4 }}>
+            <Box sx={{ p: { xs: 1, sm: 2 } }}>
+                {/* 移动端面包屑标题 */}
+                {isMobile && (
+                    <Typography
+                        variant="subtitle1"
+                        sx={{
+                            mb: 2,
+                            fontWeight: 'bold',
+                            color: 'text.primary'
+                        }}
+                    >
+                        结算管理 / 月度结算分析
+                    </Typography>
+                )}
                 {/* 顶部操作栏 */}
                 <Paper variant="outlined" sx={{ p: 1.5, mb: 2, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', bgcolor: alpha(theme.palette.primary.main, 0.05), borderRadius: 2, px: 1 }}>
@@ -974,7 +1034,12 @@ const MonthlySettlementAnalysisPage: React.FC = () => {
                         ) : isMobile ? (
                             <Box sx={{ p: 2 }}>
                                 {sortedCustomers.map((customer, idx) => (
-                                    <CustomerMobileCard key={customer._id} customer={customer} index={idx} />
+                                    <CustomerMobileCard
+                                        key={customer._id}
+                                        customer={customer}
+                                        index={idx}
+                                        onClick={handleViewDetail}
+                                    />
                                 ))}
                             </Box>
                         ) : (
