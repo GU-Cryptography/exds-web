@@ -4,13 +4,18 @@
 import calendar
 import logging
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from webapp.models.load_enums import FusionStrategy
 from webapp.services.load_query_service import LoadQueryService
-from webapp.services.retail_settlement_service import DEFAULT_RATIOS, TOU_TYPE_MAP, RetailSettlementService
+from webapp.services.retail_settlement_service import (
+    DEFAULT_RATIOS,
+    TOU_TYPE_MAP,
+    TOU_TYPE_MAP_REV,
+    RetailSettlementService,
+)
 from webapp.services.tou_service import get_month_tou_meta
 from webapp.tools.mongo import DATABASE
 
@@ -329,15 +334,40 @@ class RetailMonthlySettlementService:
         cap_price = self._get_monthly_cap_price(
             month=end_date_str[:7], date_str=end_date_str, allow_fallback=allow_fallback
         )
-        tou_48 = self.retail_service._get_tou_48(end_date_str)
-        if not tou_48 or len(tou_48) != 48:
+        fallback_tou_48 = self.retail_service._get_tou_48(end_date_str)
+        if not fallback_tou_48 or len(fallback_tou_48) != 48:
             raise ValueError(f"{end_date_str} 峰谷时段定义异常")
 
-        monthly_load_values = [0.0] * 48
+        date_keys = self._build_date_keys(start_date, end_date)
+        daily_load_by_date: Dict[str, List[float]] = {d: [0.0] * 48 for d in date_keys}
         for customer_id in customer_ids:
-            load_values = self._aggregate_customer_monthly_load_values(customer_id, start_date, end_date)
+            customer_daily_loads = self._aggregate_customer_monthly_daily_load_values(
+                customer_id=customer_id,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            for d in date_keys:
+                values = customer_daily_loads.get(d, [])
+                for i in range(48):
+                    daily_load_by_date[d][i] += float(values[i] if i < len(values) else 0.0)
+
+        monthly_load_values = [0.0] * 48
+        for values in daily_load_by_date.values():
+            for i, value in enumerate(values):
+                monthly_load_values[i] += float(value or 0.0)
+
+        period_breakdown_maps: List[Dict[str, float]] = [dict() for _ in range(48)]
+        for d in date_keys:
+            tou_48 = self.retail_service._get_tou_48(d)
+            if not tou_48 or len(tou_48) != 48:
+                raise ValueError(f"{d} 峰谷时段定义异常")
+            day_values = daily_load_by_date.get(d, [])
             for i in range(48):
-                monthly_load_values[i] += float(load_values[i] if i < len(load_values) else 0.0)
+                load_mwh = float(day_values[i] if i < len(day_values) else 0.0)
+                if load_mwh <= 0:
+                    continue
+                period_key = TOU_TYPE_MAP.get(tou_48[i], "flat")
+                period_breakdown_maps[i][period_key] = period_breakdown_maps[i].get(period_key, 0.0) + load_mwh
 
         total_energy = sum(monthly_load_values)
         if total_energy <= 0:
@@ -397,7 +427,13 @@ class RetailMonthlySettlementService:
 
         final_prices = dict(price_result.get("final_prices", {}) or {})
         final_prices_48 = list(price_result.get("final_prices_48") or []) or None
-        nominal_total_fee = self._calculate_total_fee(monthly_load_values, tou_48, final_prices, final_prices_48)
+        nominal_total_fee = self._calculate_total_fee(
+            load_values=monthly_load_values,
+            period_breakdown_maps=period_breakdown_maps,
+            fallback_tou_48=fallback_tou_48,
+            final_prices=final_prices,
+            final_prices_48=final_prices_48,
+        )
         nominal_avg_price = nominal_total_fee / (total_energy * 1000) if total_energy > 0 else 0.0
         ratio = cap_price / nominal_avg_price if nominal_avg_price > cap_price + 1e-12 and nominal_avg_price > 0 else 1.0
         is_capped = ratio < 1.0
@@ -418,31 +454,78 @@ class RetailMonthlySettlementService:
         total_fee = 0.0
         total_allocated_cost = 0.0
         for i in range(48):
-            period_type = tou_48[i]
-            period_key = TOU_TYPE_MAP.get(period_type, "flat")
-            unit_price = (
-                final_prices_48[i]
-                if final_prices_48 and len(final_prices_48) == 48
-                else float(final_prices.get(period_key, 0.0))
-            )
             load_mwh = float(monthly_load_values[i] if i < len(monthly_load_values) else 0.0)
-            fee = unit_price * load_mwh * 1000
+            breakdown_map = period_breakdown_maps[i] if i < len(period_breakdown_maps) else {}
+            breakdown_items: List[Dict[str, float]] = []
+            breakdown_fee_map: Dict[str, float] = {}
+            period_keys = sorted(k for k, v in breakdown_map.items() if float(v or 0.0) > 0)
+            is_mix = len(period_keys) > 1
+
+            if len(period_keys) == 1:
+                single_key = period_keys[0]
+                unit_price = (
+                    float(final_prices_48[i])
+                    if final_prices_48 and len(final_prices_48) == 48
+                    else float(final_prices.get(single_key, 0.0))
+                )
+                fee = unit_price * load_mwh * 1000
+                breakdown_fee_map[single_key] = fee
+                period_type = TOU_TYPE_MAP_REV.get(single_key, fallback_tou_48[i])
+            elif is_mix:
+                fee = 0.0
+                for period_key in period_keys:
+                    seg_load = float(breakdown_map.get(period_key, 0.0))
+                    seg_unit_price = float(final_prices.get(period_key, 0.0))
+                    seg_fee = seg_unit_price * seg_load * 1000
+                    fee += seg_fee
+                    breakdown_fee_map[period_key] = seg_fee
+                    breakdown_items.append(
+                        {
+                            "period_type": TOU_TYPE_MAP_REV.get(period_key, "平段"),
+                            "load_mwh": round(seg_load, 6),
+                            "fee": round(seg_fee, 2),
+                        }
+                    )
+                unit_price = (fee / (load_mwh * 1000)) if load_mwh > 0 else 0.0
+                period_type = "period_type_mix"
+            else:
+                fallback_key = TOU_TYPE_MAP.get(fallback_tou_48[i], "flat")
+                unit_price = (
+                    float(final_prices_48[i])
+                    if final_prices_48 and len(final_prices_48) == 48
+                    else float(final_prices.get(fallback_key, 0.0))
+                )
+                fee = 0.0
+                period_type = fallback_tou_48[i]
+
             allocated_cost = float(period_allocated_costs.get(i + 1, 0.0))
             wholesale_price = (allocated_cost / load_mwh) if load_mwh > 0 else 0.0
             total_fee += fee
             total_allocated_cost += allocated_cost
-            tou_summary[period_key]["load_mwh"] += load_mwh
-            tou_summary[period_key]["fee"] += fee
+
+            if breakdown_fee_map:
+                for period_key, period_fee in breakdown_fee_map.items():
+                    tou_summary[period_key]["load_mwh"] += float(breakdown_map.get(period_key, 0.0))
+                    tou_summary[period_key]["fee"] += period_fee
+            elif load_mwh > 0:
+                fallback_key = TOU_TYPE_MAP.get(period_type, "flat")
+                tou_summary[fallback_key]["load_mwh"] += load_mwh
+                tou_summary[fallback_key]["fee"] += fee
+
+            detail = {
+                "period": i + 1,
+                "period_type": period_type,
+                "load_mwh": round(load_mwh, 6),
+                "unit_price": round(unit_price, 6),
+                "fee": round(fee, 2),
+                "allocated_cost": round(allocated_cost, 6),
+                "wholesale_price": round(wholesale_price, 6),
+            }
+            if is_mix:
+                detail["period_type_breakdown"] = breakdown_items
+
             period_details.append(
-                {
-                    "period": i + 1,
-                    "period_type": period_type,
-                    "load_mwh": round(load_mwh, 6),
-                    "unit_price": round(unit_price, 6),
-                    "fee": round(fee, 2),
-                    "allocated_cost": round(allocated_cost, 6),
-                    "wholesale_price": round(wholesale_price, 6),
-                }
+                detail
             )
 
         avg_price = total_fee / (total_energy * 1000) if total_energy > 0 else 0.0
@@ -480,7 +563,20 @@ class RetailMonthlySettlementService:
             "is_capped": is_capped,
         }
 
-    def _aggregate_customer_monthly_load_values(self, customer_id: str, start_date: date, end_date: date) -> List[float]:
+    def _build_date_keys(self, start_date: date, end_date: date) -> List[str]:
+        keys: List[str] = []
+        current = start_date
+        while current <= end_date:
+            keys.append(current.strftime("%Y-%m-%d"))
+            current += timedelta(days=1)
+        return keys
+
+    def _aggregate_customer_monthly_daily_load_values(
+        self,
+        customer_id: str,
+        start_date: date,
+        end_date: date,
+    ) -> Dict[str, List[float]]:
         start_str = start_date.strftime("%Y-%m-%d")
         end_str = end_date.strftime("%Y-%m-%d")
         curves = LoadQueryService.get_curve_series(
@@ -490,11 +586,21 @@ class RetailMonthlySettlementService:
             strategy=FusionStrategy.MP_ONLY,
         )
 
-        monthly = [0.0] * 48
+        daily: Dict[str, List[float]] = {}
         for curve in curves:
             values = self._normalize_to_48(curve.values if curve else [])
-            for i, v in enumerate(values):
-                monthly[i] += float(v or 0.0)
+            curve_date = str(getattr(curve, "date", "") or "").strip()
+            if not curve_date:
+                continue
+            daily[curve_date] = [round(float(v or 0.0), 6) for v in values]
+        return daily
+
+    def _aggregate_customer_monthly_load_values(self, customer_id: str, start_date: date, end_date: date) -> List[float]:
+        daily = self._aggregate_customer_monthly_daily_load_values(customer_id, start_date, end_date)
+        monthly = [0.0] * 48
+        for values in daily.values():
+            for i, value in enumerate(values):
+                monthly[i] += float(value or 0.0)
         return [round(v, 6) for v in monthly]
 
     def _normalize_to_48(self, values: List[float]) -> List[float]:
@@ -541,19 +647,32 @@ class RetailMonthlySettlementService:
     def _calculate_total_fee(
         self,
         load_values: List[float],
-        tou_48: List[str],
+        period_breakdown_maps: List[Dict[str, float]],
+        fallback_tou_48: List[str],
         final_prices: Dict[str, float],
         final_prices_48: Optional[List[float]],
     ) -> float:
         total_fee = 0.0
         for i in range(48):
             load_mwh = load_values[i] if i < len(load_values) else 0.0
-            if final_prices_48 and len(final_prices_48) == 48:
-                unit_price = final_prices_48[i]
+            breakdown_map = period_breakdown_maps[i] if i < len(period_breakdown_maps) else {}
+            period_keys = [k for k, v in breakdown_map.items() if float(v or 0.0) > 0]
+            if len(period_keys) == 1:
+                period_key = period_keys[0]
+                if final_prices_48 and len(final_prices_48) == 48:
+                    unit_price = final_prices_48[i]
+                else:
+                    unit_price = final_prices.get(period_key, 0.0)
+                total_fee += unit_price * load_mwh * 1000
+            elif len(period_keys) > 1:
+                for period_key in period_keys:
+                    seg_load = float(breakdown_map.get(period_key, 0.0))
+                    unit_price = float(final_prices.get(period_key, 0.0))
+                    total_fee += unit_price * seg_load * 1000
             else:
-                period_key = TOU_TYPE_MAP.get(tou_48[i], "flat")
+                period_key = TOU_TYPE_MAP.get(fallback_tou_48[i], "flat")
                 unit_price = final_prices.get(period_key, 0.0)
-            total_fee += unit_price * load_mwh * 1000
+                total_fee += unit_price * load_mwh * 1000
         return total_fee
 
     def _check_monthly_cap_base_ready(self, month: str, allow_fallback: bool) -> Tuple[bool, str]:

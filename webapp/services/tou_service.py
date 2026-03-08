@@ -1,10 +1,19 @@
 
 from datetime import datetime, timedelta
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from webapp.tools.mongo import DATABASE
 
 # 默认集合
 DEFAULT_TOU_COLLECTION = DATABASE['tou_rules']
+
+# 96 -> 48 合并时段优先级（高优先级覆盖低优先级）
+TOU_PRIORITY: Dict[str, int] = {
+    "\u5c16\u5cf0": 5,  # 尖峰
+    "\u9ad8\u5cf0": 4,  # 高峰
+    "\u5e73\u6bb5": 3,  # 平段
+    "\u6df1\u8c37": 2,  # 深谷
+    "\u4f4e\u8c37": 1,  # 低谷
+}
 
 def get_tou_rule_by_date(date: datetime, collection=None) -> Dict[str, str]:
     """
@@ -86,6 +95,37 @@ def get_tou_rule_by_date(date: datetime, collection=None) -> Dict[str, str]:
         time_to_period_map[time_obj.strftime("%H:%M")] = timeline[i]
         
     return time_to_period_map
+
+
+def get_tou_timeline_by_date(
+    date: datetime,
+    points: int = 96,
+    collection=None,
+    priority_map: Optional[Dict[str, int]] = None,
+) -> List[str]:
+    """按指定分辨率返回目标日期分时类型时间轴（当前支持 96/48 点）。"""
+    if points not in (48, 96):
+        raise ValueError(f"不支持的 points={points}，当前仅支持 48 或 96")
+
+    time_map = get_tou_rule_by_date(date, collection=collection)
+    if not time_map:
+        return []
+
+    sorted_keys = sorted(time_map.keys())
+    timeline_96 = [time_map[k] for k in sorted_keys]
+    if len(timeline_96) != 96:
+        return []
+
+    if points == 96:
+        return timeline_96
+
+    priorities = priority_map or TOU_PRIORITY
+    timeline_48: List[str] = []
+    for i in range(48):
+        first = timeline_96[2 * i]
+        second = timeline_96[2 * i + 1]
+        timeline_48.append(first if priorities.get(first, 0) >= priorities.get(second, 0) else second)
+    return timeline_48
 
 def get_tou_versions(collection=None) -> List[str]:
     """

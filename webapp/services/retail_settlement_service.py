@@ -11,7 +11,7 @@ from typing import Dict, Optional, List, Any, Union
 from webapp.services.retail_price_service import retail_price_service
 from webapp.services.contract_service import ContractService
 from webapp.services.load_query_service import LoadQueryService
-from webapp.services.tou_service import get_tou_rule_by_date, get_month_tou_meta
+from webapp.services.tou_service import get_month_tou_meta, get_tou_timeline_by_date
 from webapp.tools.mongo import DATABASE
 from webapp.models.load_enums import FusionStrategy
 from webapp.models.retail_settlement import (
@@ -819,33 +819,12 @@ class RetailSettlementService:
     def _get_tou_48(self, date_str: str) -> Optional[List[str]]:
         """
         获取48时段的峰谷类型列表
-
-        tou_service 返回 96点 (15分钟) Dict[str, str]
-        需要合并为 48点 (30分钟) List[str]
         """
         date_dt = datetime.strptime(date_str, "%Y-%m-%d")
-        tou_96_map = get_tou_rule_by_date(date_dt)
-
-        if not tou_96_map:
+        tou_48 = get_tou_timeline_by_date(date_dt, points=48)
+        if len(tou_48) != 48:
+            logger.warning(f"TOU 数据点数异常: {len(tou_48)}，预期 48")
             return None
-
-        # 排序取出 96 个值
-        sorted_keys = sorted(tou_96_map.keys())
-        tou_96_list = [tou_96_map[k] for k in sorted_keys]
-
-        if len(tou_96_list) != 96:
-            logger.warning(f"TOU 数据点数异常: {len(tou_96_list)}，预期 96")
-            return None
-
-        # 96→48: 每两个连续点合并，取优先级高的类型
-        tou_48 = []
-        for i in range(48):
-            a = tou_96_list[2 * i]
-            b = tou_96_list[2 * i + 1]
-            pa = TOU_PRIORITY.get(a, 0)
-            pb = TOU_PRIORITY.get(b, 0)
-            tou_48.append(a if pa >= pb else b)
-
         return tou_48
 
     # ========== 合同查询 ==========

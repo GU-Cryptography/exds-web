@@ -1068,6 +1068,11 @@ critical_alerts = db.customer_anomaly_alerts.find({
 | `period_details` | `Array` | 月度48时段明细 |
 | `period_details.period` | `Integer` | 时段号（1-48） |
 | `period_details.period_type` | `String` | 时段类型（尖峰/高峰/平段/低谷/深谷） |
+| `period_details.period_type` | `String` | 当月该时段存在混合类型时取值 `period_type_mix` |
+| `period_details.period_type_breakdown` | `Array\|Null` | 仅 `period_type_mix` 时存在，按类型拆分的明细数组 |
+| `period_details.period_type_breakdown.period_type` | `String` | 分解类型（尖峰/高峰/平段/低谷/深谷） |
+| `period_details.period_type_breakdown.load_mwh` | `Number` | 该类型在该时段的月累计电量（MWh） |
+| `period_details.period_type_breakdown.fee` | `Number` | 该类型在该时段对应电费（元） |
 | `period_details.load_mwh` | `Number` | 时段电量（MWh） |
 | `period_details.unit_price` | `Number` | 时段单价（元/kWh） |
 | `period_details.fee` | `Number` | 时段电费（元） |
