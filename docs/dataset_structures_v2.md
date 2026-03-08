@@ -842,6 +842,8 @@ critical_alerts = db.customer_anomaly_alerts.find({
 | `source_file_name` | `String` | 导入文件名 |
 | `imported_at` | `DateTime` | 导入时间 |
 | `imported_by` | `String` | 导入人 |
+| `period_details` | `Array` | 48 点分时明细（基于日清聚合） |
+| `reconciliation_results` | `Array` | 日清汇总差异对比结果（导入时计算） |
 | `updated_at` | `DateTime` | 最后更新时间 |
 
 ### 17.2. `settlement_items` 子结构
@@ -879,6 +881,28 @@ critical_alerts = db.customer_anomaly_alerts.find({
 | `confirmation_status` | `String` | 确认状态（来自文件，仅展示） |
 | `confirmation_time` | `String` | 确认时间（来自文件，仅展示） |
 | `dispute_content` | `String` | 争议内容（来自文件，仅展示） |
+
+### 17.3. `period_details` 子结构
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `period` | `Integer` | 时段号 (1-48) |
+| `contract` | `Object` | 中长期分量 `{volume, price, fee}` |
+| `day_ahead` | `Object` | 日前分量 `{volume, price, fee}` |
+| `real_time` | `Object` | 实时分量 `{volume, price, fee}` |
+| `total_energy_fee` | `Number` | 时段电能量费用合计 |
+
+### 17.4. `reconciliation_results` 子结构
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `group_key` | `String` | 分组标识 (contract/day_ahead/...) |
+| `group_label` | `String` | 分组显示名称 |
+| `metric` | `String` | 指标名 (电量/均价/电费/偏差回收费) |
+| `monthly_value` | `Number` | 月结文件中的数值 |
+| `daily_agg_value` | `Number` | 日清汇总的数值 |
+| `diff` | `Number` | 差异额 |
+| `diff_rate_pct` | `Number` | 差异率 (%) |
 
 ### 17.3. 索引信息
 

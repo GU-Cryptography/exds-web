@@ -262,6 +262,8 @@ class WholesaleMonthlySettlementService:
             "user_type": data["user_type"],
             "agency_purchase_type": data["agency_purchase_type"],
             "settlement_items": data["settlement_items"],
+            "period_details": self._get_monthly_period_details(month),
+            "reconciliation_results": self._calculate_reconciliation_results(month, data["settlement_items"]),
             "source_file_name": file_name,
             "imported_at": now,
             "imported_by": imported_by,
@@ -399,68 +401,144 @@ class WholesaleMonthlySettlementService:
             "settlement_avg_price": settlement_avg_price,
         }
 
-    def get_reconciliation(self, month: str) -> Dict[str, Any]:
-        doc = self.get_month_detail(month)
-        if not doc:
-            raise ValueError(f"月份 {month} 数据不存在")
+    def _get_monthly_period_details(self, month: str) -> List[Dict[str, Any]]:
+        """从 settlement_daily 聚合当月 48 时段明细数据"""
+        year = int(month[:4])
+        mon = int(month[5:7])
+        last_day = monthrange(year, mon)[1]
+        start_date = f"{month}-01"
+        end_date = f"{month}-{last_day:02d}"
 
-        items = doc.get("settlement_items", {})
+        pipeline = [
+            {
+                "$match": {
+                    "operating_date": {"$gte": start_date, "$lte": end_date},
+                    "version": SettlementVersion.PLATFORM_DAILY.value,
+                    "period_details": {"$exists": True, "$not": {"$size": 0}},
+                }
+            },
+            {"$unwind": "$period_details"},
+            {
+                "$group": {
+                    "_id": "$period_details.period",
+                    "contract_volume": {"$sum": "$period_details.contract.volume"},
+                    "contract_fee": {"$sum": "$period_details.contract.fee"},
+                    "day_ahead_volume": {"$sum": "$period_details.day_ahead.volume"},
+                    "day_ahead_fee": {"$sum": "$period_details.day_ahead.fee"},
+                    "real_time_volume": {"$sum": "$period_details.real_time.volume"},
+                    "real_time_fee": {"$sum": "$period_details.real_time.fee"},
+                    "total_energy_fee": {"$sum": "$period_details.total_energy_fee"},
+                }
+            },
+            {"$sort": {"_id": 1}},
+        ]
+        
+        results = list(self.db.settlement_daily.aggregate(pipeline))
+        if not results:
+            return []
+
+        period_details = []
+        for res in results:
+            p_val = res["_id"]
+            cv = float(res.get("contract_volume", 0.0) or 0.0)
+            cf = float(res.get("contract_fee", 0.0) or 0.0)
+            dv = float(res.get("day_ahead_volume", 0.0) or 0.0)
+            df = float(res.get("day_ahead_fee", 0.0) or 0.0)
+            rv = float(res.get("real_time_volume", 0.0) or 0.0)
+            rf = float(res.get("real_time_fee", 0.0) or 0.0)
+            tef = float(res.get("total_energy_fee", 0.0) or 0.0)
+
+            period_details.append({
+                "period": p_val,
+                "contract": {
+                    "volume": round(cv, 6),
+                    "price": round(cf / cv, 6) if cv != 0 else 0.0,
+                    "fee": round(cf, 2)
+                },
+                "day_ahead": {
+                    "volume": round(dv, 6),
+                    "price": round(df / dv, 6) if dv != 0 else 0.0,
+                    "fee": round(df, 2)
+                },
+                "real_time": {
+                    "volume": round(rv, 6),
+                    "price": round(rf / rv, 6) if rv != 0 else 0.0,
+                    "fee": round(rf, 2)
+                },
+                "total_energy_fee": round(tef, 2)
+            })
+        
+        return period_details
+
+    def _calculate_reconciliation_results(self, month: str, monthly_items: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """计算月结导入数据与日清汇总之间的差异详情"""
         daily_agg = self._get_daily_aggregate(month)
-
-        monthly_day_ahead_volume = float(self._to_optional_float(items.get("day_ahead_declared_volume")) or 0.0)
-        monthly_day_ahead_fee = float(self._to_optional_float(items.get("day_ahead_deviation_fee")) or 0.0)
+        
+        monthly_day_ahead_volume = float(self._to_optional_float(monthly_items.get("day_ahead_declared_volume")) or 0.0)
+        monthly_day_ahead_fee = float(self._to_optional_float(monthly_items.get("day_ahead_deviation_fee")) or 0.0)
         monthly_day_ahead_avg = monthly_day_ahead_fee / monthly_day_ahead_volume if monthly_day_ahead_volume > 0 else 0.0
 
-        monthly_real_time_volume = float(self._to_optional_float(items.get("actual_consumption_volume")) or 0.0)
-        monthly_real_time_fee = float(self._to_optional_float(items.get("real_time_deviation_fee")) or 0.0)
+        monthly_real_time_volume = float(self._to_optional_float(monthly_items.get("actual_consumption_volume")) or 0.0)
+        monthly_real_time_fee = float(self._to_optional_float(monthly_items.get("real_time_deviation_fee")) or 0.0)
         monthly_real_time_avg = monthly_real_time_fee / monthly_real_time_volume if monthly_real_time_volume > 0 else 0.0
 
-        balancing_fee = float(self._to_optional_float(items.get("balancing_fee")) or 0.0)
-        # 按需求：日清侧对比电能量电费时，需要叠加月度调平电费
+        balancing_fee = float(self._to_optional_float(monthly_items.get("balancing_fee")) or 0.0)
         daily_energy_fee_with_balancing = float(daily_agg.get("total_energy_fee", 0.0) or 0.0) + balancing_fee
         daily_settlement_fee_with_balancing = daily_energy_fee_with_balancing + float(
             daily_agg.get("deviation_recovery_fee", 0.0) or 0.0
         )
 
         compare_items = [
-            ("contract", "中长期合约", "电量", float(self._to_optional_float(items.get("contract_volume")) or 0.0), float(daily_agg.get("contract_volume", 0.0) or 0.0)),
-            ("contract", "中长期合约", "均价", float(self._to_optional_float(items.get("contract_avg_price")) or 0.0), float(daily_agg.get("contract_avg_price", 0.0) or 0.0)),
-            ("contract", "中长期合约", "电费", float(self._to_optional_float(items.get("contract_fee")) or 0.0), float(daily_agg.get("contract_fee", 0.0) or 0.0)),
+            ("contract", "中长期合约", "电量", float(self._to_optional_float(monthly_items.get("contract_volume")) or 0.0), float(daily_agg.get("contract_volume", 0.0) or 0.0)),
+            ("contract", "中长期合约", "均价", float(self._to_optional_float(monthly_items.get("contract_avg_price")) or 0.0), float(daily_agg.get("contract_avg_price", 0.0) or 0.0)),
+            ("contract", "中长期合约", "电费", float(self._to_optional_float(monthly_items.get("contract_fee")) or 0.0), float(daily_agg.get("contract_fee", 0.0) or 0.0)),
             ("day_ahead", "日前市场偏差", "电量", monthly_day_ahead_volume, float(daily_agg.get("day_ahead_volume", 0.0) or 0.0)),
             ("day_ahead", "日前市场偏差", "均价", monthly_day_ahead_avg, float(daily_agg.get("day_ahead_avg_price", 0.0) or 0.0)),
             ("day_ahead", "日前市场偏差", "电费", monthly_day_ahead_fee, float(daily_agg.get("day_ahead_fee", 0.0) or 0.0)),
             ("real_time", "实时市场偏差", "电量", monthly_real_time_volume, float(daily_agg.get("real_time_volume", 0.0) or 0.0)),
             ("real_time", "实时市场偏差", "均价", monthly_real_time_avg, float(daily_agg.get("real_time_avg_price", 0.0) or 0.0)),
             ("real_time", "实时市场偏差", "电费", monthly_real_time_fee, float(daily_agg.get("real_time_fee", 0.0) or 0.0)),
-            ("energy", "电能量合计", "电费", float(self._to_optional_float(items.get("energy_fee_total")) or 0.0), daily_energy_fee_with_balancing),
-            ("energy", "电能量合计", "均价", float(self._to_optional_float(items.get("energy_avg_price")) or 0.0), float(daily_agg.get("energy_avg_price", 0.0) or 0.0)),
-            ("settlement", "结算合计", "电费", float(self._to_optional_float(items.get("settlement_fee_total")) or 0.0), daily_settlement_fee_with_balancing),
-            ("settlement", "结算合计", "均价", float(self._to_optional_float(items.get("settlement_avg_price")) or 0.0), float(daily_agg.get("settlement_avg_price", 0.0) or 0.0)),
-            ("fund", "资金余缺费用", "偏差回收费", float(self._to_optional_float(items.get("deviation_recovery_fee")) or 0.0), float(daily_agg.get("deviation_recovery_fee", 0.0) or 0.0)),
+            ("energy", "电能量合计", "电费", float(self._to_optional_float(monthly_items.get("energy_fee_total")) or 0.0), daily_energy_fee_with_balancing),
+            ("energy", "电能量合计", "均价", float(self._to_optional_float(monthly_items.get("energy_avg_price")) or 0.0), float(daily_agg.get("energy_avg_price", 0.0) or 0.0)),
+            ("settlement", "结算合计", "电费", float(self._to_optional_float(monthly_items.get("settlement_fee_total")) or 0.0), daily_settlement_fee_with_balancing),
+            ("settlement", "结算合计", "均价", float(self._to_optional_float(monthly_items.get("settlement_avg_price")) or 0.0), float(daily_agg.get("settlement_avg_price", 0.0) or 0.0)),
+            ("fund", "资金余缺费用", "偏差回收费", float(self._to_optional_float(monthly_items.get("deviation_recovery_fee")) or 0.0), float(daily_agg.get("deviation_recovery_fee", 0.0) or 0.0)),
         ]
 
         rows = []
         for group_key, group_label, metric_label, monthly_num, daily_num in compare_items:
             diff = monthly_num - daily_num
             diff_rate = (diff / daily_num * 100) if abs(daily_num) > 1e-9 else None
+            rows.append({
+                "group_key": group_key,
+                "group_label": group_label,
+                "metric": metric_label,
+                "monthly_value": round(monthly_num, 6),
+                "daily_agg_value": round(daily_num, 6),
+                "diff": round(diff, 6),
+                "diff_rate_pct": round(diff_rate, 4) if diff_rate is not None else None,
+            })
+        return rows
 
-            rows.append(
-                {
-                    "group_key": group_key,
-                    "group_label": group_label,
-                    "metric": metric_label,
-                    "monthly_value": round(monthly_num, 6),
-                    "daily_agg_value": round(daily_num, 6),
-                    "diff": round(diff, 6),
-                    "diff_rate_pct": round(diff_rate, 4) if diff_rate is not None else None,
-                }
-            )
+    def get_reconciliation(self, month: str) -> Dict[str, Any]:
+        doc = self.get_month_detail(month)
+        if not doc:
+            raise ValueError(f"月份 {month} 数据不存在")
+
+        # 优先使用持久化结果，支持存量数据在线计算
+        reconcile_results = doc.get("reconciliation_results")
+        if not reconcile_results:
+            reconcile_results = self._calculate_reconciliation_results(month, doc.get("settlement_items", {}))
+
+        items = doc.get("settlement_items", {})
+        # 为了兼容性，仍计算 balancing_fee 用于前端特殊展示（如果需要）
+        balancing_fee = float(self._to_optional_float(items.get("balancing_fee")) or 0.0)
 
         return {
             "month": month,
             "subject_name": doc.get("subject_name", ""),
             "version": SettlementVersion.PLATFORM_DAILY.value,
-            "rows": rows,
+            "rows": reconcile_results,
             "daily_side_adjustments": {
                 "balancing_fee_added_to_energy_fee": round(balancing_fee, 6),
             },
