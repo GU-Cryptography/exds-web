@@ -23,6 +23,7 @@ import PreSettlementOverviewPage from '../pages/PreSettlementOverviewPage';
 import PreSettlementDetailPage from '../pages/PreSettlementDetailPage';
 import MonthlyManualDataPage from '../pages/MonthlyManualDataPage';
 import SingleCustomerSettlementDetailPage from '../pages/SingleCustomerSettlementDetailPage';
+import SingleCustomerMonthlyDetailPage from '../pages/SingleCustomerMonthlyDetailPage';
 import MonthlySettlementAnalysisPage from '../pages/MonthlySettlementAnalysisPage';
 import { LoadForecastWorkbench } from '../pages/LoadForecastWorkbench';
 
@@ -77,6 +78,7 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/settlement/pre-settlement-detail', title: '日清结算详情', component: PreSettlementDetailPage },
     { path: '/settlement/customer-settlement-detail', title: '单客户结算详情', component: SingleCustomerSettlementDetailPage as any },
     { path: '/settlement/monthly-analysis', title: '月度结算详情', component: MonthlySettlementAnalysisPage },
+    { path: '/settlement/monthly-customer-detail', title: '单客户月度结算详情', component: SingleCustomerMonthlyDetailPage },
     { path: '/settlement/profit-analysis', title: '经营利润分析', component: PlaceholderPage },
 
     // 基础数据

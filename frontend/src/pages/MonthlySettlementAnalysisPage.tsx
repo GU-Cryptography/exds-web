@@ -1,4 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useTabContext } from '../contexts/TabContext';
+import SingleCustomerMonthlyDetailPage from './SingleCustomerMonthlyDetailPage';
+
+
 import {
     Alert,
     Box,
@@ -445,6 +450,10 @@ const MonthlySettlementAnalysisPage: React.FC = () => {
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const isMd = useMediaQuery(theme.breakpoints.down('md'));
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const navigate = useNavigate();
+    const tabContext = useTabContext();
+
+
 
     // 状态管理
     const [selectedDate, setSelectedDate] = useState<Date | null>(addMonths(new Date(), -1));
@@ -481,6 +490,23 @@ const MonthlySettlementAnalysisPage: React.FC = () => {
     const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
     const monthStr = selectedDate ? format(selectedDate, 'yyyy-MM') : '';
+
+    const handleViewDetail = useCallback((customerName: string) => {
+        const path = `/settlement/monthly-customer-detail?month=${monthStr}&customer_name=${encodeURIComponent(customerName)}`;
+        if (isMobile) {
+            navigate(path);
+        } else if (tabContext) {
+            tabContext.addTab({
+                key: path,
+                title: `月度结算 - ${customerName}`,
+                path: path,
+                component: <SingleCustomerMonthlyDetailPage
+                    initialMonth={monthStr}
+                    initialCustomerName={customerName}
+                />,
+            });
+        }
+    }, [monthStr, isMobile, navigate, tabContext]);
 
     const waterfallChartRef = useRef<HTMLDivElement>(null);
     const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle } = useChartFullscreen({
@@ -1072,7 +1098,21 @@ const MonthlySettlementAnalysisPage: React.FC = () => {
                                         {sortedCustomers.map((item, index) => (
                                             <TableRow key={item._id} hover sx={{ '& td': { fontSize: '0.75rem', whiteSpace: 'nowrap', py: 1 } }}>
                                                 <TableCell sx={{ color: 'text.secondary' }}>{index + 1}</TableCell>
-                                                <TableCell sx={{ fontWeight: 800, borderRight: '1px solid', borderColor: 'divider' }}>{item.customer_name}</TableCell>
+                                                <TableCell
+                                                    onClick={() => handleViewDetail(item.customer_name)}
+                                                    sx={{
+                                                        fontWeight: 800,
+                                                        borderRight: '1px solid',
+                                                        borderColor: 'divider',
+                                                        cursor: 'pointer',
+                                                        color: 'primary.main',
+                                                        '&:hover': {
+                                                            textDecoration: 'underline'
+                                                        }
+                                                    }}
+                                                >
+                                                    {item.customer_name}
+                                                </TableCell>
 
                                                 <TableCell align="right">{formatNumber(item.total_energy_mwh, 3)}</TableCell>
                                                 <TableCell align="right">{formatNumber(item.total_energy_mwh ? item.retail_total_fee / item.total_energy_mwh : 0, 3)}</TableCell>
@@ -1092,7 +1132,7 @@ const MonthlySettlementAnalysisPage: React.FC = () => {
                                                 <TableCell align="right" sx={{ fontWeight: 800, color: (item.final_price_spread_per_mwh || 0) > 0 ? 'success.main' : 'error.main', borderRight: '1px solid', borderColor: 'divider' }}>{formatNumber(item.final_price_spread_per_mwh, 3)}</TableCell>
 
                                                 <TableCell align="center">
-                                                    <Button size="small" variant="text" color="primary" sx={{ py: 0, minWidth: 60, fontSize: '0.75rem' }}>查看明细</Button>
+                                                    <Button size="small" variant="text" color="primary" sx={{ py: 0, minWidth: 60, fontSize: '0.75rem' }} onClick={() => handleViewDetail(item.customer_name)}>查看明细</Button>
                                                 </TableCell>
                                             </TableRow>
                                         ))}

@@ -115,3 +115,18 @@ def get_monthly_customers(month: str = Query(..., regex=r"^\d{4}-\d{2}$")):
     for rec in records:
         rec["_id"] = str(rec["_id"])
     return ResponseModel(data=records)
+
+
+@router.get("/monthly-customer-detail", response_model=ResponseModel)
+def get_monthly_customer_detail(
+    month: str = Query(..., regex=r"^\d{4}-\d{2}$"),
+    customer_name: str = Query(..., description="客户名称"),
+):
+    """获取单个客户的月度结算详情"""
+    doc = monthly_service.db[monthly_service.CUSTOMER_COLLECTION].find_one(
+        {"month": month, "customer_name": customer_name}
+    )
+    if not doc:
+        return ResponseModel(code=404, message="未找到该客户月度结算数据", data=None)
+    doc["_id"] = str(doc["_id"])
+    return ResponseModel(data=doc)
