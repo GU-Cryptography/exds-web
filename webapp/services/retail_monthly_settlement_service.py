@@ -1204,6 +1204,13 @@ class RetailMonthlySettlementService:
         if not final_prices_5:
             raise ValueError(f"客户 {customer_name} 月结记录 price_model.final_prices 为空")
 
+        # 提取高精度的 48 时段单价（从月结明细中反推，以保证加总后消除舍入与模型差异）
+        period_details_in_doc = monthly_doc.get("period_details", [])
+        final_prices_48: List[float] = []
+        if period_details_in_doc and len(period_details_in_doc) == 48:
+            sorted_details = sorted(period_details_in_doc, key=lambda x: x.get("period", 0))
+            final_prices_48 = [float(p.get("unit_price", 0.0)) for p in sorted_details]
+
         # 2. 计算度电返还价差（元/kWh）
         #    分母使用 final_energy_mwh（与方案 4.2 公式一致），允许结果为 0
         final_excess_refund_fee = float(monthly_doc.get("final_excess_refund_fee", 0.0))
@@ -1239,6 +1246,7 @@ class RetailMonthlySettlementService:
                     date_str=date_str,
                     load_values=load_values,
                     final_prices_5=final_prices_5,
+                    final_prices_48=final_prices_48,
                     refund_unit_price_kwh=refund_unit_price_kwh,
                     surplus_unit_price=surplus_unit_price,
                     actual_monthly_volume=final_energy_mwh,
@@ -1259,6 +1267,7 @@ class RetailMonthlySettlementService:
         date_str: str,
         load_values: List[float],
         final_prices_5: Dict[str, float],
+        final_prices_48: List[float],
         refund_unit_price_kwh: float,
         surplus_unit_price: float,
         actual_monthly_volume: float = 0.0,
@@ -1304,8 +1313,13 @@ class RetailMonthlySettlementService:
             period_type_cn = tou_48[i]
             period_key = TOU_TYPE_MAP.get(period_type_cn, "flat")
 
-            # 零售单价（元/kWh）= 月结5时段价格 - 度电返还价差（允许负价）
-            unit_price_kwh = float(final_prices_5.get(period_key, 0.0)) - refund_unit_price_kwh
+            # 零售单价（元/kWh）= 月结48时段高精度价格 或 5时段价格 - 度电返还价差（允许负价）
+            if final_prices_48 and len(final_prices_48) == 48:
+                base_price = float(final_prices_48[i])
+            else:
+                base_price = float(final_prices_5.get(period_key, 0.0))
+                
+            unit_price_kwh = base_price - refund_unit_price_kwh
             fee = unit_price_kwh * load_mwh * 1000
 
             # 采购单价（元/MWh）= 当日现货时段价 + 月度资金余缺度电分摊（允许负值）
