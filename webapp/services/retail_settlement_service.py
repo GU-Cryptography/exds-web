@@ -242,7 +242,7 @@ class RetailSettlementService:
         try:
              wholesale_prices_48 = self._get_wholesale_period_prices(date_str)
         except Exception as e:
-             logger.error(f"客户 {customer_id} 在 {date_str} 结算失败: {e}")
+             logger.warning(f"客户 {customer_id} 在 {date_str} 缺少批发侧结算数据或存在异常，跳过计算: {e}")
              return None
 
         total_allocated_cost = 0.0

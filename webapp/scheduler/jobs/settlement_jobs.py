@@ -97,12 +97,7 @@ async def event_driven_settlement_job():
 
                 day_has_new_work = False
 
-                # A. 零售侧结算 (内部已实现增量跳过)
-                res_retail = retail_service.calculate_all_customers_daily(date_str)
-                if res_retail.get("new_processed", 0) > 0:
-                    day_has_new_work = True
-                
-                # B. 日前预结算
+                # A. 日前预结算
                 res_prelim = await settlement_service.calculate_daily_settlement(
                     date_str=date_str, 
                     version=SettlementVersion.PRELIMINARY,
@@ -111,13 +106,18 @@ async def event_driven_settlement_job():
                 if res_prelim and res_prelim.is_new_calculation:
                     day_has_new_work = True
                 
-                # C. 平台日报结算
+                # B. 平台日报结算
                 res_platform = await settlement_service.calculate_daily_settlement(
                     date_str=date_str, 
                     version=SettlementVersion.PLATFORM_DAILY,
                     force=False
                 )
                 if res_platform and res_platform.is_new_calculation:
+                    day_has_new_work = True
+
+                # C. 零售侧结算 (依赖批发结算结果，所以放在后面)
+                res_retail = retail_service.calculate_all_customers_daily(date_str)
+                if res_retail.get("new_processed", 0) > 0:
                     day_has_new_work = True
                 
                 if day_has_new_work:
