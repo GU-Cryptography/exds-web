@@ -52,12 +52,21 @@ async def calculate_daily_settlement(req: CalculationRequest):
         # 校验日期格式
         datetime.strptime(req.date, "%Y-%m-%d")
         
-        result = await service.calculate_daily_settlement(req.date, version=req.version, force=req.force)
-        
-        if not result:
-            return ResponseModel(code=400, message="Calculation failed or data missing", data=None)
-            
-        return ResponseModel(code=200, message="Calculation completed", data=result)
+        result = await service.run_daily_settlement(req.date, version=req.version, force=req.force)
+
+        if not result.get("success"):
+            return ResponseModel(
+                code=400,
+                message=result.get("message", "Calculation failed"),
+                data={
+                    "status": result.get("status"),
+                    "missing_items": result.get("missing_items", []),
+                    "date": req.date,
+                    "version": req.version.value
+                }
+            )
+
+        return ResponseModel(code=200, message=result.get("message", "????"), data=result.get("data"))
         
     except ValueError as ve:
         return ResponseModel(code=400, message=f"Invalid date format: {ve}", data=None)

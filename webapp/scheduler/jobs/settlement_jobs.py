@@ -1,169 +1,246 @@
+import json
 import logging
-from datetime import datetime, timedelta
+from typing import Any, Dict, List
+
 from webapp.models.settlement import SettlementVersion
-from webapp.services.settlement_service import SettlementService
-from webapp.services.retail_settlement_service import RetailSettlementService
-from webapp.services.load_query_service import LoadQueryService
 from webapp.scheduler.logger import TaskLogger
+from webapp.services.retail_settlement_service import RetailSettlementService
+from webapp.services.settlement_service import SettlementService
+from webapp.tools.mongo import DATABASE
 
 logger = logging.getLogger(__name__)
 
-async def event_driven_settlement_job():
-    """
-    事件驱动结算任务 (间隙补全模式)
-    """
-    logger.info("🚀 开始执行事件驱动结算调度 (间隙补全模式)...")
-    
+
+def _normalize_blocked_entries(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    for entry in entries:
+        normalized.append({
+            "process": entry.get("process"),
+            "date": entry.get("date"),
+            "version": entry.get("version"),
+            "missing_items": sorted(entry.get("missing_items", [])),
+            "message": entry.get("message"),
+        })
+    normalized.sort(key=lambda x: (x["process"] or "", x["date"] or "", x["version"] or ""))
+    return normalized
+
+
+def _should_persist_log(status: str, details: Dict[str, Any]) -> bool:
+    latest = DATABASE["task_execution_logs"].find_one(
+        {"task_type": "event_driven_settlement"},
+        sort=[("start_time", -1)]
+    )
+    if not latest:
+        return True
+
+    latest_details = latest.get("details") or {}
+    compare_keys = [
+        "signature",
+        "new_preliminary",
+        "new_platform_daily",
+        "new_retail",
+        "blocked_count",
+        "error_count",
+    ]
+    same_status = latest.get("status") == status
+    same_details = all(latest_details.get(key) == details.get(key) for key in compare_keys)
+    return not (same_status and same_details)
+
+
+def _get_pending_retail_dates(retail_service: RetailSettlementService) -> List[str]:
+    wholesale_dates = sorted(set(DATABASE["settlement_daily"].distinct("operating_date")))
+    pending_dates: List[str] = []
+    for date_str in wholesale_dates:
+        expected_count = len(retail_service.contract_service.get_active_customers(date_str, date_str))
+        if expected_count == 0:
+            continue
+        actual_count = DATABASE["retail_settlement_daily"].count_documents({
+            "date": date_str,
+            "settlement_type": "daily"
+        })
+        if actual_count < expected_count:
+            pending_dates.append(date_str)
+    return pending_dates
+
+
+async def event_driven_settlement_job() -> None:
+    """Event-driven settlement job."""
+    logger.info("????????????")
+
     settlement_service = SettlementService()
     retail_service = RetailSettlementService()
-    
-    # 1. 预检查：确定同步范围
-    # 安全上限：最多同步到昨天
-    yesterday_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    
+
+    new_preliminary = 0
+    new_platform_daily = 0
+    new_retail = 0
+    blocked_entries: List[Dict[str, Any]] = []
+    error_entries: List[Dict[str, Any]] = []
+
     try:
-        # 获取最新可用负荷数据日期
-        latest_load_date = LoadQueryService.get_latest_data_date()
-        if not latest_load_date:
-            logger.info("⏩ 结算跳过: 未找到任何有效聚合负荷数据")
-            return
-            
-        sync_limit = min(latest_load_date, yesterday_str)
-        
-        # 获取已结算的最新日期 (综合考虑所有版本，取进度最慢的作为补完起点)
-        latest_prelim_date = await settlement_service.get_latest_results_date(SettlementVersion.PRELIMINARY)
-        latest_platform_date = await settlement_service.get_latest_results_date(SettlementVersion.PLATFORM_DAILY)
-        latest_retail_date = await retail_service.get_latest_results_date()
-        
-        # 解析日期并确定各版本的“下一个待处理日期”
-        dates_to_compare = []
-        
-        # 批发-初步结算
-        if latest_prelim_date:
-            dates_to_compare.append(datetime.strptime(latest_prelim_date, "%Y-%m-%d") + timedelta(days=1))
-        
-        # 批发-平台日报
-        if latest_platform_date:
-            dates_to_compare.append(datetime.strptime(latest_platform_date, "%Y-%m-%d") + timedelta(days=1))
-        
-        # 零售结算 (包含完成度精密判定)
-        if latest_retail_date:
-            expected_customers = retail_service.contract_service.get_active_customers(latest_retail_date, latest_retail_date)
-            expected_count = len(expected_customers)
-            actual_count = await retail_service.get_settled_count(latest_retail_date)
-            
-            if actual_count < expected_count:
-                # 还有漏算的客户，进度停留在此处（重试当日）
-                retail_next_dt = datetime.strptime(latest_retail_date, "%Y-%m-%d")
-                logger.info(f"🚩 零售结算进度未完成: {latest_retail_date} ({actual_count}/{expected_count})，将重试补齐")
-            else:
-                # 当日已全量完成，进度向后推一天
-                retail_next_dt = datetime.strptime(latest_retail_date, "%Y-%m-%d") + timedelta(days=1)
-            
-            dates_to_compare.append(retail_next_dt)
-        
-        if not dates_to_compare:
-            # 如果从未结算过，默认补齐最近7天
-            start_dt = datetime.strptime(sync_limit, "%Y-%m-%d") - timedelta(days=7)
-        else:
-            # 补齐起点 = 各版本中最慢的那个“下一个待处理日期”
-            start_dt = min(dates_to_compare)
-            
-        end_dt = datetime.strptime(sync_limit, "%Y-%m-%d")
-        
-        if start_dt > end_dt:
-            # 数据已是最新，仅输出巡检日志
-            logger.info(f"⏩ 结算巡检: 数据已是最新 (Start: {start_dt.strftime('%Y-%m-%d')} > End: {sync_limit})")
-            return
+        preliminary_dates = settlement_service.get_pending_dates(SettlementVersion.PRELIMINARY)
+        platform_dates = settlement_service.get_pending_dates(SettlementVersion.PLATFORM_DAILY)
 
-        # 2. 执行处理循环
-        newly_processed_count = 0  # 真正产生了新记录的天数
-        skipped_dates = []
-        error_count = 0
-        
-        curr_dt = start_dt
-        while curr_dt <= end_dt:
-            date_str = curr_dt.strftime("%Y-%m-%d")
-            logger.info(f"⏳ 正在检查 {date_str} 结算基础数据...")
-            
+        for date_str in preliminary_dates:
+            logger.info("??????????: %s", date_str)
             try:
-                # 检查基础数据完整性
-                basis_data = await settlement_service._fetch_basis_data_preliminary(date_str)
-                if not basis_data:
-                    logger.warning(f"⏩ 跳过 {date_str}: 基础数据缺失")
-                    skipped_dates.append(f"{date_str}(数据不全)")
-                    curr_dt += timedelta(days=1)
-                    continue
-
-                day_has_new_work = False
-
-                # A. 日前预结算
-                res_prelim = await settlement_service.calculate_daily_settlement(
-                    date_str=date_str, 
+                result = await settlement_service.run_daily_settlement(
+                    date_str=date_str,
                     version=SettlementVersion.PRELIMINARY,
                     force=False
                 )
-                if res_prelim and res_prelim.is_new_calculation:
-                    day_has_new_work = True
-                
-                # B. 平台日报结算
-                res_platform = await settlement_service.calculate_daily_settlement(
-                    date_str=date_str, 
+                if result["success"]:
+                    if result.get("is_new_calculation"):
+                        new_preliminary += 1
+                elif result.get("status") == "BLOCKED":
+                    blocked_entries.append({
+                        "process": "PRELIMINARY",
+                        "date": date_str,
+                        "version": SettlementVersion.PRELIMINARY.value,
+                        "missing_items": result.get("missing_items", []),
+                        "message": result.get("message"),
+                    })
+                else:
+                    error_entries.append({
+                        "process": "PRELIMINARY",
+                        "date": date_str,
+                        "message": result.get("message", "??????"),
+                    })
+            except Exception as exc:
+                logger.error("Preliminary ?????? date=%s err=%s", date_str, exc, exc_info=True)
+                error_entries.append({
+                    "process": "PRELIMINARY",
+                    "date": date_str,
+                    "message": str(exc),
+                })
+
+        for date_str in platform_dates:
+            logger.info("???????????: %s", date_str)
+            try:
+                result = await settlement_service.run_daily_settlement(
+                    date_str=date_str,
                     version=SettlementVersion.PLATFORM_DAILY,
                     force=False
                 )
-                if res_platform and res_platform.is_new_calculation:
-                    day_has_new_work = True
-
-                # C. 零售侧结算 (依赖批发结算结果，所以放在后面)
-                res_retail = retail_service.calculate_all_customers_daily(date_str)
-                if res_retail.get("new_processed", 0) > 0:
-                    day_has_new_work = True
-                
-                if day_has_new_work:
-                    newly_processed_count += 1
-                    logger.info(f"✅ {date_str} 结算有新进度更新")
+                if result["success"]:
+                    if result.get("is_new_calculation"):
+                        new_platform_daily += 1
+                elif result.get("status") == "BLOCKED":
+                    blocked_entries.append({
+                        "process": "PLATFORM_DAILY",
+                        "date": date_str,
+                        "version": SettlementVersion.PLATFORM_DAILY.value,
+                        "missing_items": result.get("missing_items", []),
+                        "message": result.get("message"),
+                    })
                 else:
-                    logger.info(f"⏭️ {date_str} 数据均已存在，无新增变动")
+                    error_entries.append({
+                        "process": "PLATFORM_DAILY",
+                        "date": date_str,
+                        "message": result.get("message", "??????"),
+                    })
+            except Exception as exc:
+                logger.error("Platform daily ?????? date=%s err=%s", date_str, exc, exc_info=True)
+                error_entries.append({
+                    "process": "PLATFORM_DAILY",
+                    "date": date_str,
+                    "message": str(exc),
+                })
 
-            except Exception as ex:
-                logger.error(f"❌ {date_str} 结算执行过程中出错: {ex}")
-                error_count += 1
-                
-            curr_dt += timedelta(days=1)
-            
-        # 3. 结果记录策略：仅在有实际产出或报错时写入数据库任务日志
-        if newly_processed_count > 0 or error_count > 0:
-            task_id = await TaskLogger.log_task_start(
-                service_type="settlement_service",
-                task_type="event_driven_settlement",
-                task_name="事件驱动结算补齐",
-                trigger_type="schedule"
-            )
+        retail_dates = _get_pending_retail_dates(retail_service)
+        for date_str in retail_dates:
+            logger.info("??????????: %s", date_str)
+            try:
+                wholesale_doc = DATABASE["settlement_daily"].find_one(
+                    {"operating_date": date_str, "version": SettlementVersion.PLATFORM_DAILY.value},
+                    projection={"_id": 1}
+                )
+                if not wholesale_doc:
+                    wholesale_doc = DATABASE["settlement_daily"].find_one(
+                        {"operating_date": date_str, "version": SettlementVersion.PRELIMINARY.value},
+                        projection={"_id": 1}
+                    )
+                if not wholesale_doc:
+                    blocked_entries.append({
+                        "process": "RETAIL_DAILY",
+                        "date": date_str,
+                        "version": "RETAIL_DAILY",
+                        "missing_items": ["wholesale_settlement_daily"],
+                        "message": "????????",
+                    })
+                    continue
 
-            summary = f"执行完成。有效产出: {newly_processed_count}天"
-            if error_count:
-                summary += f", 故障: {error_count}天"
-            if skipped_dates:
-                summary += f", 跳过: {len(skipped_dates)}天"
-                
-            await TaskLogger.log_task_end(
-                task_id, 
-                "SUCCESS" if error_count == 0 else "FAILED",
-                summary=summary,
-                details={
-                    "newly_processed_days": newly_processed_count,
-                    "error_days": error_count,
-                    "skipped_list": skipped_dates[:10],
-                    "range": f"{start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}"
-                }
-            )
+                retail_result = retail_service.calculate_all_customers_daily(date_str)
+                new_retail += retail_result.get("new_processed", 0)
+            except Exception as exc:
+                logger.error("Retail daily ?????? date=%s err=%s", date_str, exc, exc_info=True)
+                error_entries.append({
+                    "process": "RETAIL_DAILY",
+                    "date": date_str,
+                    "message": str(exc),
+                })
+
+        blocked_normalized = _normalize_blocked_entries(blocked_entries)
+        signature = json.dumps(blocked_normalized, ensure_ascii=False, sort_keys=True)
+        error_count = len(error_entries)
+        blocked_count = len(blocked_entries)
+        total_new = new_preliminary + new_platform_daily + new_retail
+
+        if error_count > 0:
+            status = "FAILED"
+        elif blocked_count > 0:
+            status = "PARTIAL"
+        elif total_new > 0:
+            status = "SUCCESS"
         else:
-            logger.info("🏁 结算巡检完成: 本轮无新增结算数据，未写入数据库日志。")
-        
-    except Exception as e:
-        logger.error(f"💥 结算调度逻辑发生致命故障: {e}")
-        # 尝试记录异常 (如果能获得 task_id 的话，这里因为是延迟创建，可能没有 task_id)
-        # 只有在非常严重的逻辑错误时才会到这里
+            status = "SKIPPED"
 
-    logger.info("🏁 结算间隙补全调度任务结束")
+        summary = (
+            f"????: ?????={new_preliminary}???????={new_platform_daily}, "
+            f"?????={new_retail}, ??={blocked_count}, ??={error_count}"
+        )
+        details = {
+            "new_preliminary": new_preliminary,
+            "new_platform_daily": new_platform_daily,
+            "new_retail": new_retail,
+            "blocked_count": blocked_count,
+            "error_count": error_count,
+            "blocked_samples": blocked_normalized[:10],
+            "error_samples": error_entries[:10],
+            "signature": signature,
+        }
+
+        if total_new > 0 or error_count > 0 or blocked_count > 0:
+            if _should_persist_log(status, details):
+                task_id = await TaskLogger.log_task_start(
+                    service_type="settlement_service",
+                    task_type="event_driven_settlement",
+                    task_name="event_driven_settlement",
+                    trigger_type="schedule"
+                )
+                await TaskLogger.log_task_end(
+                    task_id,
+                    status,
+                    summary=summary,
+                    details=details
+                )
+            else:
+                logger.info("???????????????????")
+        else:
+            logger.info("???????????????????")
+
+    except Exception as exc:
+        logger.error("??????????????: %s", exc, exc_info=True)
+        task_id = await TaskLogger.log_task_start(
+            service_type="settlement_service",
+            task_type="event_driven_settlement",
+            task_name="event_driven_settlement",
+            trigger_type="schedule"
+        )
+        await TaskLogger.log_task_end(
+            task_id,
+            "FAILED",
+            summary="??????????????",
+            error={"message": str(exc)}
+        )
+
+    logger.info("??????????")

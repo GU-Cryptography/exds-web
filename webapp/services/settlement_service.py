@@ -3,7 +3,7 @@ import logging
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Tuple
+from typing import Any, List, Dict, Optional, Tuple
 from calendar import monthrange
 
 from bson import ObjectId
@@ -45,6 +45,193 @@ class SettlementService:
         if value is None:
             return 0.0
         return round(float(value), decimals)
+
+    def _sorted_dates(self, dates: List[str]) -> List[str]:
+        """?????????????"""
+        return sorted({d for d in dates if d})
+
+    def get_pending_dates(self, version: SettlementVersion) -> List[str]:
+        """?????????????"""
+        if version == SettlementVersion.PRELIMINARY:
+            source_dates = self._sorted_dates(self.db.unified_load_curve.distinct("date"))
+        elif version == SettlementVersion.PLATFORM_DAILY:
+            source_dates = self._sorted_dates(self.db.spot_settlement_daily.distinct("operating_date"))
+        else:
+            return []
+
+        settled_dates = self._sorted_dates(
+            self.db.settlement_daily.distinct(
+                "operating_date",
+                {"version": version.value}
+            )
+        )
+        settled_set = set(settled_dates)
+        return [date_str for date_str in source_dates if date_str not in settled_set]
+
+    def validate_daily_settlement_basis(
+        self,
+        date_str: str,
+        version: SettlementVersion
+    ) -> Dict[str, Any]:
+        """???????????????"""
+        missing_items: List[str] = []
+
+        if version == SettlementVersion.PRELIMINARY:
+            if not self.db.unified_load_curve.find_one({"date": date_str}, projection={"_id": 1}):
+                missing_items.append("unified_load_curve")
+
+            active_customers = self.contract_service.get_active_customers(date_str, date_str)
+            if not active_customers:
+                missing_items.append("active_customers")
+            else:
+                load_curves = LoadQueryService.aggregate_curve_series(
+                    active_customers,
+                    date_str,
+                    date_str,
+                    strategy=FusionStrategy.MP_COMPLETE
+                )
+                if not load_curves:
+                    missing_items.append("aggregated_load_curve")
+
+            try:
+                spot_price_service.get_spot_price_curve_48(
+                    self.db,
+                    date_str,
+                    'real_time_spot_price',
+                    price_field='arithmetic_avg_clearing_price'
+                )
+            except Exception:
+                missing_items.append("real_time_spot_price")
+
+            p_da_ok = False
+            try:
+                p_da_curve = spot_price_service.get_spot_price_curve_48(
+                    self.db,
+                    date_str,
+                    'day_ahead_econ_price',
+                    price_field='clearing_price'
+                )
+                p_da_ok = bool(p_da_curve) and not all(x == 0 for x in p_da_curve)
+            except Exception:
+                p_da_ok = False
+            if not p_da_ok:
+                try:
+                    p_da_curve = spot_price_service.get_spot_price_curve_48(
+                        self.db,
+                        date_str,
+                        'day_ahead_spot_price'
+                    )
+                    p_da_ok = bool(p_da_curve) and not all(x == 0 for x in p_da_curve)
+                except Exception:
+                    p_da_ok = False
+            if not p_da_ok:
+                missing_items.append("day_ahead_price")
+
+            has_da_declare = bool(
+                self.db.day_ahead_energy_declare.find_one(
+                    {"date_str": date_str},
+                    projection={"_id": 1}
+                )
+            )
+            if not has_da_declare:
+                try:
+                    start_dt = datetime.strptime(date_str, "%Y-%m-%d")
+                    has_da_declare = bool(
+                        self.db.day_ahead_energy_declare.find_one(
+                            {"datetime": {"$gt": start_dt, "$lte": start_dt + timedelta(days=1)}},
+                            projection={"_id": 1}
+                        )
+                    )
+                except Exception:
+                    has_da_declare = False
+            if not has_da_declare:
+                missing_items.append("day_ahead_energy_declare")
+
+            sys_contracts = self.db.contracts_aggregated_daily.find_one({
+                "date": date_str,
+                "entity": "\u552e\u7535\u516c\u53f8",
+                "contract_type": "\u6574\u4f53",
+                "contract_period": "\u6574\u4f53"
+            }, projection={"_id": 1})
+            if not sys_contracts:
+                missing_items.append("contracts_aggregated_daily_system")
+
+            month_str = date_str[:7]
+            mech_doc = self.db.mechanism_energy_monthly.find_one(
+                {"month_str": month_str},
+                projection={"_id": 1}
+            )
+            if not mech_doc:
+                missing_items.append("mechanism_energy_monthly")
+
+        elif version == SettlementVersion.PLATFORM_DAILY:
+            daily_doc = self.db.spot_settlement_daily.find_one(
+                {"operating_date": date_str},
+                projection={"_id": 1}
+            )
+            if not daily_doc:
+                missing_items.append("spot_settlement_daily")
+
+            period_count = self.db.spot_settlement_period.count_documents({"operating_date": date_str})
+            if period_count < 48:
+                missing_items.append("spot_settlement_period_48")
+
+            month_str = date_str[:7]
+            mech_doc = self.db.mechanism_energy_monthly.find_one(
+                {"month_str": month_str},
+                projection={"_id": 1}
+            )
+            if not mech_doc:
+                missing_items.append("mechanism_energy_monthly")
+        else:
+            missing_items.append("unsupported_version")
+
+        ok = len(missing_items) == 0
+        return {
+            "ok": ok,
+            "date": date_str,
+            "version": version.value if hasattr(version, "value") else str(version),
+            "missing_items": missing_items,
+            "message": "??????" if ok else f"???????: {', '.join(missing_items)}"
+        }
+
+    async def run_daily_settlement(
+        self,
+        date_str: str,
+        version: SettlementVersion = SettlementVersion.PRELIMINARY,
+        force: bool = False
+    ) -> Dict[str, Any]:
+        """???????????????"""
+        validation = self.validate_daily_settlement_basis(date_str, version)
+        if not validation["ok"]:
+            return {
+                "success": False,
+                "status": "BLOCKED",
+                "message": validation["message"],
+                "missing_items": validation["missing_items"],
+                "data": None,
+                "is_new_calculation": False
+            }
+
+        result = await self.calculate_daily_settlement(date_str, version=version, force=force)
+        if not result:
+            return {
+                "success": False,
+                "status": "FAILED",
+                "message": "??????",
+                "missing_items": [],
+                "data": None,
+                "is_new_calculation": False
+            }
+
+        return {
+            "success": True,
+            "status": "SUCCESS",
+            "message": "????",
+            "missing_items": [],
+            "data": result,
+            "is_new_calculation": getattr(result, "is_new_calculation", False)
+        }
 
     async def calculate_daily_settlement(
         self, date_str: str, 
