@@ -58,15 +58,16 @@ class SettlementService:
             source_dates = self._sorted_dates(self.db.spot_settlement_daily.distinct("operating_date"))
         else:
             return []
-
-        settled_dates = self._sorted_dates(
-            self.db.settlement_daily.distinct(
-                "operating_date",
-                {"version": version.value}
-            )
+        latest_settled_date = self.db.settlement_daily.find_one(
+            {"version": version.value},
+            projection={"operating_date": 1},
+            sort=[("operating_date", -1)]
         )
-        settled_set = set(settled_dates)
-        return [date_str for date_str in source_dates if date_str not in settled_set]
+        if not latest_settled_date:
+            return source_dates
+
+        cutoff_date = latest_settled_date.get("operating_date")
+        return [date_str for date_str in source_dates if date_str > cutoff_date]
 
     def validate_daily_settlement_basis(
         self,

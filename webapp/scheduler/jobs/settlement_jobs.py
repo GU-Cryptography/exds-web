@@ -49,8 +49,16 @@ def _should_persist_log(status: str, details: Dict[str, Any]) -> bool:
 
 def _get_pending_retail_dates(retail_service: RetailSettlementService) -> List[str]:
     wholesale_dates = sorted(set(DATABASE["settlement_daily"].distinct("operating_date")))
+    latest_retail_doc = DATABASE["retail_settlement_daily"].find_one(
+        {"settlement_type": "daily"},
+        projection={"date": 1},
+        sort=[("date", -1)]
+    )
+    cutoff_date = latest_retail_doc.get("date") if latest_retail_doc else None
     pending_dates: List[str] = []
     for date_str in wholesale_dates:
+        if cutoff_date and date_str <= cutoff_date:
+            continue
         expected_count = len(retail_service.contract_service.get_active_customers(date_str, date_str))
         if expected_count == 0:
             continue
