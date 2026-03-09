@@ -704,7 +704,7 @@ critical_alerts = db.customer_anomaly_alerts.find({
 | :--- | :--- | :--- |
 | `_id` | `ObjectId` | 唯一ID |
 | `operating_date` | `String` | 结算日期 (YYYY-MM-DD) |
-| `version` | `Integer` | 计算版本号 |
+| `version` | `Integer` | 计算版本号，包括 PRELIMINARY 和 PLATFORM_DAILY 版本 |
 | `contract_volume` | `Number` | 中长期合同电量 (MWh) |
 | `contract_avg_price` | `Number` | 中长期合同均价 (元/MWh) |
 | `contract_fee` | `Number` | 中长期差价电费 (元) |

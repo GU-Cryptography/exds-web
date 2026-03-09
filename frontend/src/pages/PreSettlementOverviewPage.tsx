@@ -19,7 +19,7 @@ import TrendingUpOutlinedIcon from '@mui/icons-material/TrendingUpOutlined';
 import PriceChangeOutlinedIcon from '@mui/icons-material/PriceChangeOutlined';
 import CompareArrowsOutlinedIcon from '@mui/icons-material/CompareArrowsOutlined';
 import StorefrontOutlinedIcon from '@mui/icons-material/StorefrontOutlined';
-import { format, addMonths } from 'date-fns';
+import { format, addMonths, startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
 import {
     ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
     ResponsiveContainer, Cell, ReferenceLine
@@ -174,6 +174,63 @@ const PreSettlementOverviewPage: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
     const [data, setData] = useState<OverviewData | null>(null);
     const [chartView, setChartView] = useState<ChartViewMode>('price');
+
+    const chartData = React.useMemo(() => {
+        if (!selectedMonth || !data) return [];
+
+        const start = startOfMonth(selectedMonth);
+        const end = endOfMonth(selectedMonth);
+        const days = eachDayOfInterval({ start, end });
+
+        const detailsMap = new Map(data.daily_details.map(d => [d.date, d]));
+        const result: any[] = [];
+        let lastCumulativeProfit = 0;
+
+        days.forEach((day, idx) => {
+            const dateStr = format(day, 'yyyy-MM-dd');
+            const d = detailsMap.get(dateStr);
+            const hasData = d && (d.volume_mwh > 0 || d.wholesale_cost > 0);
+
+            if (d && d.cumulative_profit !== undefined) {
+                lastCumulativeProfit = d.cumulative_profit;
+            }
+
+            result.push({
+                date: dateStr,
+                dateLabel: dateStr.substring(5),
+                // 基础数据补全：无结算数据时设为 null，以便图表不显示
+                volume_mwh: hasData ? (d?.volume_mwh ?? 0) : 0, // 电量内部计算需用0，显示逻辑由均价/金额控制
+                wholesale_cost_wan: hasData ? ((d?.wholesale_cost ?? 0) / 10000) : null,
+                retail_revenue_wan: hasData ? ((d?.retail_revenue ?? 0) / 10000) : null,
+                daily_profit_wan: hasData ? ((d?.daily_profit ?? 0) / 10000) : null,
+                // 累计值处理
+                cumulative_profit_wan: lastCumulativeProfit / 10000,
+                // 均价类字段：无数据时设为 null 以免图表掉落到 0
+                wholesale_avg_price: hasData ? d.wholesale_avg_price : null,
+                retail_avg_price: hasData ? d.retail_avg_price : null,
+                price_spread: hasData ? d.price_spread : null,
+            });
+        });
+
+        // 计算累计平均价差
+        let runningVolume = 0;
+        let runningProfit = 0;
+        return result.map(item => {
+            runningVolume += item.volume_mwh;
+            runningProfit += (item.daily_profit_wan * 10000);
+
+            // 如果当天没有数据（未结算），则累计值设为 null，不在图表上显示延长的水平线
+            const hasDataAtThisPoint = item.wholesale_avg_price !== null;
+
+            return {
+                ...item,
+                cumulative_profit_wan: hasDataAtThisPoint ? item.cumulative_profit_wan : null,
+                cumulative_avg_spread: (hasDataAtThisPoint && runningVolume > 0)
+                    ? parseFloat((runningProfit / runningVolume).toFixed(2))
+                    : null
+            };
+        });
+    }, [data, selectedMonth]);
 
     // 校验状态
     const [validateDialogOpen, setValidateDialogOpen] = useState(false);
@@ -334,28 +391,6 @@ const PreSettlementOverviewPage: React.FC = () => {
         }
     }, [fetchData, hasInitializedVersion]);
 
-    // ====== 图表数据 ======
-    const chartData = data?.daily_details
-        .filter(d => d.volume_mwh > 0 || d.wholesale_cost > 0) // 过滤掉完全没数据的天数，以免折线图掉到 0
-        .map((d, idx, arr) => {
-            // 累计均价差 = 截至当日的总利润 / 截至当日的总电量 (近似批零价差均值)
-            let cumVolume = 0, cumProfit = 0;
-            for (let i = 0; i <= idx; i++) {
-                cumVolume += arr[i].volume_mwh;
-                cumProfit += arr[i].daily_profit;
-            }
-            const cumulativeAvgSpread = cumVolume > 0 ? cumProfit / cumVolume : 0;
-
-            return {
-                ...d,
-                dateLabel: d.date.substring(5),
-                daily_profit_wan: d.daily_profit / 10000,
-                cumulative_profit_wan: d.cumulative_profit / 10000,
-                wholesale_cost_wan: d.wholesale_cost / 10000,
-                retail_revenue_wan: d.retail_revenue / 10000,
-                cumulative_avg_spread: parseFloat(cumulativeAvgSpread.toFixed(2)),
-            };
-        }) || [];
 
     // ====== 渲染：汇总卡片 ======
     const renderSummaryCards = () => {
