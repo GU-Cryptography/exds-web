@@ -27,6 +27,7 @@ UPPER_LIMIT_PRICE = 414.3 * 1.2 / 1000  # = 0.49716
 
 # 463号文标准比例（当前结算口径）：尖峰1.8、高峰1.6、平1、低谷0.4、深谷0.3
 DEFAULT_RATIOS = {"tip": 1.8, "peak": 1.6, "flat": 1.0, "valley": 0.4, "deep": 0.3}
+NEW_463_RULE_EFFECTIVE_MONTH = "2026-02"
 
 # 时段类型映射：tou_service 中文名 → 内部标识
 TOU_TYPE_MAP = {
@@ -483,41 +484,64 @@ class RetailSettlementService:
         if floating_fee > 0 and total_load_mwh > 0:
             floating_fee_per_kwh = floating_fee / (total_load_mwh * 1000.0)
 
+        use_base_only_ratio_adjustment = self._should_exclude_floating_from_463(date_str)
         final_prices_48 = None
         if ref_values_48:
-            final_prices_48 = []
+            base_prices_48 = []
             for i in range(48):
-                final_prices_48.append(ref_values_48[i] - spread * sharing / 100.0 + floating + floating_fee_per_kwh)
+                base_prices_48.append(ref_values_48[i] - spread * sharing / 100.0)
             
             # 聚合为 5 时段用于返回 (final_prices)
-            prices = {}
+            base_prices = {}
             tou_48 = self._get_tou_48(date_str)
             for pkey in DEFAULT_RATIOS:
                 indices = [idx for idx, t in enumerate(tou_48) if TOU_TYPE_MAP.get(t) == pkey]
                 if indices:
-                    prices[pkey] = sum(final_prices_48[idx] for idx in indices) / len(indices)
+                    base_prices[pkey] = sum(base_prices_48[idx] for idx in indices) / len(indices)
                 else:
-                    prices[pkey] = 0.0
+                    base_prices[pkey] = 0.0
         else:
-            prices = {}
+            base_prices = {}
             for period, ref_val in tou_ref.items():
                 # 最终单价 = 参考价 - 价差 * 分成 + 浮动价 + 摊分后的浮动费
-                prices[period] = ref_val - spread * sharing / 100.0 + floating + floating_fee_per_kwh
+                base_prices[period] = ref_val - spread * sharing / 100.0
 
         # 463号文比例调节（以5时段均价校核）
-        adjusted, was_adjusted = self._adjust_price_ratios(prices, date_str)
+        ratio_target_prices = dict(base_prices)
+        if not use_base_only_ratio_adjustment:
+            ratio_target_prices = {
+                period: price + floating + floating_fee_per_kwh
+                for period, price in base_prices.items()
+            }
+
+        adjusted_ratio_target, was_adjusted = self._adjust_price_ratios(ratio_target_prices, date_str)
+        adjusted_base_prices = adjusted_ratio_target if use_base_only_ratio_adjustment else dict(base_prices)
+        final_prices = {
+            period: price + floating + floating_fee_per_kwh
+            for period, price in adjusted_base_prices.items()
+        }
 
         # 若使用48点参考价，需将校核结果同步映射回48点结算价，
         # 否则会出现“price_ratio_adjusted=true 但计费仍走未校核48点价”的不一致。
-        if final_prices_48 and len(final_prices_48) == 48:
+        if ref_values_48:
+            final_prices_48 = list(base_prices_48)
             tou_48 = self._get_tou_48(date_str)
             if tou_48 and len(tou_48) == 48:
                 period_delta: Dict[str, float] = {}
-                for pkey in DEFAULT_RATIOS:
-                    period_delta[pkey] = float(adjusted.get(pkey, 0.0)) - float(prices.get(pkey, 0.0))
-                for i in range(48):
-                    pkey = TOU_TYPE_MAP.get(tou_48[i], "flat")
-                    final_prices_48[i] = float(final_prices_48[i]) + float(period_delta.get(pkey, 0.0))
+                if use_base_only_ratio_adjustment:
+                    for pkey in DEFAULT_RATIOS:
+                        period_delta[pkey] = float(adjusted_base_prices.get(pkey, 0.0)) - float(base_prices.get(pkey, 0.0))
+                    for i in range(48):
+                        pkey = TOU_TYPE_MAP.get(tou_48[i], "flat")
+                        final_prices_48[i] = float(final_prices_48[i]) + float(period_delta.get(pkey, 0.0))
+                        final_prices_48[i] += floating + floating_fee_per_kwh
+                else:
+                    for pkey in DEFAULT_RATIOS:
+                        period_delta[pkey] = float(adjusted_ratio_target.get(pkey, 0.0)) - float(ratio_target_prices.get(pkey, 0.0))
+                    for i in range(48):
+                        pkey = TOU_TYPE_MAP.get(tou_48[i], "flat")
+                        final_prices_48[i] = float(final_prices_48[i]) + floating + floating_fee_per_kwh
+                        final_prices_48[i] += float(period_delta.get(pkey, 0.0))
 
         return {
             "reference_price": ReferencePriceInfo(
@@ -526,9 +550,10 @@ class RetailSettlementService:
                 source=ref_source,
                 source_month=date_str[:7],
             ),
-            "final_prices": adjusted,
+            "final_prices": final_prices,
             "final_prices_48": final_prices_48, # Add 48-point prices to result
-            "price_ratio_adjusted": was_adjusted,
+            "price_ratio_adjusted": False if use_base_only_ratio_adjustment else was_adjusted,
+            "price_ratio_adjusted_base": was_adjusted if use_base_only_ratio_adjustment else False,
         }
 
     # ========== 固定联动类计算 ==========
@@ -749,6 +774,10 @@ class RetailSettlementService:
         """
         _ = date_str
         return dict(DEFAULT_RATIOS)
+
+    def _should_exclude_floating_from_463(self, date_str: str) -> bool:
+        """2026-02 起，浮动价/浮动费折价不纳入 463 比例校验。"""
+        return date_str[:7] >= NEW_463_RULE_EFFECTIVE_MONTH
 
     # ========== 封顶价获取 ==========
 
