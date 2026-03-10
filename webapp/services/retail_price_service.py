@@ -10,10 +10,11 @@ from typing import Dict, Optional, Any, Union, List, Tuple
 from webapp.tools.mongo import DATABASE
 from webapp.services.tou_service import get_month_tou_meta
 from webapp.services.spot_price_service import get_monthly_avg_spot_prices_48, get_spot_price_curve_48
+from webapp.services.holiday_service import get_holiday_service
 
 logger = logging.getLogger(__name__)
 
-# 时段类型映射（中文 -> 内部标识）
+# 时段类型映射 (中文 -> 内部标识)
 TOU_TYPE_MAP = {
     "尖峰": "tip",
     "高峰": "peak",
@@ -37,48 +38,40 @@ class RetailPriceService:
         is_monthly: bool = False
     ) -> Tuple[Union[float, Dict[str, float], List[float], None], str]:
         """
-        获取指定日期和类型的参考价（自动处理降级）
+        获取指定日期和类型的参考价 (自动处理降级)
 
         Args:
-            price_key: 参考价键名，支持：
-                - 'upper_limit_price': 上限价
-                - 'market_monthly_avg': 市场月度交易均价
-                - 'market_annual_avg': 市场年度交易均价
-                - 'market_avg': 市场交易均价
-                - 'market_monthly_on_grid': 市场月度平均上网电价
-                - 'retailer_monthly_avg': 售电公司月度交易均价
-                - 'retailer_annual_avg': 售电公司年度交易均价
-                - 'retailer_avg': 售电公司交易均价
-                - 'retailer_monthly_settle_weighted': 售电公司月度结算加权价
-                - 'retailer_side_settle_weighted': 售电侧月度结算加权价
-                - 'real_time_avg': 实时市场加权平均价
-                - 'day_ahead_avg': 日前市场加权平均价
-                - 'day_ahead_avg_econ': 经济日前均价
-                - 'grid_agency_price': 电网代理购电价格
-                - 'coal_capacity_discount': 煤电容量电费折价
-                - 'genside_annual_bilateral': 发电侧火电年度双边价
-                - 'market_longterm_flat_avg': 市场中长期平段合规价
+            price_key: 参考价键名
             date_str: 结算日期 YYYY-MM-DD
             is_time_based: 是否需要分时数据
+            is_monthly: 是否为月度结算
 
         Returns:
             tuple: (价格数据, 来源标识 "official"|"simulated")
-            价格数据: 
-                - 常规或单值: float
-                - 分时(5段): Dict[str, float]
-                - 现货(48点): List[float]
-                - 缺失: None
         """
         month_str = date_str[:7]
 
-        # 日常日清（is_monthly=False）不使用月度发布价，直接走降级取数逻辑。
+        # 日常日清 (is_monthly=False) 不使用月度发布价，直接走降级取数逻辑。
         if not is_monthly:
             logger.info(f"日清结算 {date_str} 使用降级定价逻辑 [{price_key}]")
             return self._fallback_resolve(price_key, date_str, is_time_based, is_monthly=is_monthly), "simulated"
         
         # 1. 优先尝试从 retail_settlement_prices 获取正式发布数据
-        doc = self.collection.find_one({"_id": month_str})
+        # 逻辑：如果是节假日，优先找 YYYY-MM-holiday；否则或未找到，找 YYYY-MM
+        hs = get_holiday_service()
+        is_holiday = hs.is_holiday(datetime.strptime(date_str, "%Y-%m-%d").date())
         
+        doc = None
+        if is_holiday:
+            doc = self.collection.find_one({"_id": f"{month_str}-holiday"})
+            if doc:
+                logger.info(f"日期 {date_str} 命中节假日专项价格文件")
+        
+        if not doc:
+            doc = self.collection.find_one({"_id": month_str})
+            if doc and is_holiday:
+                logger.info(f"日期 {date_str} 为节假日但未找到专项文件，回退使用通用价格文件")
+
         if doc:
             if is_time_based:
                 # 获取分时价格 (5 段或 48 点)
@@ -120,7 +113,7 @@ class RetailPriceService:
         is_time_based: bool,
         is_monthly: bool = False
     ) -> Union[float, Dict[str, float], List[float], None]:
-        """降级方案实现（江西 4.0 规则）"""
+        """降级方案实现 (江西 4.0 规则)"""
         
         # 1. 上限价 (基准价 0.4143 * 1.2)
         if price_key == "upper_limit_price":
@@ -147,7 +140,7 @@ class RetailPriceService:
             if price_key == "grid_agency_price":
                 val = doc.get("agency_purchase_price")
             else:
-                # 其他所有市场及售电均价，降级时统一由“平均上网电价”代替
+                # 其他所有市场及售电均价，降级时统一由平均上网电价代替
                 val = doc.get("avg_on_grid_price")
                 
             if val is None:

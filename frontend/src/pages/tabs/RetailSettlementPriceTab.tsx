@@ -3,7 +3,7 @@ import {
     Box, Paper, Typography, Button, Table, TableBody, TableCell,
     TableContainer, TableHead, TableRow, Chip, CircularProgress,
     Alert, Dialog, DialogTitle, DialogContent, DialogContentText,
-    DialogActions, Tooltip, IconButton, Select, MenuItem, FormControl,
+    DialogActions, IconButton, Select, MenuItem, FormControl,
     InputLabel, SelectChangeEvent, Snackbar, useTheme, useMediaQuery,
 } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
@@ -40,6 +40,7 @@ interface PeriodPrice {
 interface MonthMeta {
     _id: string;
     month: string;
+    price_date_type?: 'regular' | 'holiday';
     imported_at: string | null;
     imported_by: string | null;
 }
@@ -91,9 +92,10 @@ const RetailSettlementPriceTab: React.FC = () => {
     const [loadingDetail, setLoadingDetail] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // 导入对话框
+    // 导入对话框相关
     const [importDialogOpen, setImportDialogOpen] = useState(false);
     const [importFile, setImportFile] = useState<File | null>(null);
+    const [importDateType, setImportDateType] = useState<'regular' | 'holiday'>('regular');
     const [importing, setImporting] = useState(false);
     const [importExistsWarning, setImportExistsWarning] = useState(false);
 
@@ -142,17 +144,35 @@ const RetailSettlementPriceTab: React.FC = () => {
         const f = e.target.files?.[0] || null;
         setImportFile(f);
         if (f) {
-            // 尝试从文件名解析月份（如 2026-01）并检查是否已存在
+            // 尝试从文件名解析月份（如 2026-01）并初步检查
             const match = f.name.match(/(\d{4}-\d{2})/);
             if (match) {
                 const filledMonth = match[1];
-                setImportExistsWarning(months.some(m => m._id === filledMonth));
+                // 默认根据文件名是否含“节假日”预设类型
+                const isHolidayFile = f.name.includes('节假日') || f.name.includes('深谷');
+                const type = isHolidayFile ? 'holiday' : 'regular';
+                setImportDateType(type);
+
+                const targetId = type === 'regular' ? filledMonth : `${filledMonth}-holiday`;
+                setImportExistsWarning(months.some(m => m._id === targetId));
             } else {
                 setImportExistsWarning(false);
+                setImportDateType('regular');
             }
             setImportDialogOpen(true);
         }
     };
+
+    // 监听导入类型变化，更新预警
+    useEffect(() => {
+        if (!importFile) return;
+        const match = importFile.name.match(/(\d{4}-\d{2})/);
+        if (match) {
+            const filledMonth = match[1];
+            const targetId = importDateType === 'regular' ? filledMonth : `${filledMonth}-holiday`;
+            setImportExistsWarning(months.some(m => m._id === targetId));
+        }
+    }, [importDateType, importFile, months]);
 
     const handleImport = async () => {
         if (!importFile) return;
@@ -160,15 +180,16 @@ const RetailSettlementPriceTab: React.FC = () => {
         const formData = new FormData();
         formData.append('file', importFile);
         try {
-            const res = await apiClient.post('/api/v1/prices/retail-settlement/import', formData, {
+            const res = await apiClient.post(`/api/v1/prices/retail-settlement/import?price_date_type=${importDateType}`, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
             const { month } = res.data;
-            setSnackbar({ open: true, msg: `月份 ${month} 价格数据导入成功`, severity: 'success' });
+            const targetId = importDateType === 'regular' ? month : `${month}-holiday`;
+            setSnackbar({ open: true, msg: `${month} (${importDateType}) 价格数据导入成功`, severity: 'success' });
             setImportDialogOpen(false);
             setImportFile(null);
             await fetchMonths();
-            setSelectedMonth(month);
+            setSelectedMonth(targetId);
         } catch (e: any) {
             setSnackbar({ open: true, msg: e.response?.data?.detail || e.message || '导入失败', severity: 'error' });
         } finally {
@@ -219,7 +240,9 @@ const RetailSettlementPriceTab: React.FC = () => {
                             onChange={(e: SelectChangeEvent) => setSelectedMonth(e.target.value)}
                         >
                             {months.map(m => (
-                                <MenuItem key={m._id} value={m._id}>{m.month}</MenuItem>
+                                <MenuItem key={m._id} value={m._id}>
+                                    {m.month}{m.price_date_type === 'holiday' ? ' (节假日)' : ''}
+                                </MenuItem>
                             ))}
                         </Select>
                     </FormControl>
@@ -374,12 +397,27 @@ const RetailSettlementPriceTab: React.FC = () => {
             <Dialog open={importDialogOpen} onClose={() => !importing && setImportDialogOpen(false)} maxWidth="sm" fullWidth>
                 <DialogTitle>确认导入价格数据</DialogTitle>
                 <DialogContent>
-                    <DialogContentText>
-                        即将导入文件：<strong>{importFile?.name}</strong>
-                    </DialogContentText>
+                    <Box sx={{ mb: 2 }}>
+                        <Typography variant="body2" gutterBottom>
+                            即将导入文件：<strong>{importFile?.name}</strong>
+                        </Typography>
+                    </Box>
+
+                    <FormControl fullWidth size="small" sx={{ mt: 1, mb: 2 }}>
+                        <InputLabel>适用日期类型</InputLabel>
+                        <Select
+                            value={importDateType}
+                            label="适用日期类型"
+                            onChange={(e) => setImportDateType(e.target.value as any)}
+                        >
+                            <MenuItem value="regular">常规/默认 (工作日及单文件月份)</MenuItem>
+                            <MenuItem value="holiday">节假日/深谷 (仅价格差异部分)</MenuItem>
+                        </Select>
+                    </FormControl>
+
                     {importExistsWarning && (
-                        <Alert severity="warning" sx={{ mt: 1 }}>
-                            检测到该月份的价格数据已存在，导入将覆盖现有数据。
+                        <Alert severity="warning">
+                            检测到该月份 <strong>({importDateType === 'holiday' ? '节假日' : '常规'})</strong> 的价格数据已存在，导入将覆盖现有数据。
                         </Alert>
                     )}
                 </DialogContent>

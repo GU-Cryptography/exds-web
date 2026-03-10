@@ -145,7 +145,7 @@ def list_retail_settlement_prices():
     try:
         docs = list(COLLECTION.find(
             {},
-            {'_id': 1, 'month': 1, 'imported_at': 1, 'imported_by': 1}
+            {'_id': 1, 'month': 1, 'price_date_type': 1, 'imported_at': 1, 'imported_by': 1}
         ).sort('_id', -1))
         return json.loads(json_util.dumps({'months': docs}))
     except Exception as e:
@@ -176,31 +176,45 @@ def get_retail_settlement_price(month: str):
 # ─────────────────────────────────────────────
 @router.post("/prices/retail-settlement/import", summary="导入零售结算价格 Excel")
 async def import_retail_settlement_prices(
+    price_date_type: str = "regular",
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_active_user)
 ):
-    """上传并解析月度价格定义 Excel，存入 retail_settlement_prices 集合（同月覆盖）。"""
+    """
+    上传并解析月度价格定义 Excel，存入 retail_settlement_prices 集合。
+    
+    Args:
+        price_date_type: 价格适用日期类型，'regular' (常规/默认) 或 'holiday' (节假日/深谷)
+        file: Excel 文件
+    """
+    if price_date_type not in ("regular", "holiday"):
+        raise HTTPException(status_code=400, detail="无效的价格日期类型")
+
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="只支持 Excel 文件（.xlsx/.xls）")
 
     content = await file.read()
     parsed = _parse_excel(content)
     month = parsed['month']
+    
+    # 确定数据库 ID: 常规/默认使用 YYYY-MM，节假日使用 YYYY-MM-holiday
+    doc_id = month if price_date_type == "regular" else f"{month}-holiday"
 
     now = datetime.now(timezone.utc)
     doc = {
-        '_id': month,
+        '_id': doc_id,
         'month': month,
+        'price_date_type': price_date_type,
         'imported_at': now,
         'imported_by': current_user.username,
         'regular_prices': parsed['regular_prices'],
         'period_prices': parsed['period_prices'],
     }
 
-    # 同月数据直接覆盖
-    COLLECTION.replace_one({'_id': month}, doc, upsert=True)
+    # 同 ID 数据直接覆盖
+    COLLECTION.replace_one({'_id': doc_id}, doc, upsert=True)
 
-    logger.info(f"月份 {month} 零售结算价格已导入，操作人：{current_user.username}")
+    logger.info(f"月份 {month} ({price_date_type}) 零售结算价格已导入，操作人：{current_user.username}")
     return {
         'status': 'success',
         'month': month,
