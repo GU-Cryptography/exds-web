@@ -5,6 +5,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from webapp.models.settlement import SettlementVersion
 from webapp.services.retail_monthly_settlement_service import RetailMonthlySettlementService
 from webapp.services.retail_settlement_service import RetailSettlementService
 
@@ -17,6 +18,10 @@ monthly_service = RetailMonthlySettlementService()
 class RetailCalculationRequest(BaseModel):
     date: str = Field(..., description="结算日期 YYYY-MM-DD")
     force: bool = Field(False, description="是否强制重算")
+    wholesale_version: SettlementVersion = Field(
+        SettlementVersion.PLATFORM_DAILY,
+        description="零售侧所依赖的批发结算版本",
+    )
 
 
 class MonthlyCalcRequest(BaseModel):
@@ -34,7 +39,11 @@ class ResponseModel(BaseModel):
 def calculate_retail_settlement(req: RetailCalculationRequest):
     try:
         datetime.strptime(req.date, "%Y-%m-%d")
-        result = service.calculate_all_customers_daily(req.date, force=req.force)
+        result = service.calculate_all_customers_daily(
+            req.date,
+            force=req.force,
+            wholesale_version=req.wholesale_version,
+        )
         if not result or (result.get("failed", 0) > 0 and result.get("success", 0) == 0):
             return ResponseModel(code=400, message="Calculation failed or no data found", data=result)
         return ResponseModel(code=200, message="Calculation completed", data=result)

@@ -738,8 +738,10 @@ class SettlementService:
         wholesale_data = wholesale.model_dump() if hasattr(wholesale, 'model_dump') else wholesale.dict()
 
         # 2. 获取零售侧数据并聚合 (优化：增加 projection 排除重型 period_details)
+        retail_query: Dict[str, Any] = {"date": date_str, "settlement_type": settlement_type}
+
         retail_cursor = self.db.retail_settlement_daily.find(
-            {"date": date_str, "settlement_type": settlement_type},
+            retail_query,
             projection={"period_details": 0}
         )
         retail_docs = list(retail_cursor)
@@ -811,15 +813,23 @@ class SettlementService:
             "customer_list": customer_list
         }
 
-    async def get_settlement_customer_detail(self, date_str: str, customer_id: str, settlement_type: str = "daily") -> Optional[Dict]:
+    async def get_settlement_customer_detail(
+        self,
+        date_str: str,
+        customer_id: str,
+        version: SettlementVersion = SettlementVersion.PRELIMINARY,
+        settlement_type: str = "daily",
+    ) -> Optional[Dict]:
         """
         获取指定日期和客户的零售侧结算详情
         """
-        doc = self.db.retail_settlement_daily.find_one({
+        retail_query: Dict[str, Any] = {
             "date": date_str,
             "customer_id": customer_id,
             "settlement_type": settlement_type
-        })
+        }
+
+        doc = self.db.retail_settlement_daily.find_one(retail_query)
         if not doc:
             return None
             
@@ -851,6 +861,11 @@ class SettlementService:
                  {"operating_date": date_str},
                  projection={"predicted_wholesale_price": 1}
              )
+        elif version != SettlementVersion.PLATFORM_DAILY:
+             ws_doc = self.db.settlement_daily.find_one(
+                 {"operating_date": date_str, "version": version.value},
+                 projection={"predicted_wholesale_price": 1}
+             ) or ws_doc
         
         if ws_doc:
              wholesale_price = ws_doc.get("predicted_wholesale_price", 0)

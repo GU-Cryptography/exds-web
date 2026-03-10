@@ -18,6 +18,7 @@ from webapp.models.retail_settlement import (
     RetailSettlementDaily, RetailPeriodDetail, TouSummaryItem,
     ReferencePriceInfo, LinkedConfigInfo
 )
+from webapp.models.settlement import SettlementVersion
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,8 @@ class RetailSettlementService:
         customer_id: str,
         date_str: str,
         force: bool = False,
-        settlement_type: str = "daily"
+        settlement_type: str = "daily",
+        wholesale_version: SettlementVersion = SettlementVersion.PLATFORM_DAILY,
     ) -> Optional[Dict[str, Any]]:
         """
         计算单客户单日零售结算
@@ -90,7 +92,7 @@ class RetailSettlementService:
             existing = collection.find_one({
                 "customer_id": customer_id,
                 "date": date_str,
-                "settlement_type": settlement_type
+                "settlement_type": settlement_type,
             })
             if existing:
                 logger.info(f"零售结算已存在: {customer_id} {date_str}")
@@ -289,7 +291,7 @@ class RetailSettlementService:
             {
                 "customer_id": customer_id, 
                 "date": date_str,
-                "settlement_type": settlement_type
+                "settlement_type": settlement_type,
             },
             {"$set": doc},
             upsert=True,
@@ -360,7 +362,8 @@ class RetailSettlementService:
         self,
         date_str: str,
         force: bool = False,
-        settlement_type: str = "daily"
+        settlement_type: str = "daily",
+        wholesale_version: SettlementVersion = SettlementVersion.PLATFORM_DAILY,
     ) -> Dict[str, Any]:
         """
         批量计算所有签约客户的日结算
@@ -380,7 +383,13 @@ class RetailSettlementService:
         results = {"success": 0, "new_processed": 0, "failed": 0, "skipped": 0, "details": []}
         for cid in customer_ids:
             try:
-                result = self.calculate_customer_daily(cid, date_str, force=force, settlement_type=settlement_type)
+                result = self.calculate_customer_daily(
+                    cid,
+                    date_str,
+                    force=force,
+                    settlement_type=settlement_type,
+                    wholesale_version=wholesale_version,
+                )
                 if result:
                     results["success"] += 1
                     if result.get("_is_new"):

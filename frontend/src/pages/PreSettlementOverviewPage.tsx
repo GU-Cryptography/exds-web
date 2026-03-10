@@ -13,6 +13,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { zhCN } from 'date-fns/locale';
 import ArrowLeftIcon from '@mui/icons-material/ArrowLeft';
 import ArrowRightIcon from '@mui/icons-material/ArrowRight';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
 import MonetizationOnOutlinedIcon from '@mui/icons-material/MonetizationOnOutlined';
 import TrendingUpOutlinedIcon from '@mui/icons-material/TrendingUpOutlined';
@@ -31,6 +32,9 @@ import { useNavigate } from 'react-router-dom';
 import { useTabContext } from '../contexts/TabContext';
 import PreSettlementDetailPage from './PreSettlementDetailPage';
 import Link from '@mui/material/Link';
+import SettlementRecalculateDialog, {
+    SettlementRecalculateOptions,
+} from '../components/settlement/SettlementRecalculateDialog';
 
 // ====== 类型定义 ======
 interface DailyDetail {
@@ -73,6 +77,13 @@ const VERSION_OPTIONS = [
     { value: 'PLATFORM_DAILY', label: '平台日清数据' },
     { value: 'PRELIMINARY', label: '原始数据计算' },
 ];
+
+const DEFAULT_RECALCULATE_OPTIONS: SettlementRecalculateOptions = {
+    wholesalePreliminary: true,
+    wholesalePlatform: false,
+    retailPreliminary: true,
+    retailPlatform: false,
+};
 
 // 图表视图模式
 type ChartViewMode = 'price' | 'amount';
@@ -237,6 +248,12 @@ const PreSettlementOverviewPage: React.FC = () => {
     const [validating, setValidating] = useState(false);
     const [validateResult, setValidateResult] = useState<any>(null);
     const [validateError, setValidateError] = useState<string | null>(null);
+    const [reSettleDialogOpen, setReSettleDialogOpen] = useState(false);
+    const [reSettleOptions, setReSettleOptions] = useState<SettlementRecalculateOptions>(DEFAULT_RECALCULATE_OPTIONS);
+    const [reSettling, setReSettling] = useState(false);
+    const [reSettleStatus, setReSettleStatus] = useState<string>('');
+    const [reSettleProgress, setReSettleProgress] = useState({ current: 0, total: 0, currentDate: '' });
+    const reSettleStopRequestedRef = useRef(false);
 
     const leftChartRef = useRef<HTMLDivElement>(null);
     const rightChartRef = useRef<HTMLDivElement>(null);
@@ -365,6 +382,85 @@ const PreSettlementOverviewPage: React.FC = () => {
         } finally {
             setValidating(false);
         }
+    };
+
+    const executeDailyRecalculateTasks = async (targetDate: string) => {
+        if (reSettleOptions.wholesalePreliminary) {
+            await apiClient.post('/api/v1/settlement/calculate', {
+                date: targetDate,
+                version: 'PRELIMINARY',
+                force: true,
+            });
+        }
+
+        if (reSettleOptions.wholesalePlatform) {
+            await apiClient.post('/api/v1/settlement/calculate', {
+                date: targetDate,
+                version: 'PLATFORM_DAILY',
+                force: true,
+            });
+        }
+
+        if (reSettleOptions.retailPreliminary) {
+            await apiClient.post('/api/v1/retail-settlement/calculate', {
+                date: targetDate,
+                force: true,
+                wholesale_version: 'PRELIMINARY',
+            });
+        }
+
+        if (reSettleOptions.retailPlatform) {
+            await apiClient.post('/api/v1/retail-settlement/calculate', {
+                date: targetDate,
+                force: true,
+                wholesale_version: 'PLATFORM_DAILY',
+            });
+        }
+    };
+
+    const handleMonthlyReSettle = async () => {
+        if (!selectedMonth) return;
+
+        const days = eachDayOfInterval({
+            start: startOfMonth(selectedMonth),
+            end: endOfMonth(selectedMonth),
+        });
+
+        setReSettling(true);
+        reSettleStopRequestedRef.current = false;
+        setError(null);
+        setReSettleProgress({ current: 0, total: days.length, currentDate: '' });
+
+        try {
+            for (let index = 0; index < days.length; index += 1) {
+                if (reSettleStopRequestedRef.current) {
+                    setReSettleStatus(`已中断，停止在第 ${index + 1} 天之前`);
+                    break;
+                }
+
+                const currentDate = format(days[index], 'yyyy-MM-dd');
+                setReSettleProgress({ current: index + 1, total: days.length, currentDate });
+                setReSettleStatus(`正在重算日结预结算 ${currentDate} (${index + 1}/${days.length})`);
+                await executeDailyRecalculateTasks(currentDate);
+            }
+
+            if (reSettleStopRequestedRef.current) {
+                setReSettleStatus('已中断执行，正在刷新页面...');
+            } else {
+                setReSettleStatus('重新结算完成，正在刷新页面...');
+            }
+            await fetchData();
+        } catch (err: any) {
+            setError(err.response?.data?.detail || err.response?.data?.message || err.message || '重新结算过程出现错误');
+        } finally {
+            setReSettling(false);
+            reSettleStopRequestedRef.current = false;
+        }
+    };
+
+    const handleStopMonthlyReSettle = () => {
+        reSettleStopRequestedRef.current = true;
+        setReSettleStatus('正在等待当前日期执行完成后中断...');
     };
 
     const navigateToDetail = (date: string) => {
@@ -837,7 +933,7 @@ const PreSettlementOverviewPage: React.FC = () => {
                 )}
 
                 <Paper variant="outlined" sx={{ p: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <IconButton onClick={() => handleShiftMonth(-1)} disabled={loading}>
+                    <IconButton onClick={() => handleShiftMonth(-1)} disabled={loading || reSettling}>
                         <ArrowLeftIcon />
                     </IconButton>
                     <DatePicker
@@ -846,27 +942,40 @@ const PreSettlementOverviewPage: React.FC = () => {
                         onChange={(date) => setSelectedMonth(date)}
                         views={['year', 'month']}
                         minDate={new Date(2026, 0, 1)}
-                        disabled={loading}
+                        disabled={loading || reSettling}
                         slotProps={{ textField: { sx: { width: { xs: '150px', sm: '200px' } } } }}
                     />
-                    <IconButton onClick={() => handleShiftMonth(1)} disabled={loading}>
+                    <IconButton onClick={() => handleShiftMonth(1)} disabled={loading || reSettling}>
                         <ArrowRightIcon />
                     </IconButton>
 
                     <Box sx={{ flexGrow: 1 }} />
                     <FormControl size="small" sx={{ minWidth: 150 }}>
                         <InputLabel>版本</InputLabel>
-                        <Select value={version} label="版本" onChange={handleVersionChange} disabled={loading}>
+                        <Select value={version} label="版本" onChange={handleVersionChange} disabled={loading || reSettling}>
                             {VERSION_OPTIONS.map(opt => (
                                 <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
                             ))}
                         </Select>
                     </FormControl>
                     <Button
+                        variant="contained"
+                        startIcon={<RefreshIcon />}
+                        onClick={() => {
+                            setReSettleStatus('');
+                            setReSettleProgress({ current: 0, total: 0, currentDate: '' });
+                            setReSettleDialogOpen(true);
+                        }}
+                        disabled={loading || reSettling}
+                        sx={{ ml: 1 }}
+                    >
+                        重新结算
+                    </Button>
+                    <Button
                         variant="outlined"
                         color="secondary"
                         onClick={handleValidate}
-                        disabled={loading}
+                        disabled={loading || reSettling}
                         sx={{ ml: 1 }}
                     >
                         数据校验
@@ -923,6 +1032,25 @@ const PreSettlementOverviewPage: React.FC = () => {
                         {renderValidateDialog()}
                     </Box>
                 ) : null}
+                <SettlementRecalculateDialog
+                    open={reSettleDialogOpen}
+                    title={`重新结算选择 (${monthStr})`}
+                    options={reSettleOptions}
+                    onClose={() => {
+                        if (!reSettling) {
+                            setReSettleDialogOpen(false);
+                            setReSettleStatus('');
+                            setReSettleProgress({ current: 0, total: 0, currentDate: '' });
+                        }
+                    }}
+                    onChange={setReSettleOptions}
+                    onConfirm={handleMonthlyReSettle}
+                    disabled={reSettling}
+                    processing={reSettling}
+                    progress={reSettleProgress}
+                    statusText={reSettleStatus}
+                    onStop={handleStopMonthlyReSettle}
+                />
             </Box>
         </LocalizationProvider>
     );

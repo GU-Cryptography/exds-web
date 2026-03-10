@@ -4,7 +4,7 @@ import {
     Select, MenuItem, FormControl, InputLabel, SelectChangeEvent,
     useMediaQuery, Theme, Tabs, Tab, Button, Divider,
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel,
-    Drawer, Dialog, DialogTitle, DialogContent, DialogActions, FormGroup, FormControlLabel, Checkbox
+    Drawer
 } from '@mui/material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -24,6 +24,9 @@ import apiClient from '../api/client';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
 import { useTabContext } from '../contexts/TabContext';
 import SingleCustomerSettlementDetailPage from './SingleCustomerSettlementDetailPage';
+import SettlementRecalculateDialog, {
+    SettlementRecalculateOptions,
+} from '../components/settlement/SettlementRecalculateDialog';
 
 // ====== 图标组件导入 ======
 import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
@@ -72,6 +75,13 @@ const VERSION_OPTIONS = [
     { value: 'PLATFORM_DAILY', label: '平台日清数据' },
     { value: 'PRELIMINARY', label: '原始数据计算' },
 ];
+
+const DEFAULT_RECALCULATE_OPTIONS: SettlementRecalculateOptions = {
+    wholesalePreliminary: true,
+    wholesalePlatform: false,
+    retailPreliminary: true,
+    retailPlatform: false,
+};
 
 // ====== StatCard ======
 const StatCard: React.FC<{
@@ -145,11 +155,7 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
 
     // 重算弹窗状态
     const [reSettleDialogOpen, setReSettleDialogOpen] = useState(false);
-    const [reSettleOptions, setReSettleOptions] = useState({
-        wholesalePreliminary: true,
-        wholesalePlatform: false,
-        retail: true
-    });
+    const [reSettleOptions, setReSettleOptions] = useState<SettlementRecalculateOptions>(DEFAULT_RECALCULATE_OPTIONS);
 
     const chartRef1 = useRef<HTMLDivElement>(null);
     const chartRef2 = useRef<HTMLDivElement>(null);
@@ -257,12 +263,21 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                 });
             }
 
-            // 3. 零售侧全量核算
-            if (reSettleOptions.retail) {
-                setProcessStatus('正在重算：零售侧全量核算...');
+            if (reSettleOptions.retailPreliminary) {
+                setProcessStatus('正在重算：零售侧日结预结算(依赖 PRELIMINARY)...');
                 await apiClient.post('/api/v1/retail-settlement/calculate', {
                     date: dateStr,
-                    force: true
+                    force: true,
+                    wholesale_version: 'PRELIMINARY'
+                });
+            }
+
+            if (reSettleOptions.retailPlatform) {
+                setProcessStatus('正在重算：零售侧日结预结算(依赖 PLATFORM_DAILY)...');
+                await apiClient.post('/api/v1/retail-settlement/calculate', {
+                    date: dateStr,
+                    force: true,
+                    wholesale_version: 'PLATFORM_DAILY'
                 });
             }
 
@@ -1428,54 +1443,15 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                         )}
                     </Box>
                 ) : null}
-                {/* 重算选择弹窗 */}
-                <Dialog open={reSettleDialogOpen} onClose={() => !processing && setReSettleDialogOpen(false)}>
-                    <DialogTitle>重新结算选择 ({dateStr})</DialogTitle>
-                    <DialogContent dividers>
-                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                            请选择需要重新执行的结算任务类型。重算过程可能持续几秒钟。
-                        </Typography>
-                        <FormGroup>
-                            <FormControlLabel
-                                control={
-                                    <Checkbox
-                                        checked={reSettleOptions.wholesalePreliminary}
-                                        onChange={(e) => setReSettleOptions({ ...reSettleOptions, wholesalePreliminary: e.target.checked })}
-                                    />
-                                }
-                                label="批发侧 - 原始数据计算 (PRELIMINARY)"
-                            />
-                            <FormControlLabel
-                                control={
-                                    <Checkbox
-                                        checked={reSettleOptions.wholesalePlatform}
-                                        onChange={(e) => setReSettleOptions({ ...reSettleOptions, wholesalePlatform: e.target.checked })}
-                                    />
-                                }
-                                label="批发侧 - 平台日清数据 (PLATFORM_DAILY)"
-                            />
-                            <FormControlLabel
-                                control={
-                                    <Checkbox
-                                        checked={reSettleOptions.retail}
-                                        onChange={(e) => setReSettleOptions({ ...reSettleOptions, retail: e.target.checked })}
-                                    />
-                                }
-                                label="零售侧全量核算 (涵盖所有客户)"
-                            />
-                        </FormGroup>
-                    </DialogContent>
-                    <DialogActions>
-                        <Button onClick={() => setReSettleDialogOpen(false)} color="inherit">取消</Button>
-                        <Button
-                            onClick={executeReSettle}
-                            variant="contained"
-                            disabled={!reSettleOptions.wholesalePreliminary && !reSettleOptions.wholesalePlatform && !reSettleOptions.retail}
-                        >
-                            开始执行
-                        </Button>
-                    </DialogActions>
-                </Dialog>
+                <SettlementRecalculateDialog
+                    open={reSettleDialogOpen}
+                    title={`重新结算选择 (${dateStr})`}
+                    options={reSettleOptions}
+                    onClose={() => setReSettleDialogOpen(false)}
+                    onChange={setReSettleOptions}
+                    onConfirm={executeReSettle}
+                    disabled={processing}
+                />
             </Box>
         </LocalizationProvider >
     );

@@ -168,11 +168,13 @@ async def get_settlement_overview(
             }
 
         # ====== 零售侧（聚合全客户，仅统计预结算口径）======
+        retail_match = {
+            "date": {"$gte": start_date, "$lte": end_date},
+            "settlement_type": "daily",
+        }
+
         retail_pipeline = [
-            {"$match": {
-                "date": {"$gte": start_date, "$lte": end_date},
-                "settlement_type": "daily",  # 明确过滤，避免混入 monthly 版本
-            }},
+            {"$match": retail_match},
             {"$group": {
                 "_id": "$date",
                 "total_fee": {"$sum": "$total_fee"},
@@ -297,6 +299,7 @@ async def get_settlement_detail(
 @router.get("/customer-detail", response_model=ResponseModel)
 async def get_settlement_customer_detail(
     date: str = Query(..., regex=r"^\d{4}-\d{2}-\d{2}$", description="结算日期 YYYY-MM-DD"),
+    version: SettlementVersion = Query(SettlementVersion.PRELIMINARY, description="结算版本"),
     customer_id: str = Query(..., description="客户ID"),
     settlement_type: str = Query("daily", description="结算类型：daily 或 monthly"),
 ):
@@ -304,7 +307,12 @@ async def get_settlement_customer_detail(
     获取单个客户在指定日期的零售详情数据
     """
     try:
-        data = await service.get_settlement_customer_detail(date, customer_id, settlement_type=settlement_type)
+        data = await service.get_settlement_customer_detail(
+            date,
+            customer_id,
+            version=version,
+            settlement_type=settlement_type,
+        )
         if not data:
             return ResponseModel(code=404, message="No retail settlement data found for this customer/date", data=None)
         

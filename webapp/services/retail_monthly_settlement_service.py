@@ -64,7 +64,7 @@ class RetailMonthlySettlementService:
     def get_customer_records(self, month: str) -> List[Dict]:
         return list(self.db[self.CUSTOMER_COLLECTION].find({"month": month}).sort("customer_name", 1))
 
-    def validate_month_ready(self, month: str, allow_fallback: bool = False) -> Tuple[bool, str]:
+    def validate_month_ready(self, month: str, allow_fallback: bool = True) -> Tuple[bool, str]:
         energy_doc = self.db["customer_monthly_energy"].find_one({"_id": month}, {"records": 1})
         if not energy_doc:
             return False, f"{month} 缺少客户月度电量记录"
@@ -160,7 +160,7 @@ class RetailMonthlySettlementService:
             self._set_job_failed(job_id, str(exc))
             return
 
-        ready, reason = self.validate_month_ready(month, allow_fallback=force)
+        ready, reason = self.validate_month_ready(month, allow_fallback=True)
         if not ready:
             self._set_job_failed(job_id, reason)
             return
@@ -215,7 +215,7 @@ class RetailMonthlySettlementService:
                     start_date=start_date,
                     end_date=end_date,
                     end_date_str=end_date_str,
-                    allow_fallback=force,
+                    allow_fallback=True,
                 )
                 entry = self._build_base_customer_entry(group, customer_ids, calc_result)
                 base_entries.append(entry)

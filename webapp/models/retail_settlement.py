@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Dict
 from datetime import datetime
 
+from webapp.models.settlement import SettlementVersion
+
 
 class RetailPeriodDetail(BaseModel):
     """零售结算48时段明细"""
@@ -50,6 +52,10 @@ class RetailSettlementDaily(BaseModel):
     package_name: str = Field("", description="套餐名称")
     model_code: str = Field("", description="定价模型代码")
     settlement_type: str = Field("daily", description="结算类型: daily / monthly")
+    wholesale_version: Optional[SettlementVersion] = Field(
+        None,
+        description="零售侧结算依赖的批发侧结算版本",
+    )
 
     # 参考价信息
     reference_price: Optional[ReferencePriceInfo] = Field(None, description="参考价信息 (价差分成类)")
