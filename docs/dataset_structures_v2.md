@@ -1084,6 +1084,7 @@ critical_alerts = db.customer_anomaly_alerts.find({
 | `price_model.linked_config.ratio` | `Number` | 联动比例 |
 | `price_model.linked_config.target` | `String` | 联动标的类型 |
 | `price_model.linked_config.target_prices` | `Object` | 联动标的分时价格 |
+| `price_model.linked_config.target_prices_48` | `Array\|Null` | 联动标的48时段价格向量（如有） |
 | `price_model.final_prices` | `Object` | 最终结算分时价格 `{tip, peak, flat, valley, deep}` |
 | `price_model.price_ratio_adjusted` | `Boolean` | 是否触发463比例调节 |
 | `price_model.price_ratio_adjusted_base` | `Boolean` | 基准分时价是否触发463比例调节 |
@@ -1098,6 +1099,7 @@ critical_alerts = db.customer_anomaly_alerts.find({
 | `period_details.period_type_breakdown.period_type` | `String` | 分解类型（尖峰/高峰/平段/低谷/深谷） |
 | `period_details.period_type_breakdown.load_mwh` | `Number` | 该类型在该时段的月累计电量（MWh） |
 | `period_details.period_type_breakdown.fee` | `Number` | 该类型在该时段对应电费（元） |
+| `period_details.period_type_breakdown` | `说明` | 月结口径日清重算时，可通过 `fee / load_mwh / 1000` 反推该类型在该时段的月均结算单价（元/kWh） |
 | `period_details.load_mwh` | `Number` | 时段电量（MWh） |
 | `period_details.unit_price` | `Number` | 时段单价（元/kWh） |
 | `period_details.fee` | `Number` | 时段电费（元） |

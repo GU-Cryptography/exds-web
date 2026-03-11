@@ -30,6 +30,112 @@ class RetailPriceService:
         self.db = DATABASE
         self.collection = self.db["retail_settlement_prices"]
 
+    @staticmethod
+    def _normalize_price_value(value: Any) -> Optional[float]:
+        """统一价格值单位为元/kWh。"""
+        if value is None:
+            return None
+        numeric = float(value)
+        return numeric / 1000.0 if numeric > 10 else numeric
+
+    def _merge_period_prices(
+        self,
+        base_period_prices: List[Dict[str, Any]],
+        patch_period_prices: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """基于 period(1-48) 将节假日补丁覆盖到常规模板。"""
+        merged_map: Dict[int, Dict[str, Any]] = {}
+
+        for row in base_period_prices:
+            try:
+                period = int(row.get("period"))
+            except (TypeError, ValueError):
+                continue
+            merged_map[period] = dict(row)
+
+        for row in patch_period_prices:
+            try:
+                period = int(row.get("period"))
+            except (TypeError, ValueError):
+                continue
+            base_row = merged_map.get(period, {}).copy()
+            for key, value in row.items():
+                if value is not None:
+                    base_row[key] = value
+            if "period" not in base_row:
+                base_row["period"] = period
+            merged_map[period] = base_row
+
+        return [merged_map[period] for period in sorted(merged_map)]
+
+    def _get_merged_period_prices(
+        self,
+        month_str: str,
+        is_holiday: bool,
+    ) -> Tuple[List[Dict[str, Any]], str]:
+        """返回时段价格行；节假日场景使用 regular 作为 base、holiday 作为 patch。"""
+        regular_doc = self.collection.find_one({"_id": month_str})
+        holiday_doc = self.collection.find_one({"_id": f"{month_str}-holiday"}) if is_holiday else None
+
+        regular_rows = list((regular_doc or {}).get("period_prices", []) or [])
+        holiday_rows = list((holiday_doc or {}).get("period_prices", []) or [])
+
+        if is_holiday and regular_rows and holiday_rows:
+            logger.info("月份 %s 命中节假日补丁文件，按 Base+Patch 合并时段价格", month_str)
+            return self._merge_period_prices(regular_rows, holiday_rows), "official"
+
+        if holiday_rows and not regular_rows:
+            logger.warning("月份 %s 缺少常规模板，仅使用节假日补丁文件中的时段价格", month_str)
+            return holiday_rows, "official"
+
+        if regular_rows:
+            if is_holiday and not holiday_rows:
+                logger.info("日期 %s-* 为节假日但未找到专项文件，回退使用通用价格文件", month_str)
+            return regular_rows, "official"
+
+        return [], "simulated"
+
+    def _extract_time_based_values(
+        self,
+        period_prices: List[Dict[str, Any]],
+        price_key: str,
+    ) -> Union[Dict[str, float], List[float], None]:
+        """从时段价格行中提取 48 点或 5 段结果。"""
+        if not period_prices:
+            return None
+
+        # 按 period 序号提取 48 点价格向量
+        if len(period_prices) >= 24:
+            value_map: Dict[int, float] = {}
+            for row in period_prices:
+                try:
+                    period = int(row.get("period"))
+                except (TypeError, ValueError):
+                    continue
+                normalized = self._normalize_price_value(row.get(price_key))
+                value_map[period] = float(normalized or 0.0)
+            if value_map:
+                return [float(value_map.get(idx, 0.0)) for idx in range(1, 49)]
+
+        # 兼容 5 段模板
+        result: Dict[str, float] = {}
+        for row in period_prices:
+            ptype_cn = row.get("period_type", "平段")
+            pkey = TOU_TYPE_MAP.get(ptype_cn, "flat")
+            normalized = self._normalize_price_value(row.get(price_key))
+            result[pkey] = float(normalized or 0.0)
+        return result if result else None
+
+    def get_monthly_base_price(self, month_str: str, price_key: str) -> Optional[float]:
+        """获取月度统一基准价，仅使用常规文件。"""
+        doc = self.collection.find_one({"_id": month_str}, {"regular_prices": 1})
+        if doc:
+            for row in doc.get("regular_prices", []) or []:
+                if row.get("price_type_key") == price_key and row.get("value") is not None:
+                    normalized = self._normalize_price_value(row.get("value"))
+                    return float(normalized) if normalized is not None else None
+        return None
+
     def get_reference_price_values(
         self,
         price_key: str,
@@ -60,47 +166,20 @@ class RetailPriceService:
         # 逻辑：如果是节假日，优先找 YYYY-MM-holiday；否则或未找到，找 YYYY-MM
         hs = get_holiday_service()
         is_holiday = hs.is_holiday(datetime.strptime(date_str, "%Y-%m-%d").date())
-        
-        doc = None
-        if is_holiday:
-            doc = self.collection.find_one({"_id": f"{month_str}-holiday"})
-            if doc:
-                logger.info(f"日期 {date_str} 命中节假日专项价格文件")
-        
-        if not doc:
-            doc = self.collection.find_one({"_id": month_str})
-            if doc and is_holiday:
-                logger.info(f"日期 {date_str} 为节假日但未找到专项文件，回退使用通用价格文件")
 
-        if doc:
-            if is_time_based:
-                # 获取分时价格 (5 段或 48 点)
-                period_prices = doc.get("period_prices", [])
-                if period_prices:
-                    if len(period_prices) == 48:
-                        # 现货 48 点返回列表
-                        vals = []
-                        for p in period_prices:
-                            val = p.get(price_key, 0.0)
-                            vals.append(float(val) / 1000.0 if val > 10 else float(val))
-                        return vals, "official"
-                    else:
-                        # 5 段分时返回字典
-                        res_dict = {}
-                        for p in period_prices:
-                            ptype_cn = p.get("period_type", "平段")
-                            pkey = TOU_TYPE_MAP.get(ptype_cn, "flat")
-                            val = p.get(price_key, 0.0)
-                            res_dict[pkey] = float(val) / 1000.0 if val > 10 else float(val)
-                        return res_dict, "official"
-            else:
-                # 获取常规价格单值
-                regular_prices = doc.get("regular_prices", [])
-                for p in regular_prices:
-                    if p.get("price_type_key") == price_key:
-                        val = p.get("value")
-                        if val is not None:
-                            return float(val), "official"
+        if is_time_based:
+            period_prices, source = self._get_merged_period_prices(month_str, is_holiday=is_holiday)
+            extracted = self._extract_time_based_values(period_prices, price_key)
+            if extracted is not None:
+                return extracted, source
+        else:
+            doc = self.collection.find_one({"_id": month_str})
+            if doc:
+                for p in doc.get("regular_prices", []) or []:
+                    if p.get("price_type_key") == price_key and p.get("value") is not None:
+                        normalized = self._normalize_price_value(p.get("value"))
+                        if normalized is not None:
+                            return float(normalized), "official"
 
         # 2. 如果无正式数据或查找失败，进入降级处理
         logger.info(f"月份 {month_str} 无正式定价数据 [{price_key}]，采用模拟方案")

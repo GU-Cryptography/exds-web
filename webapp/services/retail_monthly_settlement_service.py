@@ -9,7 +9,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from webapp.models.load_enums import FusionStrategy
+from webapp.services.holiday_service import get_holiday_service
 from webapp.services.load_query_service import LoadQueryService
+from webapp.services.retail_price_service import retail_price_service
 from webapp.services.retail_settlement_service import (
     DEFAULT_RATIOS,
     TOU_TYPE_MAP,
@@ -33,9 +35,201 @@ class RetailMonthlySettlementService:
         self.db = DATABASE
         self.retail_service = RetailSettlementService()
 
+    @staticmethod
+    def _scale_price_result(price_result: Dict[str, Any], ratio: float) -> Dict[str, Any]:
+        """按统一比例缩放价格结果中的 5 段价与 48 点价。"""
+        scaled = dict(price_result)
+        final_prices = dict(price_result.get("final_prices", {}) or {})
+        scaled["final_prices"] = {k: float(v) * ratio for k, v in final_prices.items()}
+
+        final_prices_48 = list(price_result.get("final_prices_48") or [])
+        if final_prices_48:
+            scaled["final_prices_48"] = [float(v) * ratio for v in final_prices_48]
+        return scaled
+
+    def _find_monthly_template_dates(self, date_keys: List[str]) -> Tuple[str, Optional[str], List[str], Optional[List[str]]]:
+        """选择常规模板日期与节假日模板日期。"""
+        if not date_keys:
+            raise ValueError("月份内无可用日期")
+
+        holiday_service = get_holiday_service()
+
+        regular_date = date_keys[0]
+        for date_str in date_keys:
+            current_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            if not holiday_service.is_holiday(current_date):
+                regular_date = date_str
+                break
+
+        regular_tou_48 = self.retail_service._get_tou_48(regular_date)
+        if not regular_tou_48 or len(regular_tou_48) != 48:
+            raise ValueError(f"{regular_date} 峰谷时段定义异常")
+
+        holiday_date: Optional[str] = None
+        holiday_tou_48: Optional[List[str]] = None
+        for date_str in date_keys:
+            current_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            if not holiday_service.is_holiday(current_date):
+                continue
+            current_tou_48 = self.retail_service._get_tou_48(date_str)
+            if not current_tou_48 or len(current_tou_48) != 48:
+                continue
+            if current_tou_48 != regular_tou_48:
+                holiday_date = date_str
+                holiday_tou_48 = current_tou_48
+                break
+
+        return regular_date, holiday_date, regular_tou_48, holiday_tou_48
+
+    def _build_price_result_for_date(
+        self,
+        model_code: str,
+        pricing_config: Dict[str, Any],
+        date_str: str,
+        total_energy: float,
+    ) -> Dict[str, Any]:
+        """按指定日期计算单套月结价格模板。"""
+        if model_code.startswith("price_spread"):
+            is_time_based_pkg = model_code.endswith("_time") and not model_code.endswith("_non_time")
+            result = self.retail_service._calculate_price_spread(
+                pricing_config,
+                date_str,
+                is_time_based_package=is_time_based_pkg,
+                total_load_mwh=total_energy,
+                settlement_type="monthly",
+            )
+        elif model_code.startswith("fixed_linked"):
+            result = self.retail_service._calculate_fixed_linked(
+                pricing_config,
+                date_str,
+                settlement_type="monthly",
+            )
+        elif model_code.startswith("reference_linked"):
+            is_time_based_pkg = model_code.endswith("_time") and not model_code.endswith("_non_time")
+            result = self.retail_service._calculate_reference_linked(
+                pricing_config,
+                date_str,
+                is_time_based_package=is_time_based_pkg,
+                total_load_mwh=total_energy,
+                settlement_type="monthly",
+            )
+        elif model_code.startswith("single_comprehensive"):
+            result = self.retail_service._calculate_single_comprehensive(
+                pricing_config,
+                date_str,
+                settlement_type="monthly",
+            )
+        else:
+            raise ValueError(f"不支持的定价模型: {model_code}")
+
+        if not result:
+            raise ValueError(f"日期 {date_str} 未计算出有效价格模板")
+        return result
+
+    @staticmethod
+    def _resolve_template_name(period_key: str, regular_key: str, holiday_key: Optional[str]) -> Optional[str]:
+        """根据 period_key 与 regular/holiday 模板答案判断来源模板。"""
+        if period_key == regular_key:
+            return "regular"
+        if holiday_key and period_key == holiday_key:
+            return "holiday"
+        return None
+
+    def _get_monthly_template_unit_price(
+        self,
+        index: int,
+        period_key: str,
+        regular_tou_48: List[str],
+        holiday_tou_48: Optional[List[str]],
+        price_result_regular: Dict[str, Any],
+        price_result_holiday: Optional[Dict[str, Any]],
+    ) -> float:
+        """按时段成分选择对应模板单价。"""
+        regular_key = TOU_TYPE_MAP.get(regular_tou_48[index], "flat")
+        holiday_key = TOU_TYPE_MAP.get(holiday_tou_48[index], "flat") if holiday_tou_48 else None
+        template_name = self._resolve_template_name(period_key, regular_key, holiday_key)
+
+        if template_name == "regular":
+            regular_prices_48 = list(price_result_regular.get("final_prices_48") or [])
+            if regular_prices_48 and len(regular_prices_48) == 48:
+                return float(regular_prices_48[index])
+            return float((price_result_regular.get("final_prices") or {}).get(period_key, 0.0))
+
+        if template_name == "holiday" and price_result_holiday:
+            holiday_prices_48 = list(price_result_holiday.get("final_prices_48") or [])
+            if holiday_prices_48 and len(holiday_prices_48) == 48:
+                return float(holiday_prices_48[index])
+            return float((price_result_holiday.get("final_prices") or {}).get(period_key, 0.0))
+
+        logger.warning(
+            "月结模板匹配失败 period=%s period_key=%s regular_key=%s holiday_key=%s，回退 regular 5 段价",
+            index + 1,
+            period_key,
+            regular_key,
+            holiday_key,
+        )
+        return float((price_result_regular.get("final_prices") or {}).get(period_key, 0.0))
+
+    def _calculate_nominal_total_fee_with_templates(
+        self,
+        monthly_load_values: List[float],
+        period_breakdown_maps: List[Dict[str, float]],
+        regular_tou_48: List[str],
+        holiday_tou_48: Optional[List[str]],
+        price_result_regular: Dict[str, Any],
+        price_result_holiday: Optional[Dict[str, Any]],
+    ) -> float:
+        """按 regular/holiday 双模板计算名义总电费。"""
+        total_fee = 0.0
+        for index in range(48):
+            load_mwh = float(monthly_load_values[index] if index < len(monthly_load_values) else 0.0)
+            if load_mwh <= 0:
+                continue
+
+            breakdown_map = period_breakdown_maps[index] if index < len(period_breakdown_maps) else {}
+            active_keys = [k for k, v in breakdown_map.items() if float(v or 0.0) > 0]
+            if not active_keys:
+                regular_key = TOU_TYPE_MAP.get(regular_tou_48[index], "flat")
+                unit_price = self._get_monthly_template_unit_price(
+                    index=index,
+                    period_key=regular_key,
+                    regular_tou_48=regular_tou_48,
+                    holiday_tou_48=holiday_tou_48,
+                    price_result_regular=price_result_regular,
+                    price_result_holiday=price_result_holiday,
+                )
+                total_fee += unit_price * load_mwh * 1000
+                continue
+
+            for period_key in active_keys:
+                seg_load = float(breakdown_map.get(period_key, 0.0))
+                unit_price = self._get_monthly_template_unit_price(
+                    index=index,
+                    period_key=period_key,
+                    regular_tou_48=regular_tou_48,
+                    holiday_tou_48=holiday_tou_48,
+                    price_result_regular=price_result_regular,
+                    price_result_holiday=price_result_holiday,
+                )
+                total_fee += unit_price * seg_load * 1000
+
+        return total_fee
+
+    @staticmethod
+    def _get_breakdown_unit_price(period_detail: Dict[str, Any], period_type_cn: str) -> Optional[float]:
+        """从 period_type_breakdown 中反推指定类型的月均单价。"""
+        for item in period_detail.get("period_type_breakdown", []) or []:
+            if item.get("period_type") != period_type_cn:
+                continue
+            load_mwh = float(item.get("load_mwh") or 0.0)
+            fee = float(item.get("fee") or 0.0)
+            if load_mwh > 0:
+                return fee / (load_mwh * 1000.0)
+        return None
+
     def initialize_job(self, month: str, force: bool = False) -> str:
         job_id = uuid4().hex
-        now = datetime.utcnow()
+        now = datetime.now()
         self.db[self.JOB_COLLECTION].insert_one(
             {
                 "_id": job_id,
@@ -404,57 +598,62 @@ class RetailMonthlySettlementService:
 
         model_code = package_info.get("model_code", "")
         pricing_config = package_info.get("pricing_config", {})
+        regular_date_str, holiday_date_str, regular_tou_48, holiday_tou_48 = self._find_monthly_template_dates(date_keys)
 
-        if model_code.startswith("price_spread"):
-            is_time_based_pkg = model_code.endswith("_time") and not model_code.endswith("_non_time")
-            price_result = self.retail_service._calculate_price_spread(
-                pricing_config,
-                end_date_str,
-                is_time_based_package=is_time_based_pkg,
-                total_load_mwh=total_energy,
-                settlement_type="monthly",
-            )
-        elif model_code.startswith("fixed_linked"):
-            price_result = self.retail_service._calculate_fixed_linked(
-                pricing_config,
-                end_date_str,
-                settlement_type="monthly",
-            )
-        elif model_code.startswith("reference_linked"):
-            is_time_based_pkg = model_code.endswith("_time") and not model_code.endswith("_non_time")
-            price_result = self.retail_service._calculate_reference_linked(
-                pricing_config,
-                end_date_str,
-                is_time_based_package=is_time_based_pkg,
-                total_load_mwh=total_energy,
-                settlement_type="monthly",
-            )
-        elif model_code.startswith("single_comprehensive"):
-            price_result = self.retail_service._calculate_single_comprehensive(
-                pricing_config,
-                end_date_str,
-                settlement_type="monthly",
-            )
-        else:
-            raise ValueError(f"客户 {customer_name} 不支持的定价模型: {model_code}")
-
-        final_prices = dict(price_result.get("final_prices", {}) or {})
-        final_prices_48 = list(price_result.get("final_prices_48") or []) or None
-        nominal_total_fee = self._calculate_total_fee(
-            load_values=monthly_load_values,
-            period_breakdown_maps=period_breakdown_maps,
-            fallback_tou_48=fallback_tou_48,
-            final_prices=final_prices,
-            final_prices_48=final_prices_48,
+        price_result_regular = self._build_price_result_for_date(
+            model_code=model_code,
+            pricing_config=pricing_config,
+            date_str=regular_date_str,
+            total_energy=total_energy,
         )
+        price_result_holiday = None
+        if holiday_date_str and holiday_tou_48:
+            price_result_holiday = self._build_price_result_for_date(
+                model_code=model_code,
+                pricing_config=pricing_config,
+                date_str=holiday_date_str,
+                total_energy=total_energy,
+            )
+
+        price_result = price_result_regular
+        use_dual_templates = price_result_holiday is not None and holiday_tou_48 is not None
+
+        if use_dual_templates:
+            nominal_total_fee = self._calculate_nominal_total_fee_with_templates(
+                monthly_load_values=monthly_load_values,
+                period_breakdown_maps=period_breakdown_maps,
+                regular_tou_48=regular_tou_48,
+                holiday_tou_48=holiday_tou_48,
+                price_result_regular=price_result_regular,
+                price_result_holiday=price_result_holiday,
+            )
+            final_prices = dict(price_result_regular.get("final_prices", {}) or {})
+            final_prices_48 = list(price_result_regular.get("final_prices_48") or []) or None
+        else:
+            final_prices = dict(price_result_regular.get("final_prices", {}) or {})
+            final_prices_48 = list(price_result_regular.get("final_prices_48") or []) or None
+            nominal_total_fee = self._calculate_total_fee(
+                load_values=monthly_load_values,
+                period_breakdown_maps=period_breakdown_maps,
+                fallback_tou_48=fallback_tou_48,
+                final_prices=final_prices,
+                final_prices_48=final_prices_48,
+            )
         nominal_avg_price = nominal_total_fee / (total_energy * 1000) if total_energy > 0 else 0.0
         ratio = cap_price / nominal_avg_price if nominal_avg_price > cap_price + 1e-12 and nominal_avg_price > 0 else 1.0
         is_capped = ratio < 1.0
 
         if is_capped:
-            final_prices = {k: v * ratio for k, v in final_prices.items()}
-            if final_prices_48 and len(final_prices_48) == 48:
-                final_prices_48 = [v * ratio for v in final_prices_48]
+            if use_dual_templates:
+                price_result_regular = self._scale_price_result(price_result_regular, ratio)
+                if price_result_holiday:
+                    price_result_holiday = self._scale_price_result(price_result_holiday, ratio)
+                final_prices = dict(price_result_regular.get("final_prices", {}) or {})
+                final_prices_48 = list(price_result_regular.get("final_prices_48") or []) or None
+            else:
+                final_prices = {k: v * ratio for k, v in final_prices.items()}
+                if final_prices_48 and len(final_prices_48) == 48:
+                    final_prices_48 = [v * ratio for v in final_prices_48]
 
         period_details: List[Dict[str, Any]] = []
         tou_summary: Dict[str, Dict[str, float]] = {
@@ -476,11 +675,21 @@ class RetailMonthlySettlementService:
 
             if len(period_keys) == 1:
                 single_key = period_keys[0]
-                unit_price = (
-                    float(final_prices_48[i])
-                    if final_prices_48 and len(final_prices_48) == 48
-                    else float(final_prices.get(single_key, 0.0))
-                )
+                if use_dual_templates:
+                    unit_price = self._get_monthly_template_unit_price(
+                        index=i,
+                        period_key=single_key,
+                        regular_tou_48=regular_tou_48,
+                        holiday_tou_48=holiday_tou_48,
+                        price_result_regular=price_result_regular,
+                        price_result_holiday=price_result_holiday,
+                    )
+                else:
+                    unit_price = (
+                        float(final_prices_48[i])
+                        if final_prices_48 and len(final_prices_48) == 48
+                        else float(final_prices.get(single_key, 0.0))
+                    )
                 fee = unit_price * load_mwh * 1000
                 breakdown_fee_map[single_key] = fee
                 period_type = TOU_TYPE_MAP_REV.get(single_key, fallback_tou_48[i])
@@ -488,7 +697,17 @@ class RetailMonthlySettlementService:
                 fee = 0.0
                 for period_key in period_keys:
                     seg_load = float(breakdown_map.get(period_key, 0.0))
-                    seg_unit_price = float(final_prices.get(period_key, 0.0))
+                    if use_dual_templates:
+                        seg_unit_price = self._get_monthly_template_unit_price(
+                            index=i,
+                            period_key=period_key,
+                            regular_tou_48=regular_tou_48,
+                            holiday_tou_48=holiday_tou_48,
+                            price_result_regular=price_result_regular,
+                            price_result_holiday=price_result_holiday,
+                        )
+                    else:
+                        seg_unit_price = float(final_prices.get(period_key, 0.0))
                     seg_fee = seg_unit_price * seg_load * 1000
                     fee += seg_fee
                     breakdown_fee_map[period_key] = seg_fee
@@ -503,11 +722,21 @@ class RetailMonthlySettlementService:
                 period_type = "period_type_mix"
             else:
                 fallback_key = TOU_TYPE_MAP.get(fallback_tou_48[i], "flat")
-                unit_price = (
-                    float(final_prices_48[i])
-                    if final_prices_48 and len(final_prices_48) == 48
-                    else float(final_prices.get(fallback_key, 0.0))
-                )
+                if use_dual_templates:
+                    unit_price = self._get_monthly_template_unit_price(
+                        index=i,
+                        period_key=fallback_key,
+                        regular_tou_48=regular_tou_48,
+                        holiday_tou_48=holiday_tou_48,
+                        price_result_regular=price_result_regular,
+                        price_result_holiday=price_result_holiday,
+                    )
+                else:
+                    unit_price = (
+                        float(final_prices_48[i])
+                        if final_prices_48 and len(final_prices_48) == 48
+                        else float(final_prices.get(fallback_key, 0.0))
+                    )
                 fee = 0.0
                 period_type = fallback_tou_48[i]
 
@@ -689,15 +918,13 @@ class RetailMonthlySettlementService:
         return total_fee
 
     def _check_monthly_cap_base_ready(self, month: str, allow_fallback: bool) -> Tuple[bool, str]:
-        doc = self.db["retail_settlement_prices"].find_one({"_id": month}, {"regular_prices": 1})
-        if not doc:
+        value = retail_price_service.get_monthly_base_price(month, "market_longterm_flat_avg")
+        if value is None:
             if allow_fallback:
                 return True, ""
             return False, f"{month} 未发布零售结算价格定义，确认后可降级计算"
 
-        regular_prices = doc.get("regular_prices", []) or []
-        found = any((p.get("price_type_key") == "market_longterm_flat_avg" and p.get("value") is not None) for p in regular_prices)
-        if found:
+        if value > 0:
             return True, ""
 
         if allow_fallback:
@@ -713,12 +940,9 @@ class RetailMonthlySettlementService:
         return round(base_price * (1 + ratio), 6)
 
     def _get_monthly_cap_base_price(self, month: str, allow_fallback: bool) -> float:
-        doc = self.db["retail_settlement_prices"].find_one({"_id": month}, {"regular_prices": 1})
-        regular_prices = (doc or {}).get("regular_prices", []) or []
-        for row in regular_prices:
-            if row.get("price_type_key") == "market_longterm_flat_avg" and row.get("value") is not None:
-                value = float(row.get("value"))
-                return value / 1000.0 if value > 10 else value
+        value = retail_price_service.get_monthly_base_price(month, "market_longterm_flat_avg")
+        if value is not None and value > 0:
+            return float(value)
 
         if not allow_fallback:
             raise ValueError(f"{month} 缺少 market_longterm_flat_avg，无法计算月度封顶价")
@@ -816,7 +1040,7 @@ class RetailMonthlySettlementService:
         excess_profit_total = excess_profit_per_mwh * retail_total_energy
         excess_refund_pool = excess_profit_total * 0.8
 
-        now = datetime.utcnow()
+        now = datetime.now()
         return {
             "_id": month,
             "month": month,
@@ -838,7 +1062,7 @@ class RetailMonthlySettlementService:
 
     def _persist_base_customer_entries(self, month: str, entries: List[Dict], status_doc: Dict) -> None:
         collection = self.db[self.CUSTOMER_COLLECTION]
-        now = datetime.utcnow()
+        now = datetime.now()
 
         for entry in entries:
             doc_id = self._build_customer_doc_id(month, entry["customer_name"])
@@ -964,7 +1188,7 @@ class RetailMonthlySettlementService:
             return
 
         refund_pool = float(status_doc.get("excess_refund_pool") or 0.0)
-        now = datetime.utcnow()
+        now = datetime.now()
 
         for entry in entries:
             ratio = entry["total_energy_mwh"] / total_energy_for_ratio if total_energy_for_ratio > 0 else 0.0
@@ -1102,14 +1326,14 @@ class RetailMonthlySettlementService:
             {
                 "status": "failed",
                 "message": message,
-                "updated_at": datetime.utcnow(),
+                "updated_at": datetime.now(),
             },
             initialize=False,
         )
 
     def _update_job(self, job_id: str, fields: Dict, initialize: bool = True) -> None:
         payload = fields.copy()
-        payload["updated_at"] = datetime.utcnow()
+        payload["updated_at"] = datetime.now()
         self.db[self.JOB_COLLECTION].update_one(
             {"_id": job_id},
             {"$set": payload},
@@ -1163,7 +1387,7 @@ class RetailMonthlySettlementService:
                 failed_customers.append(customer_name)
 
         # 更新月结状态
-        now = datetime.utcnow()
+        now = datetime.now()
         self.db[self.STATUS_COLLECTION].update_one(
             {"_id": month},
             {
@@ -1210,6 +1434,8 @@ class RetailMonthlySettlementService:
         if period_details_in_doc and len(period_details_in_doc) == 48:
             sorted_details = sorted(period_details_in_doc, key=lambda x: x.get("period", 0))
             final_prices_48 = [float(p.get("unit_price", 0.0)) for p in sorted_details]
+        else:
+            sorted_details = []
 
         # 2. 计算度电返还价差（元/kWh）
         #    分母使用 final_energy_mwh（与方案 4.2 公式一致），允许结果为 0
@@ -1247,6 +1473,7 @@ class RetailMonthlySettlementService:
                     load_values=load_values,
                     final_prices_5=final_prices_5,
                     final_prices_48=final_prices_48,
+                    monthly_period_details=sorted_details,
                     refund_unit_price_kwh=refund_unit_price_kwh,
                     surplus_unit_price=surplus_unit_price,
                     actual_monthly_volume=final_energy_mwh,
@@ -1268,6 +1495,7 @@ class RetailMonthlySettlementService:
         load_values: List[float],
         final_prices_5: Dict[str, float],
         final_prices_48: List[float],
+        monthly_period_details: List[Dict[str, Any]],
         refund_unit_price_kwh: float,
         surplus_unit_price: float,
         actual_monthly_volume: float = 0.0,
@@ -1314,7 +1542,21 @@ class RetailMonthlySettlementService:
             period_key = TOU_TYPE_MAP.get(period_type_cn, "flat")
 
             # 零售单价（元/kWh）= 月结48时段高精度价格 或 5时段价格 - 度电返还价差（允许负价）
-            if final_prices_48 and len(final_prices_48) == 48:
+            if monthly_period_details and i < len(monthly_period_details):
+                period_detail = monthly_period_details[i]
+                if period_detail.get("period_type") == "period_type_mix":
+                    breakdown_unit_price = self._get_breakdown_unit_price(period_detail, period_type_cn)
+                    if breakdown_unit_price is not None:
+                        base_price = breakdown_unit_price
+                    elif final_prices_48 and len(final_prices_48) == 48:
+                        base_price = float(final_prices_48[i])
+                    else:
+                        base_price = float(final_prices_5.get(period_key, 0.0))
+                elif final_prices_48 and len(final_prices_48) == 48:
+                    base_price = float(final_prices_48[i])
+                else:
+                    base_price = float(final_prices_5.get(period_key, 0.0))
+            elif final_prices_48 and len(final_prices_48) == 48:
                 base_price = float(final_prices_48[i])
             else:
                 base_price = float(final_prices_5.get(period_key, 0.0))
@@ -1355,7 +1597,7 @@ class RetailMonthlySettlementService:
             for k, v in tou_summary.items()
         }
 
-        now = datetime.utcnow()
+        now = datetime.now()
         doc = {
             "customer_id": customer_id,
             "customer_name": customer_name,
