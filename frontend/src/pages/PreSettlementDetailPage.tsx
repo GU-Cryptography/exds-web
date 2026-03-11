@@ -79,8 +79,7 @@ const VERSION_OPTIONS = [
 const DEFAULT_RECALCULATE_OPTIONS: SettlementRecalculateOptions = {
     wholesalePreliminary: true,
     wholesalePlatform: false,
-    retailPreliminary: true,
-    retailPlatform: false,
+    retailDaily: true,
 };
 
 // ====== StatCard ======
@@ -263,22 +262,30 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                 });
             }
 
-            if (reSettleOptions.retailPreliminary) {
-                setProcessStatus('正在重算：零售侧日结预结算(依赖 PRELIMINARY)...');
-                await apiClient.post('/api/v1/retail-settlement/calculate', {
-                    date: dateStr,
-                    force: true,
-                    wholesale_version: 'PRELIMINARY'
-                });
-            }
-
-            if (reSettleOptions.retailPlatform) {
-                setProcessStatus('正在重算：零售侧日结预结算(依赖 PLATFORM_DAILY)...');
-                await apiClient.post('/api/v1/retail-settlement/calculate', {
-                    date: dateStr,
-                    force: true,
-                    wholesale_version: 'PLATFORM_DAILY'
-                });
+            if (reSettleOptions.retailDaily) {
+                setProcessStatus('正在重算：零售侧日结预结算(默认PLATFORM_DAILY,缺失降级)...');
+                try {
+                    const res = await apiClient.post('/api/v1/retail-settlement/calculate', {
+                        date: dateStr,
+                        force: true,
+                        wholesale_version: 'PLATFORM_DAILY'
+                    });
+                    if (res.data.code !== 200 || (res.data.data && res.data.data.failed > 0 && res.data.data.success === 0)) {
+                        setProcessStatus('平台数据不足，降级依赖 PRELIMINARY 重算零售侧...');
+                        await apiClient.post('/api/v1/retail-settlement/calculate', {
+                            date: dateStr,
+                            force: true,
+                            wholesale_version: 'PRELIMINARY'
+                        });
+                    }
+                } catch (err: any) {
+                    setProcessStatus('请求异常，降级依赖 PRELIMINARY 重算零售侧...');
+                    await apiClient.post('/api/v1/retail-settlement/calculate', {
+                        date: dateStr,
+                        force: true,
+                        wholesale_version: 'PRELIMINARY'
+                    });
+                }
             }
 
             setProcessStatus('重算完成，正在刷新页面...');

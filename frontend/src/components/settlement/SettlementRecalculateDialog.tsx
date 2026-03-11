@@ -16,8 +16,7 @@ import {
 export interface SettlementRecalculateOptions {
     wholesalePreliminary: boolean;
     wholesalePlatform: boolean;
-    retailPreliminary: boolean;
-    retailPlatform: boolean;
+    retailDaily: boolean;
 }
 
 interface SettlementRecalculateDialogProps {
@@ -91,22 +90,12 @@ const SettlementRecalculateDialog: React.FC<SettlementRecalculateDialogProps> = 
                     <FormControlLabel
                         control={
                             <Checkbox
-                                checked={options.retailPreliminary}
-                                onChange={(e) => updateOption('retailPreliminary', e.target.checked)}
+                                checked={options.retailDaily}
+                                onChange={(e) => updateOption('retailDaily', e.target.checked)}
                                 disabled={processing}
                             />
                         }
-                        label="零售侧日结预结算 (依赖 PRELIMINARY)"
-                    />
-                    <FormControlLabel
-                        control={
-                            <Checkbox
-                                checked={options.retailPlatform}
-                                onChange={(e) => updateOption('retailPlatform', e.target.checked)}
-                                disabled={processing}
-                            />
-                        }
-                        label="零售侧日结预结算 (依赖 PLATFORM_DAILY)"
+                        label="零售侧日结预结算 (默认PLATFORM_DAILY, 缺失时降级为PRELIMINARY)"
                     />
                 </FormGroup>
 

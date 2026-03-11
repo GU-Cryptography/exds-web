@@ -81,8 +81,7 @@ const VERSION_OPTIONS = [
 const DEFAULT_RECALCULATE_OPTIONS: SettlementRecalculateOptions = {
     wholesalePreliminary: true,
     wholesalePlatform: false,
-    retailPreliminary: true,
-    retailPlatform: false,
+    retailDaily: true,
 };
 
 // 图表视图模式
@@ -401,20 +400,30 @@ const PreSettlementOverviewPage: React.FC = () => {
             });
         }
 
-        if (reSettleOptions.retailPreliminary) {
-            await apiClient.post('/api/v1/retail-settlement/calculate', {
-                date: targetDate,
-                force: true,
-                wholesale_version: 'PRELIMINARY',
-            });
-        }
+        if (reSettleOptions.retailDaily) {
+            try {
+                const res = await apiClient.post('/api/v1/retail-settlement/calculate', {
+                    date: targetDate,
+                    force: true,
+                    wholesale_version: 'PLATFORM_DAILY',
+                });
 
-        if (reSettleOptions.retailPlatform) {
-            await apiClient.post('/api/v1/retail-settlement/calculate', {
-                date: targetDate,
-                force: true,
-                wholesale_version: 'PLATFORM_DAILY',
-            });
+                // 如果后端返回 code != 200 或执行全失败，则降级
+                if (res.data.code !== 200 || (res.data.data && res.data.data.failed > 0 && res.data.data.success === 0)) {
+                    await apiClient.post('/api/v1/retail-settlement/calculate', {
+                        date: targetDate,
+                        force: true,
+                        wholesale_version: 'PRELIMINARY',
+                    });
+                }
+            } catch (err: any) {
+                // 出现 HTTP 异常也尝试降级兜底
+                await apiClient.post('/api/v1/retail-settlement/calculate', {
+                    date: targetDate,
+                    force: true,
+                    wholesale_version: 'PRELIMINARY',
+                });
+            }
         }
     };
 
@@ -672,7 +681,7 @@ const PreSettlementOverviewPage: React.FC = () => {
                                 <Grid container spacing={1}>
                                     <Grid size={{ xs: 6 }}>
                                         <Typography variant="caption" color="text.secondary">电量 (MWh)</Typography>
-                                        <Typography variant="body2">{hasRowData ? d.volume_mwh.toFixed(1) : '-'}</Typography>
+                                        <Typography variant="body2">{hasRowData ? d.volume_mwh.toFixed(3) : '-'}</Typography>
                                     </Grid>
                                     <Grid size={{ xs: 6 }}>
                                         <Typography variant="caption" color="text.secondary">价差 (元/MWh)</Typography>
@@ -704,7 +713,7 @@ const PreSettlementOverviewPage: React.FC = () => {
                         <Grid container spacing={1}>
                             <Grid size={{ xs: 6 }}>
                                 <Typography variant="caption" color="text.secondary">总电量 (MWh)</Typography>
-                                <Typography variant="body2">{s.total_volume_mwh.toFixed(1)}</Typography>
+                                <Typography variant="body2">{s.total_volume_mwh.toFixed(3)}</Typography>
                             </Grid>
                             <Grid size={{ xs: 6 }}>
                                 <Typography variant="caption" color="text.secondary">批零价差 (元/MWh)</Typography>
@@ -775,7 +784,7 @@ const PreSettlementOverviewPage: React.FC = () => {
                                             {d.date.substring(5)}
                                         </Link>
                                     </TableCell>
-                                    <TableCell align="right">{hasRowData ? d.volume_mwh.toFixed(1) : '-'}</TableCell>
+                                    <TableCell align="right">{hasRowData ? d.volume_mwh.toFixed(3) : '-'}</TableCell>
                                     <TableCell align="right">{hasRowData ? formatYuan(d.wholesale_cost) : '-'}</TableCell>
                                     <TableCell align="right">{hasRowData ? formatYuan(d.deviation_recovery_fee) : '-'}</TableCell>
                                     <TableCell align="right">{hasRowData ? d.wholesale_avg_price.toFixed(2) : '-'}</TableCell>
@@ -803,7 +812,7 @@ const PreSettlementOverviewPage: React.FC = () => {
                         })}
                         <TableRow sx={{ backgroundColor: 'action.selected', '& .MuiTableCell-root': { fontWeight: 'bold' } }}>
                             <TableCell>月累计</TableCell>
-                            <TableCell align="right">{s.total_volume_mwh.toFixed(1)}</TableCell>
+                            <TableCell align="right">{s.total_volume_mwh.toFixed(3)}</TableCell>
                             <TableCell align="right">{formatYuan(s.total_wholesale_cost)}</TableCell>
                             <TableCell align="right">{formatYuan(s.total_deviation_recovery_fee)}</TableCell>
                             <TableCell align="right">{s.wholesale_avg_price.toFixed(2)}</TableCell>

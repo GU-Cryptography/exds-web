@@ -89,7 +89,7 @@ class SettlementService:
                     active_customers,
                     date_str,
                     date_str,
-                    strategy=FusionStrategy.MP_COMPLETE
+                    strategy=FusionStrategy.MP_ONLY
                 )
                 if not load_curves:
                     missing_items.append("aggregated_load_curve")
@@ -488,7 +488,7 @@ class SettlementService:
             
         load_curves = LoadQueryService.aggregate_curve_series(
             active_customers, date_str, date_str, 
-            strategy=FusionStrategy.MP_COMPLETE
+            strategy=FusionStrategy.MP_ONLY
         )
         if not load_curves:
             logger.warning(f"当日无聚合负荷数据: {date_str}")
