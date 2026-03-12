@@ -1135,36 +1135,9 @@ class RetailMonthlySettlementService:
             "created_at": now,
         }
 
-    def _build_final_wholesale_fee_map(self, entries: List[Dict], status_doc: Dict) -> Dict[str, float]:
-        """按客户最终结算电量占比，分摊批发侧月结总采购成本。"""
-        wholesale_total_fee = float(status_doc.get("wholesale_total_fee") or 0.0)
-        total_energy = sum(float(entry.get("total_energy_mwh") or 0.0) for entry in entries)
-        if wholesale_total_fee <= 0 or total_energy <= 0:
-            return {
-                str(entry.get("customer_name") or ""): 0.0
-                for entry in entries
-            }
-
-        fee_map: Dict[str, float] = {}
-        allocated_total = 0.0
-        sorted_entries = sorted(entries, key=lambda item: str(item.get("customer_name") or ""))
-
-        for index, entry in enumerate(sorted_entries):
-            customer_name = str(entry.get("customer_name") or "")
-            energy = float(entry.get("total_energy_mwh") or 0.0)
-            if index == len(sorted_entries) - 1:
-                fee = round(wholesale_total_fee - allocated_total, 6)
-            else:
-                fee = round(wholesale_total_fee * energy / total_energy, 6) if energy > 0 else 0.0
-                allocated_total += fee
-            fee_map[customer_name] = fee
-
-        return fee_map
-
     def _persist_base_customer_entries(self, month: str, entries: List[Dict], status_doc: Dict) -> None:
         collection = self.db[self.CUSTOMER_COLLECTION]
         now = datetime.now()
-        final_wholesale_fee_map = self._build_final_wholesale_fee_map(entries, status_doc)
 
         for entry in entries:
             doc_id = self._build_customer_doc_id(month, entry["customer_name"])
@@ -1189,7 +1162,7 @@ class RetailMonthlySettlementService:
             )
             post_balancing_gross_profit = round(entry["total_fee_before_refund"] - wholesale_total_fee, 2)
             post_balancing_spread = post_balancing_retail_unit_price - customer_wholesale_avg_price
-            final_wholesale_fee = float(final_wholesale_fee_map.get(entry["customer_name"], 0.0))
+            final_wholesale_fee = wholesale_total_fee
             final_wholesale_unit_price = (
                 final_wholesale_fee / entry["total_energy_mwh"] if entry["total_energy_mwh"] > 0 else 0.0
             )
@@ -1296,7 +1269,6 @@ class RetailMonthlySettlementService:
 
         refund_pool = float(status_doc.get("excess_refund_pool") or 0.0)
         now = datetime.now()
-        final_wholesale_fee_map = self._build_final_wholesale_fee_map(entries, status_doc)
 
         for entry in entries:
             ratio = entry["total_energy_mwh"] / total_energy_for_ratio if total_energy_for_ratio > 0 else 0.0
@@ -1304,7 +1276,10 @@ class RetailMonthlySettlementService:
             settlement_fee = round(entry["total_fee_before_refund"] - refund_amount, 2)
             settlement_avg_price = settlement_fee / entry["total_energy_mwh"] if entry["total_energy_mwh"] > 0 else 0.0
 
-            final_wholesale_fee = float(final_wholesale_fee_map.get(entry["customer_name"], 0.0))
+            final_wholesale_fee = float(entry.get("total_allocated_cost", 0.0))
+            final_wholesale_fee += float(entry.get("balancing_energy_mwh", 0.0)) * float(status_doc.get("balancing_price") or 0.0)
+            final_wholesale_fee += float(entry["total_energy_mwh"]) * float(status_doc.get("surplus_unit_price", 0.0))
+            final_wholesale_fee = round(final_wholesale_fee, 6)
             final_wholesale_unit_price = (
                 final_wholesale_fee / entry["total_energy_mwh"] if entry["total_energy_mwh"] > 0 else 0.0
             )
