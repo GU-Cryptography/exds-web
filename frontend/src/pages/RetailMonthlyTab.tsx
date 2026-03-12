@@ -10,7 +10,6 @@ import {
     DialogTitle,
     Divider,
     Grid,
-    IconButton,
     LinearProgress,
     Paper,
     Snackbar,
@@ -566,6 +565,7 @@ export const RetailMonthlyTab: React.FC<RetailMonthlyTabProps> = ({
                                     >
                                         <TableHead>
                                             <TableRow sx={{ '& th': { bgcolor: alpha(theme.palette.success.main, 0.05), fontWeight: 800 } }}>
+                                                <TableCell align="center">序号</TableCell>
                                                 <TableCell>
                                                     <TableSortLabel active={orderBy === 'customer_name'} direction={orderBy === 'customer_name' ? order : 'asc'} onClick={() => handleRequestSort('customer_name')}>
                                                         客户名称
@@ -597,8 +597,9 @@ export const RetailMonthlyTab: React.FC<RetailMonthlyTabProps> = ({
                                             </TableRow>
                                         </TableHead>
                                         <TableBody>
-                                            {sortedCustomers.map((customer) => (
+                                            {sortedCustomers.map((customer, index) => (
                                                 <TableRow key={customer._id} hover>
+                                                    <TableCell align="center" sx={{ fontWeight: 700 }}>{index + 1}</TableCell>
                                                     <TableCell sx={{ fontWeight: 700 }}>{customer.customer_name}</TableCell>
                                                     <TableCell align="right">{formatNumber(customer.total_energy_mwh, 3)}</TableCell>
                                                     <TableCell align="right">{formatNumber(customer.total_energy_mwh ? customer.retail_total_fee / customer.total_energy_mwh : 0, 3)}</TableCell>
@@ -615,13 +616,20 @@ export const RetailMonthlyTab: React.FC<RetailMonthlyTabProps> = ({
                                                         {formatNumber(customer.final_price_spread_per_mwh, 3)}
                                                     </TableCell>
                                                     <TableCell align="center">
-                                                        <IconButton size="small" color="primary" onClick={() => handleViewDetail(customer.customer_name)}>
-                                                            <ArrowForwardIosIcon sx={{ fontSize: 14 }} />
-                                                        </IconButton>
+                                                        <Button
+                                                            size="small"
+                                                            color="primary"
+                                                            endIcon={<ArrowForwardIosIcon sx={{ fontSize: '12px !important' }} />}
+                                                            onClick={() => handleViewDetail(customer.customer_name)}
+                                                            sx={{ minWidth: 'auto', fontWeight: 700, whiteSpace: 'nowrap' }}
+                                                        >
+                                                            查看明细
+                                                        </Button>
                                                     </TableCell>
                                                 </TableRow>
                                             ))}
                                             <TableRow sx={{ bgcolor: theme.palette.grey[100], '& td': { fontWeight: 800 } }}>
+                                                <TableCell align="center">--</TableCell>
                                                 <TableCell>全量合计</TableCell>
                                                 <TableCell align="right">{formatNumber(totalEnergy, 3)}</TableCell>
                                                 <TableCell align="right">{formatNumber(totalEnergy > 0 ? totalRetailFee / totalEnergy : 0, 3)}</TableCell>
