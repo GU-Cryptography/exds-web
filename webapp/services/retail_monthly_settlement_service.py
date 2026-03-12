@@ -258,6 +258,77 @@ class RetailMonthlySettlementService:
     def get_customer_records(self, month: str) -> List[Dict]:
         return list(self.db[self.CUSTOMER_COLLECTION].find({"month": month}).sort("customer_name", 1))
 
+    def get_month_chart_data(self, month: str) -> Dict[str, List[Dict[str, Any]]]:
+        """获取月结零售侧图表数据。"""
+        records = list(
+            self.db[self.CUSTOMER_COLLECTION].find(
+                {"month": month},
+                {
+                    "customer_name": 1,
+                    "package_name": 1,
+                    "model_code": 1,
+                    "price_model.is_capped": 1,
+                    "final_energy_mwh": 1,
+                    "final_gross_profit": 1,
+                    "final_price_spread_per_mwh": 1,
+                },
+            ).sort("customer_name", 1)
+        )
+
+        customer_points: List[Dict[str, Any]] = []
+        package_map: Dict[str, Dict[str, Any]] = {}
+
+        for rec in records:
+            package_name = str(rec.get("package_name") or rec.get("model_code") or "其它")
+            final_energy_mwh = float(rec.get("final_energy_mwh") or 0.0)
+            final_gross_profit = float(rec.get("final_gross_profit") or 0.0)
+            final_price_spread_per_mwh = float(rec.get("final_price_spread_per_mwh") or 0.0)
+            is_capped = bool((rec.get("price_model") or {}).get("is_capped", False))
+
+            customer_points.append(
+                {
+                    "customer_name": str(rec.get("customer_name") or ""),
+                    "package_name": package_name,
+                    "model_code": str(rec.get("model_code") or ""),
+                    "is_capped": is_capped,
+                    "spread": round(final_price_spread_per_mwh, 3),
+                    "load": round(final_energy_mwh, 6),
+                    "profit": round(final_gross_profit, 2),
+                    "abs_profit": round(abs(final_gross_profit), 2),
+                }
+            )
+
+            if package_name not in package_map:
+                package_map[package_name] = {
+                    "name": package_name,
+                    "profit": 0.0,
+                    "count": 0,
+                    "load": 0.0,
+                }
+
+            package_map[package_name]["profit"] += final_gross_profit
+            package_map[package_name]["load"] += final_energy_mwh
+            package_map[package_name]["count"] += 1
+
+        package_summary = sorted(
+            [
+                {
+                    "name": item["name"],
+                    "profit": round(float(item["profit"]), 2),
+                    "count": int(item["count"]),
+                    "load": round(float(item["load"]), 6),
+                }
+                for item in package_map.values()
+            ],
+            key=lambda item: item["profit"],
+            reverse=True,
+        )
+
+        return {
+            "customer_points": customer_points,
+            "package_summary": package_summary,
+        }
+
     def validate_month_ready(self, month: str, allow_fallback: bool = True) -> Tuple[bool, str]:
         energy_doc = self.db["customer_monthly_energy"].find_one({"_id": month}, {"records": 1})
         if not energy_doc:

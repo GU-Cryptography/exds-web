@@ -130,6 +130,15 @@ def get_monthly_customers(month: str = Query(..., regex=r"^\d{4}-\d{2}$")):
     return ResponseModel(data=records)
 
 
+@router.get("/monthly-chart-data", response_model=ResponseModel)
+def get_monthly_chart_data(month: str = Query(..., regex=r"^\d{4}-\d{2}$")):
+    try:
+        data = monthly_service.get_month_chart_data(month)
+        return ResponseModel(data=data)
+    except Exception as exc:
+        return ResponseModel(code=500, message=str(exc), data={"customer_points": [], "package_summary": []})
+
+
 @router.get("/monthly-customer-detail", response_model=ResponseModel)
 def get_monthly_customer_detail(
     month: str = Query(..., regex=r"^\d{4}-\d{2}$"),
