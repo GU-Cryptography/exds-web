@@ -313,6 +313,9 @@ export const RetailMonthlyTab: React.FC<RetailMonthlyTabProps> = ({
     const totalWholesaleFee = useMemo(() => customers.reduce((sum, customer) => sum + (customer.final_wholesale_fee || 0), 0), [customers]);
     const totalGrossProfit = useMemo(() => customers.reduce((sum, customer) => sum + (customer.final_gross_profit || 0), 0), [customers]);
     const totalExcessRefund = useMemo(() => customers.reduce((sum, customer) => sum + (customer.excess_refund_fee || 0), 0), [customers]);
+    const retailColumnBg = alpha(theme.palette.warning.main, 0.08);
+    const settlementColumnBg = alpha(theme.palette.info.main, 0.08);
+    const analysisColumnBg = alpha(theme.palette.success.main, 0.08);
 
     const { isFullscreen: isBubbleFullscreen, FullscreenEnterButton: BubbleEnterButton, FullscreenExitButton: BubbleExitButton, FullscreenTitle: BubbleTitle } = useChartFullscreen({
         chartRef: bubbleRef,
@@ -551,18 +554,27 @@ export const RetailMonthlyTab: React.FC<RetailMonthlyTabProps> = ({
                                 </Box>
                             ) : (
                                 <TableContainer sx={{ overflowX: 'auto' }}>
-                                    <Table
-                                        size="small"
-                                        sx={{
-                                            minWidth: 1000,
-                                            '& .MuiTableCell-root': {
+                                        <Table
+                                            size="small"
+                                            sx={{
+                                                minWidth: 1000,
+                                                '& .MuiTableCell-root': {
                                                 fontSize: { xs: '0.75rem', sm: '0.875rem' },
                                                 px: { xs: 0.5, sm: 1.5 },
-                                                py: 1,
-                                                whiteSpace: 'nowrap',
-                                            },
-                                        }}
-                                    >
+                                                    py: 1,
+                                                    whiteSpace: 'nowrap',
+                                                },
+                                                '& .MuiTableRow-root > .MuiTableCell-root:nth-of-type(3), & .MuiTableRow-root > .MuiTableCell-root:nth-of-type(4), & .MuiTableRow-root > .MuiTableCell-root:nth-of-type(5)': {
+                                                    bgcolor: retailColumnBg,
+                                                },
+                                                '& .MuiTableRow-root > .MuiTableCell-root:nth-of-type(6), & .MuiTableRow-root > .MuiTableCell-root:nth-of-type(7), & .MuiTableRow-root > .MuiTableCell-root:nth-of-type(8)': {
+                                                    bgcolor: settlementColumnBg,
+                                                },
+                                                '& .MuiTableRow-root > .MuiTableCell-root:nth-of-type(9), & .MuiTableRow-root > .MuiTableCell-root:nth-of-type(10), & .MuiTableRow-root > .MuiTableCell-root:nth-of-type(11), & .MuiTableRow-root > .MuiTableCell-root:nth-of-type(12)': {
+                                                    bgcolor: analysisColumnBg,
+                                                },
+                                            }}
+                                        >
                                         <TableHead>
                                             <TableRow sx={{ '& th': { bgcolor: alpha(theme.palette.success.main, 0.05), fontWeight: 800 } }}>
                                                 <TableCell align="center">序号</TableCell>
