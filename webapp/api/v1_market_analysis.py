@@ -1,7 +1,8 @@
 import logging
+import math
 import statistics
 import json
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 from datetime import datetime, timedelta
 import calendar
 from bson import json_util
@@ -17,6 +18,30 @@ router = APIRouter(tags=["v1-market-analysis"])
 DA_PRICE_COLLECTION = DATABASE['day_ahead_spot_price']
 RT_PRICE_COLLECTION = DATABASE['real_time_spot_price']
 DA_ECON_PRICE_COLLECTION = DATABASE['day_ahead_econ_price']
+
+
+def _safe_finite_float(value: Any) -> Optional[float]:
+    """将输入安全转换为有限浮点数，非有限值返回 None。"""
+    if value is None:
+        return None
+
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    return numeric_value if math.isfinite(numeric_value) else None
+
+
+def _sanitize_json_floats(value: Any) -> Any:
+    """递归清理返回内容中的 NaN/Inf，避免 JSON 序列化报错。"""
+    if isinstance(value, dict):
+        return {key: _sanitize_json_floats(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_json_floats(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
 
 def get_tou_rule_for_date(date: datetime) -> Dict[str, str]:
     """
@@ -261,24 +286,24 @@ def get_market_dashboard(date_str: str = Query(..., description="查询日期, �
             generation_data = generation_map.get(time_str, {})
             daily_release_data = daily_release_map.get(time_str, {})
 
-            da_price = da_doc.get('avg_clearing_price')
-            da_volume = da_doc.get('total_clearing_power', 0)
-            rt_price = rt_doc.get('avg_clearing_price')
-            rt_volume = rt_doc.get('total_clearing_power', 0)
-            rt_wind = rt_doc.get('wind_clearing_power', 0)
-            rt_solar = rt_doc.get('solar_clearing_power', 0)
+            da_price = _safe_finite_float(da_doc.get('avg_clearing_price'))
+            da_volume = _safe_finite_float(da_doc.get('total_clearing_power')) or 0.0
+            rt_price = _safe_finite_float(rt_doc.get('avg_clearing_price'))
+            rt_volume = _safe_finite_float(rt_doc.get('total_clearing_power')) or 0.0
+            rt_wind = _safe_finite_float(rt_doc.get('wind_clearing_power')) or 0.0
+            rt_solar = _safe_finite_float(rt_doc.get('solar_clearing_power')) or 0.0
             
             # [NEW] 提取经济出清价格
-            price_econ = da_econ_doc.get('clearing_price')
+            price_econ = _safe_finite_float(da_econ_doc.get('clearing_price'))
 
             market_bidding_space_da = 0
             if daily_release_data:
                 try:
-                    load_forecast = float(daily_release_data.get('system_load_forecast', 0))
-                    wind = float(daily_release_data.get('wind_forecast', 0))
-                    pv = float(daily_release_data.get('pv_forecast', 0))
-                    nonmarket = float(daily_release_data.get('nonmarket_unit_forecast', 0))
-                    tieline = float(daily_release_data.get('tieline_plan', 0))
+                    load_forecast = _safe_finite_float(daily_release_data.get('system_load_forecast')) or 0.0
+                    wind = _safe_finite_float(daily_release_data.get('wind_forecast')) or 0.0
+                    pv = _safe_finite_float(daily_release_data.get('pv_forecast')) or 0.0
+                    nonmarket = _safe_finite_float(daily_release_data.get('nonmarket_unit_forecast')) or 0.0
+                    tieline = _safe_finite_float(daily_release_data.get('tieline_plan')) or 0.0
                     market_bidding_space_da = load_forecast - wind - pv - nonmarket - tieline
                 except (TypeError, ValueError):
                     pass
@@ -286,13 +311,13 @@ def get_market_dashboard(date_str: str = Query(..., description="查询日期, �
             market_bidding_space_rt = 0
             if actual_op_data and generation_data:
                 try:
-                    system_load = float(actual_op_data.get('system_load', 0))
-                    tieline_flow = float(actual_op_data.get('tieline_flow', 0))
-                    wind = float(generation_data.get('wind_generation', 0))
-                    solar = float(generation_data.get('solar_generation', 0))
-                    hydro = float(generation_data.get('hydro_generation', 0))
-                    pumped_storage = float(generation_data.get('pumped_storage_generation', 0))
-                    battery_storage = float(generation_data.get('battery_storage_generation', 0))
+                    system_load = _safe_finite_float(actual_op_data.get('system_load')) or 0.0
+                    tieline_flow = _safe_finite_float(actual_op_data.get('tieline_flow')) or 0.0
+                    wind = _safe_finite_float(generation_data.get('wind_generation')) or 0.0
+                    solar = _safe_finite_float(generation_data.get('solar_generation')) or 0.0
+                    hydro = _safe_finite_float(generation_data.get('hydro_generation')) or 0.0
+                    pumped_storage = _safe_finite_float(generation_data.get('pumped_storage_generation')) or 0.0
+                    battery_storage = _safe_finite_float(generation_data.get('battery_storage_generation')) or 0.0
                     nonmarket_unit = hydro + max(pumped_storage, 0) + max(battery_storage, 0)
                     market_bidding_space_rt = system_load - wind - solar - nonmarket_unit - tieline_flow
                 except (TypeError, ValueError):
@@ -403,13 +428,13 @@ def get_market_dashboard(date_str: str = Query(..., description="查询日期, �
                 "vwap_spread": vwap_spread_period, "avg_volume_rt": avg_volume_rt, "renewable_ratio": renewable_ratio
             })
 
-        return {
+        return _sanitize_json_floats({
             "date": date_str,
             "financial_kpis": financial_kpis,
             "risk_kpis": risk_kpis,
             "time_series": time_series,
             "period_summary": period_summary
-        }
+        })
 
     except ValueError:
         raise HTTPException(status_code=400, detail="日期格式无效，请使用 YYYY-MM-DD 格式")

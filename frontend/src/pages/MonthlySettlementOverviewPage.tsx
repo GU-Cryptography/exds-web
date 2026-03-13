@@ -135,6 +135,29 @@ const profitColor = (val: number | null): string => {
 };
 
 // Tooltip 格式化函数
+const calculateAxisDomain = (values: Array<number | null | undefined>): [number, number] | undefined => {
+    const numericValues = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    if (numericValues.length === 0) {
+        return undefined;
+    }
+
+    const min = Math.min(...numericValues);
+    const max = Math.max(...numericValues);
+
+    if (min === max) {
+        const padding = Math.max(Math.abs(min) * 0.1, 1);
+        return [min - padding, max + padding];
+    }
+
+    const padding = Math.max((max - min) * 0.1, 0.1);
+    return [min - padding, max + padding];
+};
+
+const formatAxisTick = (value: number | string): string => {
+    const numericValue = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(numericValue) ? numericValue.toFixed(1) : String(value);
+};
+
 const tooltipFormatter = (value: any, name: string) => {
     if (value === null || value === undefined) return ['-', name];
     const val = Number(value);
@@ -360,6 +383,44 @@ export const MonthlySettlementOverviewPage: React.FC = () => {
         });
     }, [monthlyRows]);
 
+    const leftChartAxisDomain = useMemo(() => {
+        const values: Array<number | null | undefined> = [];
+
+        if (chartView === 'price') {
+            if (priceVis.wholesale_avg_price) {
+                values.push(...chartData.map(item => item.wholesale_avg_price));
+            }
+            if (priceVis.retail_avg_price) {
+                values.push(...chartData.map(item => item.retail_avg_price));
+            }
+        } else {
+            if (amountVis.wholesale_cost_wan) {
+                values.push(...chartData.map(item => item.wholesale_cost_wan));
+            }
+            if (amountVis.retail_revenue_wan) {
+                values.push(...chartData.map(item => item.retail_revenue_wan));
+            }
+        }
+
+        return calculateAxisDomain(values);
+    }, [amountVis.retail_revenue_wan, amountVis.wholesale_cost_wan, chartData, chartView, priceVis.retail_avg_price, priceVis.wholesale_avg_price]);
+
+    const rightLeftAxisDomain = useMemo(() => {
+        const values = chartView === 'price'
+            ? (spreadVis.price_spread ? chartData.map(item => item.price_spread) : [])
+            : (profitVis.daily_profit_wan ? chartData.map(item => item.daily_profit_wan) : []);
+
+        return calculateAxisDomain(values);
+    }, [chartData, chartView, profitVis.daily_profit_wan, spreadVis.price_spread]);
+
+    const rightRightAxisDomain = useMemo(() => {
+        const values = chartView === 'price'
+            ? (spreadVis.cumulative_avg_spread ? chartData.map(item => item.cumulative_avg_spread) : [])
+            : (profitVis.cumulative_profit_wan ? chartData.map(item => item.cumulative_profit_wan) : []);
+
+        return calculateAxisDomain(values);
+    }, [chartData, chartView, profitVis.cumulative_profit_wan, spreadVis.cumulative_avg_spread]);
+
     const chartBoxSx = (isFs: boolean) => ({
         height: { xs: 300, sm: 350 },
         position: 'relative' as const,
@@ -461,7 +522,11 @@ export const MonthlySettlementOverviewPage: React.FC = () => {
                                             <ComposedChart data={chartData}>
                                                 <CartesianGrid strokeDasharray="3 3" />
                                                 <XAxis dataKey="monthLabel" />
-                                                <YAxis label={{ value: chartView === 'price' ? '元/MWh' : '万元', angle: -90, position: 'insideLeft' }} />
+                                                <YAxis
+                                                    domain={leftChartAxisDomain}
+                                                    tickFormatter={formatAxisTick}
+                                                    label={{ value: chartView === 'price' ? '元/MWh' : '万元', angle: -90, position: 'insideLeft' }}
+                                                />
                                                 <Tooltip formatter={tooltipFormatter} />
                                                 <Legend onClick={chartView === 'price' ? onPriceLegend : onAmountLegend} />
                                                 {chartView === 'price' ? (
@@ -487,8 +552,19 @@ export const MonthlySettlementOverviewPage: React.FC = () => {
                                             <ComposedChart data={chartData}>
                                                 <CartesianGrid strokeDasharray="3 3" />
                                                 <XAxis dataKey="monthLabel" />
-                                                <YAxis yAxisId="left" label={{ value: chartView === 'price' ? '价差' : '月毛利(万)', angle: -90, position: 'insideLeft' }} />
-                                                <YAxis yAxisId="right" orientation="right" label={{ value: '累计', angle: 90, position: 'insideRight' }} />
+                                                <YAxis
+                                                    yAxisId="left"
+                                                    domain={rightLeftAxisDomain}
+                                                    tickFormatter={formatAxisTick}
+                                                    label={{ value: chartView === 'price' ? '价差' : '月毛利(万)', angle: -90, position: 'insideLeft' }}
+                                                />
+                                                <YAxis
+                                                    yAxisId="right"
+                                                    orientation="right"
+                                                    domain={rightRightAxisDomain}
+                                                    tickFormatter={formatAxisTick}
+                                                    label={{ value: '累计', angle: 90, position: 'insideRight' }}
+                                                />
                                                 <Tooltip formatter={tooltipFormatter} />
                                                 <Legend onClick={chartView === 'price' ? onSpreadLegend : onProfitLegend} />
                                                 <ReferenceLine yAxisId="left" y={0} stroke="#999" />
