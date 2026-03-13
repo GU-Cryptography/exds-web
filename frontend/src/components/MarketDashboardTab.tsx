@@ -18,6 +18,7 @@ import { format } from 'date-fns';
 import apiClient from '../api/client';
 import { useTouPeriodBackground } from '../hooks/useTouPeriodBackground';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
+import { useSelectableSeries } from '../hooks/useSelectableSeries';
 import { CustomTooltip } from './CustomTooltip';
 
 // 类型定义
@@ -51,6 +52,7 @@ interface TimeSeriesPoint {
     time_str: string;
     price_rt: number | null;
     price_da: number | null;
+    price_da_forecast?: number | null;
     price_econ: number | null;
     volume_rt: number;
     volume_da: number;
@@ -79,14 +81,90 @@ interface DashboardData {
     risk_kpis: RiskKPIs;
     time_series: TimeSeriesPoint[];
     period_summary: PeriodSummary[];
+    forecast_avg_price?: number | null;
+    forecast_accuracy?: number | null;
 }
+
+interface PriceForecastVersion {
+    forecast_id: string;
+}
+
+interface PriceForecastPoint {
+    time: string;
+    predicted_price: number | null;
+}
+
+interface PriceForecastAccuracy {
+    wmape_accuracy?: number | null;
+}
+
+type PriceSeriesKey = 'price_rt' | 'price_da' | 'price_da_forecast' | 'price_econ';
+
+const mergeForecastIntoTimeSeries = async (
+    timeSeries: TimeSeriesPoint[],
+    dateStr: string
+): Promise<{
+    timeSeries: TimeSeriesPoint[];
+    forecastAvgPrice: number | null;
+    forecastAccuracy: number | null;
+}> => {
+    try {
+        const versionsResponse = await apiClient.get<PriceForecastVersion[]>('/api/v1/price-forecast/versions', {
+            params: { target_date: dateStr, forecast_type: 'd1_price' }
+        });
+        const latestVersion = versionsResponse.data?.[0];
+        if (!latestVersion?.forecast_id) {
+            return {
+                timeSeries: timeSeries.map(point => ({ ...point, price_da_forecast: null })),
+                forecastAvgPrice: null,
+                forecastAccuracy: null
+            };
+        }
+
+        const [forecastResponse, accuracyResponse] = await Promise.all([
+            apiClient.get<PriceForecastPoint[]>('/api/v1/price-forecast/data', {
+                params: { forecast_id: latestVersion.forecast_id, target_date: dateStr }
+            }),
+            apiClient.get<PriceForecastAccuracy | null>('/api/v1/price-forecast/accuracy', {
+                params: { forecast_id: latestVersion.forecast_id, target_date: dateStr }
+            })
+        ]);
+        const forecastMap = new Map(
+            (forecastResponse.data || []).map(item => [item.time, item.predicted_price ?? null])
+        );
+        const forecastValues = (forecastResponse.data || [])
+            .map(item => item.predicted_price)
+            .filter((value): value is number => value !== null && value !== undefined);
+        const forecastAvgPrice = forecastValues.length > 0
+            ? forecastValues.reduce((sum, value) => sum + value, 0) / forecastValues.length
+            : null;
+
+        return {
+            timeSeries: timeSeries.map(point => ({
+                ...point,
+                price_da_forecast: forecastMap.get(point.time_str) ?? null
+            })),
+            forecastAvgPrice,
+            forecastAccuracy: accuracyResponse.data?.wmape_accuracy ?? null
+        };
+    } catch (error) {
+        console.warn('加载日前价格预测曲线失败:', error);
+        return {
+            timeSeries: timeSeries.map(point => ({ ...point, price_da_forecast: null })),
+            forecastAvgPrice: null,
+            forecastAccuracy: null
+        };
+    }
+};
 
 // 市场价格描述面板组件
 const MarketPriceSummaryPanel: React.FC<{
     financial_kpis: FinancialKPIs;
     risk_kpis: RiskKPIs;
-    time_series: TimeSeriesPoint[]
-}> = ({ financial_kpis, risk_kpis, time_series }) => {
+    time_series: TimeSeriesPoint[];
+    forecast_avg_price?: number | null;
+    forecast_accuracy?: number | null;
+}> = ({ financial_kpis, risk_kpis, time_series, forecast_avg_price, forecast_accuracy }) => {
     // 计算价格范围
     const rtPrices = time_series.filter(d => d.price_rt !== null).map(d => d.price_rt!);
     const daPrices = time_series.filter(d => d.price_da !== null).map(d => d.price_da!);
@@ -133,7 +211,9 @@ const MarketPriceSummaryPanel: React.FC<{
                     <Box component="span">
                         日前均价 {financial_kpis.vwap_da?.toFixed(2) || 'N/A'} 元/MWh (范围: {minDaPrice.toFixed(2)}~{maxDaPrice.toFixed(2)})，
                         实时均价 {financial_kpis.vwap_rt?.toFixed(2) || 'N/A'} 元/MWh (范围: {minRtPrice.toFixed(2)}~{maxRtPrice.toFixed(2)})，
-                        经济出清均价 {financial_kpis.twap_econ?.toFixed(2) || 'N/A'} 元/MWh (范围: {minEconPrice.toFixed(2)}~{maxEconPrice.toFixed(2)})
+                        经济出清均价 {financial_kpis.twap_econ?.toFixed(2) || 'N/A'} 元/MWh (范围: {minEconPrice.toFixed(2)}~{maxEconPrice.toFixed(2)})，
+                        预测均价 {forecast_avg_price !== null && forecast_avg_price !== undefined ? forecast_avg_price.toFixed(2) : 'N/A'} 元/MWh，
+                        预测准确率 {forecast_accuracy !== null && forecast_accuracy !== undefined ? `${forecast_accuracy.toFixed(2)}%` : 'N/A'}
                     </Box>
                 </Typography>
 
@@ -346,9 +426,20 @@ const CustomTooltipContent: React.FC<any> = ({ active, payload, label, unit }) =
 // 价格曲线图组件
 const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onDateShift?: (days: number) => void }> = ({ data, dateStr, onDateShift }) => {
     const chartRef = useRef<HTMLDivElement>(null);
+    const { seriesVisibility, handleLegendClick } = useSelectableSeries<PriceSeriesKey>({
+        price_rt: true,
+        price_da: true,
+        price_da_forecast: true,
+        price_econ: true
+    });
 
     // 计算Y轴范围
-    const prices = data.flatMap(d => [d.price_rt, d.price_da, d.price_econ].filter(p => p !== null) as number[]);
+    const prices = data.flatMap(d => [
+        seriesVisibility.price_rt ? d.price_rt : null,
+        seriesVisibility.price_da ? d.price_da : null,
+        seriesVisibility.price_da_forecast ? d.price_da_forecast : null,
+        seriesVisibility.price_econ ? d.price_econ : null
+    ].filter(p => p !== null) as number[]);
     const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
     const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
 
@@ -425,7 +516,7 @@ const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onDateShi
                                 tick={{ fontSize: 12 }}
                             />
                             <Tooltip content={<CustomTooltipContent unit="元/MWh" />} />
-                            <Legend />
+                            <Legend onClick={handleLegendClick} />
                             <Line
                                 type="monotone"
                                 dataKey="price_rt"
@@ -433,6 +524,7 @@ const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onDateShi
                                 strokeWidth={2}
                                 name="实时价格"
                                 dot={false}
+                                hide={!seriesVisibility.price_rt}
                             />
                             <Line
                                 type="monotone"
@@ -442,6 +534,17 @@ const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onDateShi
                                 strokeDasharray="5 5"
                                 name="日前价格"
                                 dot={false}
+                                hide={!seriesVisibility.price_da}
+                            />
+                            <Line
+                                type="monotone"
+                                dataKey="price_da_forecast"
+                                stroke="#9c27b0"
+                                strokeWidth={2}
+                                strokeDasharray="8 4"
+                                name="日前价格预测"
+                                dot={false}
+                                hide={!seriesVisibility.price_da_forecast}
                             />
                             <Line
                                 type="monotone"
@@ -451,6 +554,7 @@ const PriceChart: React.FC<{ data: TimeSeriesPoint[]; dateStr: string; onDateShi
                                 strokeDasharray="3 3"
                                 name="经济出清价"
                                 dot={false}
+                                hide={!seriesVisibility.price_econ}
                             />
 
                             {/* 实时价格最大值标注 */}
@@ -862,12 +966,19 @@ export const MarketDashboardTab: React.FC<MarketDashboardTabProps> = ({ selected
             setLoading(true);
             setError(null);
             try {
-                const response = await apiClient.get('/api/v1/market-analysis/dashboard', {
+                const response = await apiClient.get<DashboardData>('/api/v1/market-analysis/dashboard', {
                     params: { date_str: dateStr }
                 });
 
                 // 数据验证
-                const timeSeriesData = response.data.time_series;
+                const forecastResult = await mergeForecastIntoTimeSeries(response.data.time_series || [], dateStr);
+                const mergedData: DashboardData = {
+                    ...response.data,
+                    time_series: forecastResult.timeSeries,
+                    forecast_avg_price: forecastResult.forecastAvgPrice,
+                    forecast_accuracy: forecastResult.forecastAccuracy
+                };
+                const timeSeriesData = mergedData.time_series;
                 if (timeSeriesData && timeSeriesData.length > 0) {
                     const firstPoint = timeSeriesData[0];
                     if (firstPoint.time_str !== '00:15') {
@@ -878,10 +989,10 @@ export const MarketDashboardTab: React.FC<MarketDashboardTabProps> = ({ selected
                     }
                 }
 
-                setData(response.data);
+                setData(mergedData);
                 // 更新缓存
                 setCachedDate(dateStr);
-                setCachedData(response.data);
+                setCachedData(mergedData);
             } catch (err: any) {
                 if (typeof err.response?.data?.detail === 'string') {
                     setError(err.response.data.detail);
@@ -970,6 +1081,8 @@ export const MarketDashboardTab: React.FC<MarketDashboardTabProps> = ({ selected
                         financial_kpis={data.financial_kpis}
                         risk_kpis={data.risk_kpis}
                         time_series={data.time_series}
+                        forecast_avg_price={data.forecast_avg_price}
+                        forecast_accuracy={data.forecast_accuracy}
                     />
 
                     <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mt: 2 }}>
