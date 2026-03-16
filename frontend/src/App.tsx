@@ -5,7 +5,6 @@ import {
     Routes,
     Route,
 } from 'react-router-dom';
-import { CustomerLoadAnalysisPage } from './pages/CustomerLoadAnalysisPage';
 import { CustomerLoadOverviewPage } from './pages/CustomerLoadOverviewPage';
 import LoadCharacteristicsOverviewPage from './pages/LoadCharacteristicsOverviewPage';
 import LoadCharacteristicsDetailPage from './pages/LoadCharacteristicsDetailPage';
@@ -42,6 +41,7 @@ import MonthlyManualDataPage from './pages/MonthlyManualDataPage';
 import MonthlySettlementAnalysisPage from './pages/MonthlySettlementAnalysisPage';
 import SingleCustomerMonthlyDetailPage from './pages/SingleCustomerMonthlyDetailPage';
 import { MonthlySettlementOverviewPage } from './pages/MonthlySettlementOverviewPage';
+import TradeReviewPage from './pages/TradeReviewPage';
 import { TabProvider } from './contexts/TabContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { DesktopTabLayout } from './layouts/DesktopTabLayout';
@@ -114,9 +114,9 @@ const ResponsiveLayout: React.FC = () => {
                     <Route path="trading-strategy/d-2" element={<PlaceholderPage />} />
                     <Route path="trading-strategy/day-ahead" element={<PlaceholderPage />} />
 
-                    {/* 风险管理 */}
-                    <Route path="risk-management/position-contracts" element={<PlaceholderPage />} />
-                    <Route path="risk-management/exposure" element={<PlaceholderPage />} />
+                    {/* 交易复盘 */}
+                    <Route path="trade-review/monthly-trading-review" element={<TradeReviewPage />} />
+                    <Route path="trade-review/spot-review" element={<PlaceholderPage />} />
 
                     {/* 结算管理 */}
                     <Route path="settlement/monthly-overview" element={<MonthlySettlementOverviewPage />} />

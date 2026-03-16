@@ -14,6 +14,7 @@ from webapp.api import (
     v1_retail_settlement,
     v1_retail_prices,
     v1_mechanism_energy,
+    v1_trade_review,
     v1_customer_energy,
     v1_wholesale_monthly_settlement,
     medium_term_forecast  # New module
@@ -49,6 +50,7 @@ router.include_router(v1_settlement.router)
 router.include_router(v1_retail_settlement.router)
 router.include_router(v1_retail_prices.router)  # 零售结算价格定义
 router.include_router(v1_mechanism_energy.router)
+router.include_router(v1_trade_review.router)
 router.include_router(v1_customer_energy.router)
 router.include_router(v1_wholesale_monthly_settlement.router)
 

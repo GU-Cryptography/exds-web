@@ -27,6 +27,7 @@ import SingleCustomerMonthlyDetailPage from '../pages/SingleCustomerMonthlyDetai
 import MonthlySettlementAnalysisPage from '../pages/MonthlySettlementAnalysisPage';
 import { MonthlySettlementOverviewPage } from '../pages/MonthlySettlementOverviewPage';
 import { LoadForecastWorkbench } from '../pages/LoadForecastWorkbench';
+import TradeReviewPage from '../pages/TradeReviewPage';
 
 export interface RouteConfig {
     path: string;
@@ -70,9 +71,9 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/trading-strategy/d-2', title: 'D-2交易策略', component: PlaceholderPage },
     { path: '/trading-strategy/day-ahead', title: '日前交易策略', component: PlaceholderPage },
 
-    // 风险管理
-    { path: '/risk-management/position-contracts', title: '持仓合约管理', component: PlaceholderPage },
-    { path: '/risk-management/exposure', title: '风险敞口分析', component: PlaceholderPage },
+    // 交易复盘
+    { path: '/trade-review/monthly-trading-review', title: '月内交易复盘', component: TradeReviewPage },
+    { path: '/trade-review/spot-review', title: '现货交易复盘', component: PlaceholderPage },
 
     // 结算管理
     { path: '/settlement/monthly-overview', title: '月度结算总览', component: MonthlySettlementOverviewPage },

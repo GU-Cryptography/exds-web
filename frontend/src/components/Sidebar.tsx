@@ -116,8 +116,8 @@ const menuItems: MenuItem[] = [
         text: '交易复盘',
         icon: <ShieldIcon />,
         subItems: [
-            { text: '中长期交易复盘', path: '/risk-management/position-contracts', icon: <FunctionsOutlined /> },
-            { text: '现货交易复盘', path: '/risk-management/exposure', icon: <BarChartOutlined /> },
+            { text: '月内交易复盘', path: '/trade-review/monthly-trading-review', icon: <FunctionsOutlined /> },
+            { text: '现货交易复盘', path: '/trade-review/spot-review', icon: <BarChartOutlined /> },
         ],
     },
     {

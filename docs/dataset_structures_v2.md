@@ -1175,3 +1175,44 @@ critical_alerts = db.customer_anomaly_alerts.find({
 - `updated_at`（建议索引，支持任务清理与排序）
 
 
+## 22. `trade_declare` - 交易申报记录
+
+该集合存储“交易申报记录”页面下载后的 D-2 交易申报明细数据，采用**按交易日聚合**的文档结构（每个 `trade_date` 一条文档）。
+
+- **数据来源**: `rpa.pipelines.trade_declare`
+- **更新频率**: 每日（支持从集合最后一天自动回补到当天）
+- **页面路径**: `交易及出清结果 > 交易申报记录`
+
+### 22.1. 字段说明
+
+| 字段名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `trade_date` | String | **[主键]** 交易日期，格式 `YYYY-MM-DD`。 |
+| `delivery_groups` | Array | 按目标日期分组的申报记录列表。 |
+| `delivery_groups.delivery_date` | String | 目标日期（成交时间），格式 `YYYY-MM-DD`。 |
+| `delivery_groups.records` | Array | 该目标日期下的全部申报明细记录。 |
+| `delivery_groups.records.period` | Number | 时段（1-48）。 |
+| `delivery_groups.records.listing_side` | String | 挂牌类型（如“用电侧增持/减持”等）。 |
+| `delivery_groups.records.listing_mwh` | Number | 挂牌电量（MWh）。 |
+| `delivery_groups.records.listing_price` | Number | 挂牌电价（元/MWh）。 |
+| `delivery_groups.records.remaining_mwh` | Number | 剩余电量（MWh）。 |
+| `delivery_groups.records.trade_type` | String | 交易类型（如“市场化挂牌”）。 |
+| `delivery_groups.records.off_shelf_type` | String | 下架类型（如“自动下架/未下架”）。 |
+| `delivery_groups.records.listing_time` | String | 挂牌时间，格式 `YYYY-MM-DD HH:mm:ss`。 |
+| `delivery_groups.records.off_shelf_time` | String/Null | 下架时间，格式 `YYYY-MM-DD HH:mm:ss`；未下架时为空。 |
+| `delivery_groups.records.record_key` | String | 去重键（基于 trade_date + delivery_date + period + listing_side + listing_mwh + listing_price + listing_time 生成）。 |
+| `delivery_dates` | Array | 该交易日包含的全部 `delivery_date` 列表（便于快速检索）。 |
+| `record_count` | Number | 该交易日去重后的明细总条数。 |
+| `is_empty` | Boolean | 历史回补场景下，若当日无数据会写入空文档并置为 `true`。 |
+| `updated_at` | ISODate | 文档最后更新时间。 |
+
+### 22.2. 索引
+
+- `(trade_date: 1)`: 唯一索引，确保每个交易日仅一条聚合文档。
+- `(updated_at: -1)`: 普通索引，用于按更新时间倒序查询。
+
+### 22.3. 规则说明
+
+- 同一 `trade_date` 每次执行采用覆盖式 upsert（`replace_one + upsert`），保证当日数据可被最新结果刷新。
+- 历史回补时，若某个历史交易日查询无数据，也会写入空文档（`record_count=0, is_empty=true`），避免后续重复对该日期进行空下载。
+

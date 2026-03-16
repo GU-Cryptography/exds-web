@@ -1,5 +1,6 @@
 import logging
 import json
+from urllib.parse import quote
 from bson import json_util
 from fastapi import APIRouter, File, UploadFile, Depends, HTTPException, Response
 
@@ -86,12 +87,13 @@ def get_sgcc_price_pdf(month: str):
     try:
         document = PRICE_SGCC_COLLECTION.find_one({'_id': month}, {'pdf_binary_data': 1, 'attachment_name': 1})
         if document and 'pdf_binary_data' in document and document['pdf_binary_data']:
-            pdf_bytes = document['pdf_binary_data']
+            pdf_bytes = bytes(document['pdf_binary_data'])
             logger.debug(f"Found PDF for month {month}. Size: {len(pdf_bytes)} bytes.")
             attachment_name = document.get('attachment_name', f"sgcc_price_{month}.pdf")
+            encoded_filename = quote(attachment_name)
 
             headers = {
-                'Content-Disposition': f'inline; filename="{attachment_name}"'
+                "Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}"
             }
             return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
         else:

@@ -1,0 +1,87 @@
+import logging
+from datetime import datetime
+
+from fastapi import APIRouter, HTTPException, Query, status
+
+from webapp.models.trade_review import (
+    BatchDetailResponse,
+    TradeDateListResponse,
+    TradeDetailResponse,
+    TradeOverviewResponse,
+)
+from webapp.services.trade_review_service import TradeReviewService
+from webapp.tools.mongo import DATABASE
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/trade-review", tags=["trade-review"])
+
+
+def get_service() -> TradeReviewService:
+    return TradeReviewService(DATABASE)
+
+
+def _validate_date(date_str: str) -> None:
+    try:
+        datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="日期格式无效，请使用 YYYY-MM-DD 格式",
+        ) from exc
+
+
+@router.get("/trade-dates", response_model=TradeDateListResponse, summary="获取交易日期列表")
+def get_trade_dates() -> TradeDateListResponse:
+    try:
+        return get_service().get_trade_dates()
+    except Exception as exc:
+        logger.error("get_trade_dates error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@router.get("/overview", response_model=TradeOverviewResponse, summary="获取交易日概览")
+def get_trade_overview(
+    trade_date: str = Query(..., description="交易日期 YYYY-MM-DD"),
+) -> TradeOverviewResponse:
+    _validate_date(trade_date)
+    try:
+        return get_service().get_trade_overview(trade_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("get_trade_overview error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@router.get("/detail", response_model=TradeDetailResponse, summary="获取目标日复盘详情")
+def get_trade_detail(
+    trade_date: str = Query(..., description="交易日期 YYYY-MM-DD"),
+    delivery_date: str = Query(..., description="目标日期 YYYY-MM-DD"),
+) -> TradeDetailResponse:
+    _validate_date(trade_date)
+    _validate_date(delivery_date)
+    try:
+        return get_service().get_trade_detail(trade_date, delivery_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("get_trade_detail error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@router.get("/batch-detail", response_model=BatchDetailResponse, summary="获取单个批次详情")
+def get_batch_detail(
+    trade_date: str = Query(..., description="交易日期 YYYY-MM-DD"),
+    delivery_date: str = Query(..., description="目标日期 YYYY-MM-DD"),
+    batch_id: str = Query(..., description="批次ID"),
+) -> BatchDetailResponse:
+    _validate_date(trade_date)
+    _validate_date(delivery_date)
+    try:
+        return get_service().get_batch_detail(trade_date, delivery_date, batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("get_batch_detail error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
