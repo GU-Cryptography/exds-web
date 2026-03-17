@@ -72,11 +72,8 @@ class MeterDataImportService:
         records = []
         
         try:
-            # 从文件名提取电表号
+            # 文件名中的电表号仅作为辅助校验，不再作为强制前提
             meter_id_from_filename = MeterDataImportService.extract_meter_id_from_filename(filename)
-            if not meter_id_from_filename:
-                errors.append(f"无法从文件名提取电表号: {filename}")
-                return [], errors
             
             # 读取 Excel
             df = pd.read_excel(BytesIO(file_content))
@@ -167,9 +164,12 @@ class MeterDataImportService:
             for _, row in df.iterrows():
                 # 获取电表号
                 meter_id = str(row[meter_col]).strip()
+                if not meter_id or meter_id.lower() == 'nan':
+                    errors.append("存在未识别到电表号的数据行，已自动跳过")
+                    continue
                 
                 # 验证电表号一致性
-                if meter_id != meter_id_from_filename:
+                if meter_id_from_filename and meter_id != meter_id_from_filename:
                     # 可能是截断显示，检查是否包含
                     if meter_id_from_filename not in meter_id and meter_id not in meter_id_from_filename:
                         logger.warning(f"电表号不一致: 文件名={meter_id_from_filename}, 内容={meter_id}")

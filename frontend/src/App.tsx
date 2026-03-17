@@ -42,6 +42,7 @@ import MonthlySettlementAnalysisPage from './pages/MonthlySettlementAnalysisPage
 import SingleCustomerMonthlyDetailPage from './pages/SingleCustomerMonthlyDetailPage';
 import { MonthlySettlementOverviewPage } from './pages/MonthlySettlementOverviewPage';
 import TradeReviewPage from './pages/TradeReviewPage';
+import { IntentCustomerDiagnosisPage } from './pages/IntentCustomerDiagnosisPage';
 import { TabProvider } from './contexts/TabContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { DesktopTabLayout } from './layouts/DesktopTabLayout';
@@ -86,7 +87,7 @@ const ResponsiveLayout: React.FC = () => {
                     <Route path="customer/cluster-analysis" element={<PlaceholderPage />} />
                     <Route path="customer/load-characteristics" element={<LoadCharacteristicsOverviewPage />} />
                     <Route path="customer/load-characteristics/:customerId" element={<LoadCharacteristicsDetailPage />} />
-                    <Route path="customer/external-diagnosis" element={<PlaceholderPage />} />
+                    <Route path="customer/external-diagnosis" element={<IntentCustomerDiagnosisPage />} />
 
                     {/* 负荷预测 */}
                     <Route path="load-forecast/overall-analysis" element={<LoadAnalysisPage />} />

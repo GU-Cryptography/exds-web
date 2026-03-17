@@ -28,6 +28,7 @@ import MonthlySettlementAnalysisPage from '../pages/MonthlySettlementAnalysisPag
 import { MonthlySettlementOverviewPage } from '../pages/MonthlySettlementOverviewPage';
 import { LoadForecastWorkbench } from '../pages/LoadForecastWorkbench';
 import TradeReviewPage from '../pages/TradeReviewPage';
+import { IntentCustomerDiagnosisPage } from '../pages/IntentCustomerDiagnosisPage';
 
 export interface RouteConfig {
     path: string;
@@ -45,7 +46,7 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/customer/load-analysis', title: '客户负荷分析', component: CustomerLoadOverviewPage },
     { path: '/customer/load-characteristics', title: '负荷特征分析', component: LoadCharacteristicsOverviewPage },
     { path: '/customer/load-characteristics/:customerId', title: '客户特征详情', component: LoadCharacteristicsDetailPage },
-    { path: '/customer/external-diagnosis', title: '外部客户诊断', component: PlaceholderPage },
+    { path: '/customer/external-diagnosis', title: '外部客户诊断', component: IntentCustomerDiagnosisPage },
 
     // 负荷预测
     { path: '/load-forecast/overall-analysis', title: '总体负荷分析', component: LoadAnalysisPage },
