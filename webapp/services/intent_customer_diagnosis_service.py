@@ -1,4 +1,5 @@
 import logging
+from calendar import monthrange
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -7,6 +8,7 @@ from bson import ObjectId
 
 from webapp.services.load_aggregation_service import LoadAggregationService
 from webapp.services.meter_data_import_service import MeterDataImportService
+from webapp.services.retail_settlement_service import RetailSettlementService
 from webapp.tools.mongo import DATABASE
 
 logger = logging.getLogger(__name__)
@@ -17,6 +19,8 @@ class IntentCustomerDiagnosisService:
         self.profile_collection = DATABASE["intent_customer_profiles"]
         self.raw_collection = DATABASE["intent_customer_meter_reads_daily"]
         self.curve_collection = DATABASE["intent_customer_load_curve_daily"]
+        self.wholesale_result_collection = DATABASE["intent_customer_monthly_wholesale"]
+        self.retail_settlement_service = RetailSettlementService()
         self._ensure_indexes()
 
     def _ensure_indexes(self) -> None:
@@ -28,6 +32,11 @@ class IntentCustomerDiagnosisService:
         )
         self.raw_collection.create_index([("customer_id", 1), ("date", 1)])
         self.curve_collection.create_index([("customer_id", 1), ("date", 1)], unique=True)
+        self.wholesale_result_collection.create_index(
+            [("customer_id", 1), ("settlement_month", 1)],
+            unique=True,
+        )
+        self.wholesale_result_collection.create_index([("customer_id", 1), ("updated_at", -1)])
 
     def preview_files(self, files: List[Tuple[str, bytes]]) -> Dict[str, Any]:
         preview_items: List[Dict[str, Any]] = []
@@ -289,6 +298,248 @@ class IntentCustomerDiagnosisService:
             "selected_day_total": round(float(selected_curve.get("total", 0.0)), 3) if selected_curve else 0.0,
         }
 
+    def calculate_wholesale_simulation(self, customer_id: str) -> Dict[str, Any]:
+        profile_doc = self._get_profile_doc(customer_id)
+        months = self._get_available_wholesale_months(customer_id)
+
+        summary_rows: List[Dict[str, Any]] = []
+        month_details: List[Dict[str, Any]] = []
+        for month in months:
+            result = self._calculate_single_wholesale_month(customer_id, profile_doc, month)
+            self._save_wholesale_result(result)
+            summary_rows.append(result["summary"])
+            month_details.append(
+                {
+                    "settlement_month": month,
+                    "summary": result["summary"],
+                    "period_details": result["period_details"],
+                    "daily_details": result["daily_details"],
+                }
+            )
+
+        return {
+            "customer": self._to_customer_list_item(profile_doc),
+            "summary_rows": summary_rows,
+            "month_details": month_details,
+        }
+
+    def get_wholesale_simulation(self, customer_id: str) -> Dict[str, Any]:
+        profile_doc = self._get_profile_doc(customer_id)
+        docs = list(
+            self.wholesale_result_collection.find(
+                {"customer_id": customer_id},
+                {"summary": 1, "period_details": 1, "daily_details": 1, "settlement_month": 1},
+            ).sort("settlement_month", 1)
+        )
+
+        summary_rows: List[Dict[str, Any]] = []
+        month_details: List[Dict[str, Any]] = []
+        for doc in docs:
+            summary = doc.get("summary", {}) or {}
+            summary_rows.append(summary)
+            month_details.append(
+                {
+                    "settlement_month": doc.get("settlement_month", ""),
+                    "summary": summary,
+                    "period_details": doc.get("period_details", []) or [],
+                    "daily_details": doc.get("daily_details", []) or [],
+                }
+            )
+
+        return {
+            "customer": self._to_customer_list_item(profile_doc),
+            "summary_rows": summary_rows,
+            "month_details": month_details,
+        }
+
+    def _get_profile_doc(self, customer_id: str) -> Dict[str, Any]:
+        if not ObjectId.is_valid(customer_id):
+            raise ValueError("无效的客户ID")
+
+        profile_doc = self.profile_collection.find_one({"_id": ObjectId(customer_id)})
+        if not profile_doc:
+            raise ValueError("客户不存在")
+        return profile_doc
+
+    def _get_available_wholesale_months(self, customer_id: str) -> List[str]:
+        curve_months = {
+            str(doc.get("date", ""))[:7]
+            for doc in self.curve_collection.find({"customer_id": customer_id}, {"date": 1})
+            if str(doc.get("date", "")).startswith("20")
+        }
+        wholesale_months = {
+            str(month)
+            for month in self.wholesale_result_collection.database["wholesale_settlement_monthly"].distinct("month")
+            if isinstance(month, str) and len(month) == 7
+        }
+        return sorted(curve_months & wholesale_months)
+
+    def _calculate_single_wholesale_month(
+        self,
+        customer_id: str,
+        profile_doc: Dict[str, Any],
+        month: str,
+    ) -> Dict[str, Any]:
+        wholesale_doc = self.wholesale_result_collection.database["wholesale_settlement_monthly"].find_one(
+            {"_id": month},
+            {"settlement_items": 1},
+        )
+        if not wholesale_doc:
+            raise ValueError(f"{month} 缺少批发月度结算数据")
+
+        settlement_items = wholesale_doc.get("settlement_items", {}) or {}
+        surplus_unit_price = self._calculate_surplus_unit_price(settlement_items)
+        daily_curves = self._get_month_curve_docs(customer_id, month)
+        if not daily_curves:
+            raise ValueError(f"{month} 缺少可用负荷曲线数据")
+
+        period_loads = [0.0] * 48
+        period_daily_costs = [0.0] * 48
+        daily_details: List[Dict[str, Any]] = []
+        total_energy_mwh = 0.0
+        daily_cost_total = 0.0
+
+        for curve_doc in daily_curves:
+            date_str = str(curve_doc.get("date"))
+            values = self._normalize_to_48(curve_doc.get("values") or [])
+            wholesale_prices = self.retail_settlement_service._get_wholesale_period_prices(date_str)
+
+            day_energy_mwh = 0.0
+            day_daily_cost = 0.0
+            for index in range(48):
+                load_mwh = float(values[index] if index < len(values) else 0.0)
+                price_mwh = float(wholesale_prices[index] if index < len(wholesale_prices) else 0.0)
+                allocated_cost = load_mwh * price_mwh
+                period_loads[index] += load_mwh
+                period_daily_costs[index] += allocated_cost
+                day_energy_mwh += load_mwh
+                day_daily_cost += allocated_cost
+
+            day_surplus_cost = day_energy_mwh * surplus_unit_price
+            day_total_cost = day_daily_cost + day_surplus_cost
+            day_unit_cost = day_total_cost / day_energy_mwh if day_energy_mwh > 0 else 0.0
+
+            total_energy_mwh += day_energy_mwh
+            daily_cost_total += day_daily_cost
+            daily_details.append(
+                {
+                    "date": date_str,
+                    "total_energy_mwh": round(day_energy_mwh, 6),
+                    "daily_cost_total": round(day_daily_cost, 2),
+                    "surplus_cost": round(day_surplus_cost, 2),
+                    "total_cost": round(day_total_cost, 2),
+                    "unit_cost_yuan_per_mwh": round(day_unit_cost, 6),
+                }
+            )
+
+        surplus_cost = total_energy_mwh * surplus_unit_price
+        total_cost = daily_cost_total + surplus_cost
+        unit_cost_yuan_per_mwh = total_cost / total_energy_mwh if total_energy_mwh > 0 else 0.0
+        unit_cost_yuan_per_kwh = unit_cost_yuan_per_mwh / 1000 if unit_cost_yuan_per_mwh > 0 else 0.0
+
+        summary = {
+            "settlement_month": month,
+            "total_energy_mwh": round(total_energy_mwh, 6),
+            "daily_cost_total": round(daily_cost_total, 2),
+            "surplus_unit_price": round(surplus_unit_price, 6),
+            "surplus_cost": round(surplus_cost, 2),
+            "total_cost": round(total_cost, 2),
+            "unit_cost_yuan_per_mwh": round(unit_cost_yuan_per_mwh, 6),
+            "unit_cost_yuan_per_kwh": round(unit_cost_yuan_per_kwh, 6),
+            "status": "success",
+            "message": "",
+        }
+
+        period_details: List[Dict[str, Any]] = []
+        for index in range(48):
+            load_mwh = period_loads[index]
+            period_surplus_cost = load_mwh * surplus_unit_price
+            period_total_cost = period_daily_costs[index] + period_surplus_cost
+            daily_unit_price = period_daily_costs[index] / load_mwh if load_mwh > 0 else 0.0
+            final_unit_price = period_total_cost / load_mwh if load_mwh > 0 else 0.0
+            period_details.append(
+                {
+                    "period": index + 1,
+                    "time_label": self._build_period_label(index),
+                    "load_mwh": round(load_mwh, 6),
+                    "daily_cost_total": round(period_daily_costs[index], 2),
+                    "surplus_cost": round(period_surplus_cost, 2),
+                    "total_cost": round(period_total_cost, 2),
+                    "daily_cost_unit_price": round(daily_unit_price, 6),
+                    "final_unit_price": round(final_unit_price, 6),
+                }
+            )
+
+        now = datetime.now()
+        return {
+            "_id": f"{customer_id}_{month}_intent_monthly_v1",
+            "customer_id": customer_id,
+            "customer_name": profile_doc.get("customer_name", ""),
+            "settlement_month": month,
+            "settlement_version": "intent_monthly_v1",
+            "calc_status": "success",
+            "calc_message": "",
+            "summary": summary,
+            "period_details": period_details,
+            "daily_details": daily_details,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+    @staticmethod
+    def _calculate_surplus_unit_price(settlement_items: Dict[str, Any]) -> float:
+        fund_surplus_deficit_total = float(settlement_items.get("fund_surplus_deficit_total") or 0.0)
+        deviation_recovery_fee = float(settlement_items.get("deviation_recovery_fee") or 0.0)
+        actual_monthly_volume = float(settlement_items.get("actual_monthly_volume") or 0.0)
+        if actual_monthly_volume <= 0:
+            return 0.0
+        return (fund_surplus_deficit_total - deviation_recovery_fee) / actual_monthly_volume
+
+    def _get_month_curve_docs(self, customer_id: str, month: str) -> List[Dict[str, Any]]:
+        year = int(month[:4])
+        mon = int(month[5:7])
+        start_date = f"{month}-01"
+        end_date = f"{month}-{monthrange(year, mon)[1]:02d}"
+        return list(
+            self.curve_collection.find(
+                {"customer_id": customer_id, "date": {"$gte": start_date, "$lte": end_date}},
+                {"date": 1, "values": 1, "total": 1},
+            ).sort("date", 1)
+        )
+
+    @staticmethod
+    def _normalize_to_48(values: List[Any]) -> List[float]:
+        normalized = [float(value or 0.0) for value in values]
+        if len(normalized) == 48:
+            return normalized
+        if len(normalized) == 96:
+            return [normalized[index * 2] + normalized[index * 2 + 1] for index in range(48)]
+        if len(normalized) > 48:
+            return normalized[:48]
+        return normalized + [0.0] * (48 - len(normalized))
+
+    @staticmethod
+    def _build_period_label(index: int) -> str:
+        start_minutes = index * 30
+        end_minutes = start_minutes + 30
+        start_hour = (start_minutes // 60) % 24
+        start_minute = start_minutes % 60
+        end_hour = (end_minutes // 60) % 24
+        end_minute = end_minutes % 60
+        return f"{start_hour:02d}:{start_minute:02d}-{end_hour:02d}:{end_minute:02d}"
+
+    def _save_wholesale_result(self, result: Dict[str, Any]) -> None:
+        payload = result.copy()
+        created_at = payload.pop("created_at", datetime.now())
+        self.wholesale_result_collection.update_one(
+            {
+                "customer_id": result["customer_id"],
+                "settlement_month": result["settlement_month"],
+            },
+            {"$set": payload, "$setOnInsert": {"created_at": created_at}},
+            upsert=True,
+        )
+
     def delete_customer(self, customer_id: str) -> None:
         if not ObjectId.is_valid(customer_id):
             raise ValueError("无效的客户ID")
@@ -301,6 +552,7 @@ class IntentCustomerDiagnosisService:
         self.profile_collection.delete_one({"_id": profile_object_id})
         self.raw_collection.delete_many({"customer_id": customer_id})
         self.curve_collection.delete_many({"customer_id": customer_id})
+        self.wholesale_result_collection.delete_many({"customer_id": customer_id})
 
     def _aggregate_customer_curves(
         self,

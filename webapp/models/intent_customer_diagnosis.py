@@ -108,3 +108,49 @@ class LoadSummaryResponse(BaseModel):
 
 class DeleteIntentCustomerRequest(BaseModel):
     password: str = Field(..., min_length=1, description="登录密码")
+
+
+class IntentWholesaleMonthlySummaryRow(BaseModel):
+    settlement_month: str = Field(..., description="结算月份")
+    total_energy_mwh: float = Field(0.0, description="总电量(MWh)")
+    daily_cost_total: float = Field(0.0, description="每日成本汇总(元)")
+    surplus_unit_price: float = Field(0.0, description="资金余缺分摊单价(元/MWh)")
+    surplus_cost: float = Field(0.0, description="资金余缺分摊(元)")
+    total_cost: float = Field(0.0, description="批发总成本(元)")
+    unit_cost_yuan_per_mwh: float = Field(0.0, description="批发单价(元/MWh)")
+    unit_cost_yuan_per_kwh: float = Field(0.0, description="批发单价(元/kWh)")
+    status: str = Field("success", description="计算状态")
+    message: str = Field("", description="结果消息")
+
+
+class IntentWholesalePeriodDetail(BaseModel):
+    period: int = Field(..., description="时段序号")
+    time_label: str = Field(..., description="时段标签")
+    load_mwh: float = Field(0.0, description="电量(MWh)")
+    daily_cost_total: float = Field(0.0, description="每日成本汇总(元)")
+    surplus_cost: float = Field(0.0, description="资金余缺分摊(元)")
+    total_cost: float = Field(0.0, description="总成本(元)")
+    daily_cost_unit_price: float = Field(0.0, description="每日成本汇总单价(元/MWh)")
+    final_unit_price: float = Field(0.0, description="最终单价(元/MWh)")
+
+
+class IntentWholesaleDailyDetail(BaseModel):
+    date: str = Field(..., description="日期")
+    total_energy_mwh: float = Field(0.0, description="总电量(MWh)")
+    daily_cost_total: float = Field(0.0, description="每日成本汇总(元)")
+    surplus_cost: float = Field(0.0, description="资金余缺分摊(元)")
+    total_cost: float = Field(0.0, description="总成本(元)")
+    unit_cost_yuan_per_mwh: float = Field(0.0, description="日均单价(元/MWh)")
+
+
+class IntentWholesaleMonthlyDetail(BaseModel):
+    settlement_month: str = Field(..., description="结算月份")
+    summary: IntentWholesaleMonthlySummaryRow = Field(..., description="月度汇总")
+    period_details: List[IntentWholesalePeriodDetail] = Field(default_factory=list, description="48时段明细")
+    daily_details: List[IntentWholesaleDailyDetail] = Field(default_factory=list, description="每日明细")
+
+
+class IntentWholesaleSimulationResponse(BaseModel):
+    customer: IntentCustomerListItem = Field(..., description="客户摘要")
+    summary_rows: List[IntentWholesaleMonthlySummaryRow] = Field(default_factory=list, description="月度汇总表")
+    month_details: List[IntentWholesaleMonthlyDetail] = Field(default_factory=list, description="按月明细")

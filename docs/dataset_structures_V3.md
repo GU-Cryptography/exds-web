@@ -233,7 +233,117 @@
 
 ---
 
-## 5. 当前版本边界说明
+## 5. `intent_customer_monthly_wholesale` - 意向客户批发侧月度模拟结算结果
+
+该集合用于保存意向客户在“月度模拟结算”页中批发侧的计算结果。  
+**服务文件**: [`webapp/services/intent_customer_diagnosis_service.py`](/d:/Gitworks/exds-web/webapp/services/intent_customer_diagnosis_service.py)
+
+### 5.1. 设计说明
+
+- 一条记录对应“一个意向客户 + 一个结算月份”
+- 同一意向客户同一月份只有一条记录
+- 每次执行“计算批发侧结算”时，按 `customer_id + settlement_month` 覆盖原有记录
+- 页面打开批发侧 Tab 子页面时，默认读取该集合中已保存的结果并直接展示
+- 当前保留 `settlement_version` 字段用于口径标识，但不参与唯一约束
+
+### 5.2. 字段说明
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `_id` | `String` | 记录主键，当前格式为 `{customer_id}_{settlement_month}_intent_monthly_v1` |
+| `customer_id` | `String` | 关联 `intent_customer_profiles._id` |
+| `customer_name` | `String` | 冗余客户名称 |
+| `settlement_month` | `String` | 结算月份，格式 `YYYY-MM` |
+| `settlement_version` | `String` | 计算口径版本，当前固定为 `intent_monthly_v1` |
+| `calc_status` | `String` | 计算状态，当前成功时为 `success` |
+| `calc_message` | `String` | 结果消息 |
+| `summary` | `Object` | 月度汇总结果 |
+| `summary.settlement_month` | `String` | 结算月份 |
+| `summary.total_energy_mwh` | `Number` | 总电量，单位 `MWh` |
+| `summary.daily_cost_total` | `Number` | 每日成本汇总，单位 `元` |
+| `summary.surplus_unit_price` | `Number` | 资金余缺分摊单价，单位 `元/MWh` |
+| `summary.surplus_cost` | `Number` | 资金余缺分摊，单位 `元` |
+| `summary.total_cost` | `Number` | 批发总成本，单位 `元` |
+| `summary.unit_cost_yuan_per_mwh` | `Number` | 批发单价，单位 `元/MWh` |
+| `summary.status` | `String` | 月度结果状态 |
+| `summary.message` | `String` | 月度结果消息 |
+| `period_details` | `Array[48]` | 48时段成本明细 |
+| `period_details[].period` | `Number` | 时段序号，1~48 |
+| `period_details[].time_label` | `String` | 时段标签，如 `00:00-00:30` |
+| `period_details[].load_mwh` | `Number` | 该时段月累计电量，单位 `MWh` |
+| `period_details[].daily_cost_total` | `Number` | 该时段每日成本汇总，单位 `元` |
+| `period_details[].surplus_cost` | `Number` | 该时段资金余缺分摊，单位 `元` |
+| `period_details[].total_cost` | `Number` | 该时段总成本，单位 `元` |
+| `period_details[].daily_cost_unit_price` | `Number` | 该时段每日成本汇总单价，单位 `元/MWh` |
+| `period_details[].final_unit_price` | `Number` | 该时段最终单价，单位 `元/MWh` |
+| `daily_details` | `Array` | 每日成本明细 |
+| `daily_details[].date` | `String` | 日期，格式 `YYYY-MM-DD` |
+| `daily_details[].total_energy_mwh` | `Number` | 当日总电量，单位 `MWh` |
+| `daily_details[].daily_cost_total` | `Number` | 当日每日成本汇总，单位 `元` |
+| `daily_details[].surplus_cost` | `Number` | 当日资金余缺分摊，单位 `元` |
+| `daily_details[].total_cost` | `Number` | 当日总成本，单位 `元` |
+| `daily_details[].unit_cost_yuan_per_mwh` | `Number` | 当日日均单价，单位 `元/MWh` |
+| `created_at` | `DateTime` | 首次创建时间 |
+| `updated_at` | `DateTime` | 最近更新时间 |
+
+### 5.3. 索引信息
+
+- `_id_`（默认）
+- `customer_id`, `settlement_month`（唯一复合索引）
+- `customer_id`, `updated_at`
+
+### 5.4. 示例
+
+```json
+{
+  "_id": "67d7d4f5f2d9f91a2f9d0001_2026-02_intent_monthly_v1",
+  "customer_id": "67d7d4f5f2d9f91a2f9d0001",
+  "customer_name": "华东精密制造厂",
+  "settlement_month": "2026-02",
+  "settlement_version": "intent_monthly_v1",
+  "calc_status": "success",
+  "calc_message": "",
+  "summary": {
+    "settlement_month": "2026-02",
+    "total_energy_mwh": 982.156,
+    "daily_cost_total": 361225.43,
+    "surplus_unit_price": 12.345678,
+    "surplus_cost": 12125.98,
+    "total_cost": 373351.41,
+    "unit_cost_yuan_per_mwh": 380.139487,
+    "status": "success",
+    "message": ""
+  },
+  "period_details": [
+    {
+      "period": 1,
+      "time_label": "00:00-00:30",
+      "load_mwh": 18.625,
+      "daily_cost_total": 6521.44,
+      "surplus_cost": 229.94,
+      "total_cost": 6751.38,
+      "daily_cost_unit_price": 350.144295,
+      "final_unit_price": 362.489973
+    }
+  ],
+  "daily_details": [
+    {
+      "date": "2026-02-01",
+      "total_energy_mwh": 31.268,
+      "daily_cost_total": 11352.27,
+      "surplus_cost": 386.02,
+      "total_cost": 11738.29,
+      "unit_cost_yuan_per_mwh": 375.408786
+    }
+  ],
+  "created_at": "2026-03-17T16:20:00",
+  "updated_at": "2026-03-17T16:20:00"
+}
+```
+
+---
+
+## 6. 当前版本边界说明
 
 ### 5.1. 已实现
 
@@ -260,6 +370,10 @@
 
 本模块当前新增的 3 个核心集合如下：
 
+## 7. 命名汇总
+本模块当前新增的 4 个核心集合如下：
+
 - `intent_customer_profiles`
 - `intent_customer_meter_reads_daily`
 - `intent_customer_load_curve_daily`
+- `intent_customer_monthly_wholesale`

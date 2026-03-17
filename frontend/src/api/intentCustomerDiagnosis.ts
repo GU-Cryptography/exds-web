@@ -57,6 +57,52 @@ export interface IntentImportConfig {
     multiplier: number;
 }
 
+export interface IntentWholesaleSummaryRow {
+    settlement_month: string;
+    total_energy_mwh: number;
+    daily_cost_total: number;
+    surplus_unit_price: number;
+    surplus_cost: number;
+    total_cost: number;
+    unit_cost_yuan_per_mwh: number;
+    unit_cost_yuan_per_kwh: number;
+    status: string;
+    message: string;
+}
+
+export interface IntentWholesalePeriodDetail {
+    period: number;
+    time_label: string;
+    load_mwh: number;
+    daily_cost_total: number;
+    surplus_cost: number;
+    total_cost: number;
+    daily_cost_unit_price: number;
+    final_unit_price: number;
+}
+
+export interface IntentWholesaleDailyDetail {
+    date: string;
+    total_energy_mwh: number;
+    daily_cost_total: number;
+    surplus_cost: number;
+    total_cost: number;
+    unit_cost_yuan_per_mwh: number;
+}
+
+export interface IntentWholesaleMonthDetail {
+    settlement_month: string;
+    summary: IntentWholesaleSummaryRow;
+    period_details: IntentWholesalePeriodDetail[];
+    daily_details: IntentWholesaleDailyDetail[];
+}
+
+export interface IntentWholesaleSimulationResponse {
+    customer: IntentCustomerSummary;
+    summary_rows: IntentWholesaleSummaryRow[];
+    month_details: IntentWholesaleMonthDetail[];
+}
+
 export const listIntentCustomers = async () => {
     const response = await apiClient.get<{ items: IntentCustomerSummary[] }>('/api/v1/intent-customer-diagnosis/customers');
     return response.data.items;
@@ -96,4 +142,18 @@ export const deleteIntentCustomer = async (customerId: string, password: string)
     await apiClient.delete(`/api/v1/intent-customer-diagnosis/customers/${customerId}`, {
         data: { password }
     });
+};
+
+export const calculateIntentCustomerWholesaleSimulation = async (customerId: string) => {
+    const response = await apiClient.post<IntentWholesaleSimulationResponse>(
+        `/api/v1/intent-customer-diagnosis/customers/${customerId}/wholesale-simulation`
+    );
+    return response.data;
+};
+
+export const getIntentCustomerWholesaleSimulation = async (customerId: string) => {
+    const response = await apiClient.get<IntentWholesaleSimulationResponse>(
+        `/api/v1/intent-customer-diagnosis/customers/${customerId}/wholesale-simulation`
+    );
+    return response.data;
 };

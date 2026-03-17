@@ -9,6 +9,7 @@ from webapp.models.intent_customer_diagnosis import (
     ImportMeterConfig,
     ImportResult,
     IntentCustomerListResponse,
+    IntentWholesaleSimulationResponse,
     LoadSummaryResponse,
     PreviewResponse,
 )
@@ -65,10 +66,7 @@ async def import_intent_customer_files(
     service = IntentCustomerDiagnosisService()
     try:
         file_payloads = [(file.filename or "unknown.xlsx", await file.read()) for file in files]
-        return service.import_customer_data(
-            files=file_payloads,
-            meter_configs=meter_configs,
-        )
+        return service.import_customer_data(files=file_payloads, meter_configs=meter_configs)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
@@ -93,6 +91,40 @@ async def get_intent_customer_load_data(
         return service.get_customer_load_data(customer_id=customer_id, month=month, date=date)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post(
+    "/customers/{customer_id}/wholesale-simulation",
+    response_model=IntentWholesaleSimulationResponse,
+    summary="批量计算意向客户批发侧月度模拟结算",
+)
+async def calculate_intent_customer_wholesale_simulation(
+    customer_id: str,
+    current_user: User = Depends(get_current_active_user),
+):
+    del current_user
+    service = IntentCustomerDiagnosisService()
+    try:
+        return service.calculate_wholesale_simulation(customer_id=customer_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get(
+    "/customers/{customer_id}/wholesale-simulation",
+    response_model=IntentWholesaleSimulationResponse,
+    summary="获取已保存的意向客户批发侧月度模拟结算",
+)
+async def get_intent_customer_wholesale_simulation(
+    customer_id: str,
+    current_user: User = Depends(get_current_active_user),
+):
+    del current_user
+    service = IntentCustomerDiagnosisService()
+    try:
+        return service.get_wholesale_simulation(customer_id=customer_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.delete("/customers/{customer_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除意向客户")

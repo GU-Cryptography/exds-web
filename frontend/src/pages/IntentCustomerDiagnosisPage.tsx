@@ -4,6 +4,7 @@ import {
     Autocomplete,
     Box,
     Button,
+    ButtonGroup,
     Card,
     CardContent,
     Chip,
@@ -17,6 +18,12 @@ import {
     Paper,
     Stack,
     Tab,
+    Table,
+    TableBody,
+    TableCell,
+    TableContainer,
+    TableHead,
+    TableRow,
     Tabs,
     TextField,
     Typography,
@@ -49,6 +56,7 @@ import {
     BarChart,
     CartesianGrid,
     Cell,
+    ComposedChart,
     Legend,
     Line,
     LineChart,
@@ -58,10 +66,16 @@ import {
     YAxis
 } from 'recharts';
 import {
+    calculateIntentCustomerWholesaleSimulation,
     deleteIntentCustomer,
     getIntentCustomerLoadData,
+    getIntentCustomerWholesaleSimulation,
     importIntentCustomerFiles,
     IntentCustomerSummary,
+    IntentWholesaleDailyDetail,
+    IntentWholesaleMonthDetail,
+    IntentWholesalePeriodDetail,
+    IntentWholesaleSummaryRow,
     IntentImportConfig,
     IntentPreviewResponse,
     listIntentCustomers,
@@ -451,6 +465,484 @@ const DeleteDialog: React.FC<{
                 </Button>
             </DialogActions>
         </Dialog>
+    );
+};
+
+type WholesaleDetailMode = 'chart' | 'table';
+
+const WholesaleSimulationTab: React.FC<{
+    selectedCustomer: IntentCustomerSummary | null;
+}> = ({ selectedCustomer }) => {
+    const detailPanelHeight = { xs: 350, sm: 400 };
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [message, setMessage] = useState<string | null>(null);
+    const [summaryRows, setSummaryRows] = useState<IntentWholesaleSummaryRow[]>([]);
+    const [monthDetails, setMonthDetails] = useState<IntentWholesaleMonthDetail[]>([]);
+    const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+    const [periodMode, setPeriodMode] = useState<WholesaleDetailMode>('chart');
+    const [dailyMode, setDailyMode] = useState<WholesaleDetailMode>('chart');
+
+    const periodChartRef = useRef<HTMLDivElement>(null);
+    const dailyChartRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        setSummaryRows([]);
+        setMonthDetails([]);
+        setSelectedMonth(null);
+        setError(null);
+        setMessage(null);
+        setPeriodMode('chart');
+        setDailyMode('chart');
+    }, [selectedCustomer?.id]);
+
+    useEffect(() => {
+        if (!selectedCustomer) {
+            return;
+        }
+
+        let cancelled = false;
+        const loadSavedResult = async () => {
+            setLoading(true);
+            setError(null);
+            try {
+                const response = await getIntentCustomerWholesaleSimulation(selectedCustomer.id);
+                if (cancelled) {
+                    return;
+                }
+                setSummaryRows(response.summary_rows);
+                setMonthDetails(response.month_details);
+                setSelectedMonth((current) => current || response.summary_rows[0]?.settlement_month || null);
+            } catch (loadError: any) {
+                if (cancelled) {
+                    return;
+                }
+                setError(loadError.response?.data?.detail || loadError.message || '加载批发侧结算结果失败');
+            } finally {
+                if (!cancelled) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        void loadSavedResult();
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedCustomer]);
+
+    const selectedMonthDetail = useMemo(
+        () => monthDetails.find((item) => item.settlement_month === selectedMonth) || null,
+        [monthDetails, selectedMonth]
+    );
+
+    useEffect(() => {
+        if (!selectedMonthDetail && monthDetails.length > 0) {
+            setSelectedMonth(monthDetails[0].settlement_month);
+        }
+    }, [monthDetails, selectedMonthDetail]);
+
+    const periodChartData = useMemo(
+        () => (selectedMonthDetail?.period_details || []).map((item) => ({
+            ...item,
+            short_label: item.period.toString()
+        })),
+        [selectedMonthDetail]
+    );
+
+    const dailyChartData = useMemo(
+        () => (selectedMonthDetail?.daily_details || []).map((item) => ({
+            ...item,
+            label: item.date.slice(5)
+        })),
+        [selectedMonthDetail]
+    );
+
+    const {
+        isFullscreen: isPeriodFullscreen,
+        FullscreenEnterButton: PeriodFullscreenEnterButton,
+        FullscreenExitButton: PeriodFullscreenExitButton,
+        FullscreenTitle: PeriodFullscreenTitle
+    } = useChartFullscreen({
+        chartRef: periodChartRef,
+        title: selectedMonth ? `48时段成本明细 ${selectedMonth}` : '48时段成本明细'
+    });
+
+    const {
+        isFullscreen: isDailyFullscreen,
+        FullscreenEnterButton: DailyFullscreenEnterButton,
+        FullscreenExitButton: DailyFullscreenExitButton,
+        FullscreenTitle: DailyFullscreenTitle
+    } = useChartFullscreen({
+        chartRef: dailyChartRef,
+        title: selectedMonth ? `每日成本明细 ${selectedMonth}` : '每日成本明细'
+    });
+
+    const handleCalculate = async () => {
+        if (!selectedCustomer) {
+            return;
+        }
+        setLoading(true);
+        setError(null);
+        setMessage(null);
+        try {
+            const response = await calculateIntentCustomerWholesaleSimulation(selectedCustomer.id);
+            setSummaryRows(response.summary_rows);
+            setMonthDetails(response.month_details);
+            setSelectedMonth(response.summary_rows[0]?.settlement_month || null);
+            setMessage(response.summary_rows.length > 0 ? '批发侧月度模拟结算已完成。' : '没有可计算的结算月份。');
+        } catch (calcError: any) {
+            setError(calcError.response?.data?.detail || calcError.message || '批发侧月度模拟结算失败');
+            setSummaryRows([]);
+            setMonthDetails([]);
+            setSelectedMonth(null);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const renderSummaryTable = () => (
+        <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto' }}>
+            <Table
+                size="small"
+                sx={{
+                    '& .MuiTableCell-root': {
+                        fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                        px: { xs: 0.5, sm: 1.5 }
+                    }
+                }}
+            >
+                <TableHead>
+                    <TableRow>
+                        <TableCell>结算月份</TableCell>
+                        <TableCell align="right">总电量(MWh)</TableCell>
+                        <TableCell align="right">每日成本汇总(元)</TableCell>
+                        <TableCell align="right">资金余缺分摊单价(元/MWh)</TableCell>
+                        <TableCell align="right">资金余缺分摊(元)</TableCell>
+                        <TableCell align="right">批发总成本(元)</TableCell>
+                        <TableCell align="right">批发单价(元/MWh)</TableCell>
+                    </TableRow>
+                </TableHead>
+                <TableBody>
+                    {summaryRows.map((row) => {
+                        const active = row.settlement_month === selectedMonth;
+                        return (
+                            <TableRow
+                                key={row.settlement_month}
+                                hover
+                                selected={active}
+                                onClick={() => setSelectedMonth(row.settlement_month)}
+                                sx={{ cursor: 'pointer' }}
+                            >
+                                <TableCell>{row.settlement_month}</TableCell>
+                                <TableCell align="right">{row.total_energy_mwh.toFixed(3)}</TableCell>
+                                <TableCell align="right">{row.daily_cost_total.toFixed(3)}</TableCell>
+                                <TableCell align="right">{row.surplus_unit_price.toFixed(3)}</TableCell>
+                                <TableCell align="right">{row.surplus_cost.toFixed(3)}</TableCell>
+                                <TableCell align="right">{row.total_cost.toFixed(3)}</TableCell>
+                                <TableCell align="right">{row.unit_cost_yuan_per_mwh.toFixed(3)}</TableCell>
+                            </TableRow>
+                        );
+                    })}
+                </TableBody>
+            </Table>
+        </TableContainer>
+    );
+
+    const renderPeriodTable = (rows: IntentWholesalePeriodDetail[]) => {
+        const totals = rows.reduce(
+            (acc, row) => ({
+                load_mwh: acc.load_mwh + row.load_mwh,
+                daily_cost_total: acc.daily_cost_total + row.daily_cost_total,
+                surplus_cost: acc.surplus_cost + row.surplus_cost,
+                total_cost: acc.total_cost + row.total_cost
+            }),
+            { load_mwh: 0, daily_cost_total: 0, surplus_cost: 0, total_cost: 0 }
+        );
+
+        return (
+            <Box sx={{ height: detailPanelHeight }}>
+                <TableContainer sx={{ overflow: 'auto', height: '100%' }}>
+                    <Table
+                        stickyHeader
+                        size="small"
+                        sx={{
+                            '& .MuiTableCell-root': {
+                                fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                                px: { xs: 0.5, sm: 1.5 }
+                            }
+                        }}
+                    >
+                        <TableHead>
+                            <TableRow>
+                                <TableCell>时段</TableCell>
+                                <TableCell>时间</TableCell>
+                                <TableCell align="right">电量(MWh)</TableCell>
+                                <TableCell align="right">每日成本汇总(元)</TableCell>
+                                <TableCell align="right">资金余缺分摊(元)</TableCell>
+                                <TableCell align="right">总成本(元)</TableCell>
+                                <TableCell align="right">时段均价</TableCell>
+                            </TableRow>
+                        </TableHead>
+                        <TableBody>
+                            {rows.map((row) => (
+                                <TableRow key={row.period}>
+                                    <TableCell>{row.period}</TableCell>
+                                    <TableCell>{row.time_label}</TableCell>
+                                    <TableCell align="right">{row.load_mwh.toFixed(3)}</TableCell>
+                                    <TableCell align="right">{row.daily_cost_total.toFixed(3)}</TableCell>
+                                    <TableCell align="right">{row.surplus_cost.toFixed(3)}</TableCell>
+                                    <TableCell align="right">{row.total_cost.toFixed(3)}</TableCell>
+                                    <TableCell align="right">{row.final_unit_price.toFixed(3)}</TableCell>
+                                </TableRow>
+                            ))}
+                            <TableRow
+                                sx={{
+                                    position: 'sticky',
+                                    bottom: 0,
+                                    backgroundColor: '#f5f7fa',
+                                    '& .MuiTableCell-root': { fontWeight: 700 }
+                                }}
+                            >
+                                <TableCell colSpan={2}>合计</TableCell>
+                                <TableCell align="right">{totals.load_mwh.toFixed(3)}</TableCell>
+                                <TableCell align="right">{totals.daily_cost_total.toFixed(3)}</TableCell>
+                                <TableCell align="right">{totals.surplus_cost.toFixed(3)}</TableCell>
+                                <TableCell align="right">{totals.total_cost.toFixed(3)}</TableCell>
+                                <TableCell align="right">{(totals.total_cost / totals.load_mwh || 0).toFixed(3)}</TableCell>
+                            </TableRow>
+                        </TableBody>
+                    </Table>
+                </TableContainer>
+            </Box>
+        );
+    };
+
+    const renderDailyTable = (rows: IntentWholesaleDailyDetail[]) => {
+        const totals = rows.reduce(
+            (acc, row) => ({
+                total_energy_mwh: acc.total_energy_mwh + row.total_energy_mwh,
+                daily_cost_total: acc.daily_cost_total + row.daily_cost_total,
+                surplus_cost: acc.surplus_cost + row.surplus_cost,
+                total_cost: acc.total_cost + row.total_cost
+            }),
+            { total_energy_mwh: 0, daily_cost_total: 0, surplus_cost: 0, total_cost: 0 }
+        );
+
+        return (
+            <Box sx={{ height: detailPanelHeight }}>
+                <TableContainer sx={{ overflow: 'auto', height: '100%' }}>
+                    <Table
+                        stickyHeader
+                        size="small"
+                        sx={{
+                            '& .MuiTableCell-root': {
+                                fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                                px: { xs: 0.5, sm: 1.5 }
+                            }
+                        }}
+                    >
+                        <TableHead>
+                            <TableRow>
+                                <TableCell>日期</TableCell>
+                                <TableCell align="right">总电量(MWh)</TableCell>
+                                <TableCell align="right">每日成本汇总(元)</TableCell>
+                                <TableCell align="right">资金余缺分摊(元)</TableCell>
+                                <TableCell align="right">总成本(元)</TableCell>
+                                <TableCell align="right">日均单价(元/MWh)</TableCell>
+                            </TableRow>
+                        </TableHead>
+                        <TableBody>
+                            {rows.map((row) => (
+                                <TableRow key={row.date}>
+                                    <TableCell>{row.date}</TableCell>
+                                    <TableCell align="right">{row.total_energy_mwh.toFixed(3)}</TableCell>
+                                    <TableCell align="right">{row.daily_cost_total.toFixed(3)}</TableCell>
+                                    <TableCell align="right">{row.surplus_cost.toFixed(3)}</TableCell>
+                                    <TableCell align="right">{row.total_cost.toFixed(3)}</TableCell>
+                                    <TableCell align="right">{row.unit_cost_yuan_per_mwh.toFixed(3)}</TableCell>
+                                </TableRow>
+                            ))}
+                            <TableRow
+                                sx={{
+                                    position: 'sticky',
+                                    bottom: 0,
+                                    backgroundColor: '#f5f7fa',
+                                    '& .MuiTableCell-root': { fontWeight: 700 }
+                                }}
+                            >
+                                <TableCell>合计</TableCell>
+                                <TableCell align="right">{totals.total_energy_mwh.toFixed(3)}</TableCell>
+                                <TableCell align="right">{totals.daily_cost_total.toFixed(3)}</TableCell>
+                                <TableCell align="right">{totals.surplus_cost.toFixed(3)}</TableCell>
+                                <TableCell align="right">{totals.total_cost.toFixed(3)}</TableCell>
+                                <TableCell align="right">{(totals.total_cost / totals.total_energy_mwh || 0).toFixed(3)}</TableCell>
+                            </TableRow>
+                        </TableBody>
+                    </Table>
+                </TableContainer>
+            </Box>
+        );
+    };
+
+    if (!selectedCustomer) {
+        return (
+            <Paper variant="outlined" sx={{ p: 3, textAlign: 'center' }}>
+                <Typography color="text.secondary">请先新增或选择意向客户。</Typography>
+            </Paper>
+        );
+    }
+
+    return (
+        <Stack spacing={2}>
+            <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 } }}>
+                <Stack
+                    direction={{ xs: 'column', md: 'row' }}
+                    justifyContent="space-between"
+                    alignItems={{ xs: 'flex-start', md: 'center' }}
+                    spacing={1.5}
+                >
+                    <Box>
+                        <Typography variant="h6" fontSize="1rem" fontWeight="bold">批发侧结算结果</Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                            自动识别该客户已覆盖且已完成批发月结的月份，一次性计算全部月份。
+                        </Typography>
+                    </Box>
+                    <Button variant="contained" onClick={() => void handleCalculate()} disabled={loading}>
+                        {loading ? '计算中...' : '计算批发侧结算'}
+                    </Button>
+                </Stack>
+            </Paper>
+
+            {message && <Alert severity="success" onClose={() => setMessage(null)}>{message}</Alert>}
+            {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
+
+            {loading && summaryRows.length === 0 ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+                    <CircularProgress />
+                </Box>
+            ) : summaryRows.length === 0 ? (
+                <Paper variant="outlined" sx={{ p: 3, textAlign: 'center' }}>
+                    <Typography color="text.secondary">点击上方按钮后，将在这里显示批发侧月度结算结果。</Typography>
+                </Paper>
+            ) : (
+                <Stack spacing={2}>
+                    {renderSummaryTable()}
+
+                    {selectedMonthDetail && (
+                        <Grid container spacing={{ xs: 1, sm: 2 }} alignItems="stretch">
+                            <Grid size={{ xs: 12, lg: 6 }}>
+                                <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 }, height: '100%', display: 'flex', flexDirection: 'column' }}>
+                                    <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1} sx={{ mb: 2 }}>
+                                        <Box>
+                                            <Typography variant="h6" fontSize="1rem" fontWeight="bold">48时段成本明细</Typography>
+                                            <Typography variant="body2" color="text.secondary">{selectedMonthDetail.settlement_month}</Typography>
+                                        </Box>
+                                        <ButtonGroup size="small" variant="outlined">
+                                            <Button variant={periodMode === 'chart' ? 'contained' : 'outlined'} onClick={() => setPeriodMode('chart')}>图表</Button>
+                                            <Button variant={periodMode === 'table' ? 'contained' : 'outlined'} onClick={() => setPeriodMode('table')}>表格</Button>
+                                        </ButtonGroup>
+                                    </Stack>
+                                    <Box sx={{ flex: 1, minHeight: 0 }}>
+                                        {periodMode === 'chart' ? (
+                                            <Box
+                                                ref={periodChartRef}
+                                                sx={{
+                                                    height: detailPanelHeight,
+                                                    position: 'relative',
+                                                    backgroundColor: isPeriodFullscreen ? 'background.paper' : 'transparent',
+                                                    p: isPeriodFullscreen ? 2 : 0,
+                                                    ...(isPeriodFullscreen && {
+                                                        position: 'fixed',
+                                                        top: 0,
+                                                        left: 0,
+                                                        width: '100vw',
+                                                        height: '100vh',
+                                                        zIndex: 1400
+                                                    })
+                                                }}
+                                            >
+                                                <PeriodFullscreenEnterButton />
+                                                <PeriodFullscreenExitButton />
+                                                <PeriodFullscreenTitle />
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <ComposedChart data={periodChartData} margin={{ top: 20, right: 20, left: 0, bottom: 10 }}>
+                                                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                                        <XAxis dataKey="short_label" tick={{ fontSize: 11 }} interval={3} />
+                                                        <YAxis yAxisId="left" />
+                                                        <YAxis yAxisId="right" orientation="right" />
+                                                        <RechartsTooltip />
+                                                        <Legend />
+                                                        <Bar yAxisId="left" dataKey="load_mwh" name="电量(MWh)" fill="#8caac4" />
+                                                        <Line yAxisId="right" type="monotone" dataKey="total_cost" name="总成本(元)" stroke="#ef6c00" strokeWidth={2.5} dot={false} />
+                                                    </ComposedChart>
+                                                </ResponsiveContainer>
+                                            </Box>
+                                        ) : (
+                                            renderPeriodTable(selectedMonthDetail.period_details)
+                                        )}
+                                    </Box>
+                                </Paper>
+                            </Grid>
+
+                            <Grid size={{ xs: 12, lg: 6 }}>
+                                <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 }, height: '100%', display: 'flex', flexDirection: 'column' }}>
+                                    <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1} sx={{ mb: 2 }}>
+                                        <Box>
+                                            <Typography variant="h6" fontSize="1rem" fontWeight="bold">每日成本明细</Typography>
+                                            <Typography variant="body2" color="text.secondary">{selectedMonthDetail.settlement_month}</Typography>
+                                        </Box>
+                                        <ButtonGroup size="small" variant="outlined">
+                                            <Button variant={dailyMode === 'chart' ? 'contained' : 'outlined'} onClick={() => setDailyMode('chart')}>图表</Button>
+                                            <Button variant={dailyMode === 'table' ? 'contained' : 'outlined'} onClick={() => setDailyMode('table')}>表格</Button>
+                                        </ButtonGroup>
+                                    </Stack>
+                                    <Box sx={{ flex: 1, minHeight: 0 }}>
+                                        {dailyMode === 'chart' ? (
+                                            <Box
+                                                ref={dailyChartRef}
+                                                sx={{
+                                                    height: detailPanelHeight,
+                                                    position: 'relative',
+                                                    backgroundColor: isDailyFullscreen ? 'background.paper' : 'transparent',
+                                                    p: isDailyFullscreen ? 2 : 0,
+                                                    ...(isDailyFullscreen && {
+                                                        position: 'fixed',
+                                                        top: 0,
+                                                        left: 0,
+                                                        width: '100vw',
+                                                        height: '100vh',
+                                                        zIndex: 1400
+                                                    })
+                                                }}
+                                            >
+                                                <DailyFullscreenEnterButton />
+                                                <DailyFullscreenExitButton />
+                                                <DailyFullscreenTitle />
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <ComposedChart data={dailyChartData} margin={{ top: 20, right: 20, left: 0, bottom: 10 }}>
+                                                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                                        <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                                                        <YAxis yAxisId="left" />
+                                                        <YAxis yAxisId="right" orientation="right" />
+                                                        <RechartsTooltip />
+                                                        <Legend />
+                                                        <Bar yAxisId="left" dataKey="total_energy_mwh" name="电量(MWh)" fill="#4caf50" />
+                                                        <Line yAxisId="right" type="monotone" dataKey="total_cost" name="总成本(元)" stroke="#1976d2" strokeWidth={2.5} dot={false} />
+                                                    </ComposedChart>
+                                                </ResponsiveContainer>
+                                            </Box>
+                                        ) : (
+                                            renderDailyTable(selectedMonthDetail.daily_details)
+                                        )}
+                                    </Box>
+                                </Paper>
+                            </Grid>
+                        </Grid>
+                    )}
+                </Stack>
+            )}
+        </Stack>
     );
 };
 
@@ -987,11 +1479,31 @@ export const IntentCustomerDiagnosisPage: React.FC = () => {
                 </TabPanel>
 
                 <TabPanel value={activeTab} index="wholesale">
-                    <PlaceholderTabCard title="批发结算模拟" description="已预留独立子页面入口，后续将在此接入覆盖月份识别、批发侧成本测算和趋势分析。" />
+                    <WholesaleSimulationTab selectedCustomer={selectedCustomer} />
                 </TabPanel>
 
                 <TabPanel value={activeTab} index="retail">
-                    <PlaceholderTabCard title="零售套餐分析" description="已预留独立子页面入口，后续将在此接入套餐选择、并排测算和推荐分析。" />
+                    <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
+                        <Stack
+                            direction={{ xs: 'column', md: 'row' }}
+                            justifyContent="space-between"
+                            alignItems={{ xs: 'flex-start', md: 'center' }}
+                            spacing={1.5}
+                        >
+                            <Box>
+                                <Typography variant="h6" fontSize="1rem" fontWeight="bold">零售侧结算结果</Typography>
+                                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                                    零售侧区域将支持按多个套餐版本分别测算，计算按钮与批发侧分开，不共用。
+                                </Typography>
+                            </Box>
+                            <Button variant="contained" disabled>
+                                计算零售侧结算
+                            </Button>
+                        </Stack>
+                        <Box sx={{ mt: 2 }}>
+                            <PlaceholderTabCard title="零售套餐分析" description="下一步将在这里接入套餐选择、多版本测算和推荐分析。" />
+                        </Box>
+                    </Paper>
                 </TabPanel>
 
                 <ImportDialog
