@@ -1,6 +1,6 @@
 import apiClient from './client';
 import {
-    BatchDetailResponse,
+    OperationDetailResponse,
     TradeDateListResponse,
     TradeDetailResponse,
     TradeOverviewResponse,
@@ -16,8 +16,8 @@ export const tradeReviewApi = {
         apiClient.get<TradeDetailResponse>('/api/v1/trade-review/detail', {
             params: { trade_date: tradeDate, delivery_date: deliveryDate },
         }),
-    fetchBatchDetail: (tradeDate: string, deliveryDate: string, batchId: string) =>
-        apiClient.get<BatchDetailResponse>('/api/v1/trade-review/batch-detail', {
-            params: { trade_date: tradeDate, delivery_date: deliveryDate, batch_id: batchId },
+    fetchOperationDetail: (tradeDate: string, deliveryDate: string, operationId: string) =>
+        apiClient.get<OperationDetailResponse>('/api/v1/trade-review/operation-detail', {
+            params: { trade_date: tradeDate, delivery_date: deliveryDate, operation_id: operationId },
         }),
 };

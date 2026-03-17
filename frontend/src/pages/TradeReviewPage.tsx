@@ -9,6 +9,7 @@ import {
     CircularProgress,
     Grid,
     IconButton,
+    MenuItem,
     Paper,
     Tab,
     Tabs,
@@ -19,13 +20,16 @@ import {
     TableFooter,
     TableHead,
     TableRow,
+    TextField,
     Typography,
     useMediaQuery,
     useTheme,
 } from '@mui/material';
 import ArrowLeftIcon from '@mui/icons-material/ArrowLeft';
 import ArrowRightIcon from '@mui/icons-material/ArrowRight';
+import BarChartOutlinedIcon from '@mui/icons-material/BarChartOutlined';
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
+import TimelineOutlinedIcon from '@mui/icons-material/TimelineOutlined';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { zhCN } from 'date-fns/locale';
@@ -35,16 +39,16 @@ import {
     Bar,
     CartesianGrid,
     ComposedChart,
-    Legend,
     Line,
     ReferenceLine,
     ResponsiveContainer,
+    Scatter,
     Tooltip,
     XAxis,
     YAxis,
 } from 'recharts';
 import { tradeReviewApi } from '../api/tradeReview';
-import { BatchDetailResponse, TradeDetailResponse, TradeOverviewResponse } from '../types/tradeReview';
+import { OperationDetailResponse, OrderLevelItem, TradeDetailResponse, TradeOverviewResponse } from '../types/tradeReview';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
 import { useSelectableSeries } from '../hooks/useSelectableSeries';
 
@@ -66,11 +70,32 @@ const formatSignedTrade = (value: number | null | undefined, digits = 2): string
 };
 
 const StatCard: React.FC<{ title: string; lines: string[] }> = ({ title, lines }) => (
-    <Card variant="outlined" sx={{ height: '100%' }}>
-        <CardContent>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>{title}</Typography>
+    <Card
+        variant="outlined"
+        sx={{
+            height: '100%',
+            borderRadius: 3,
+            borderColor: 'rgba(148, 163, 184, 0.22)',
+            background: 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.96) 100%)',
+            boxShadow: '0 14px 28px rgba(15, 23, 42, 0.06)',
+            overflow: 'hidden',
+        }}
+    >
+        <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
+            <Box
+                sx={{
+                    width: 36,
+                    height: 4,
+                    borderRadius: 999,
+                    background: 'linear-gradient(90deg, #0f766e 0%, #38bdf8 100%)',
+                    mb: 1.25,
+                }}
+            />
+            <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1, color: '#0f172a', letterSpacing: 0.2 }}>{title}</Typography>
             {lines.map((line) => (
-                <Typography key={line} variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>{line}</Typography>
+                <Typography key={line} variant="body2" sx={{ mb: 0.75, color: '#475569', lineHeight: 1.65 }}>
+                    {line}
+                </Typography>
             ))}
         </CardContent>
     </Card>
@@ -142,36 +167,45 @@ const DetailedExecutionTooltip: React.FC<any> = ({ active, payload, label }) => 
     return row ? <DetailedExecutionTooltipContent row={row} label={label} /> : null;
 };
 
-const BatchTooltip: React.FC<any> = ({ active, payload }) => {
+const OPERATION_BUY_COLORS = ['#1b5e20', '#2e7d32', '#43a047', '#66bb6a', '#81c784'];
+const OPERATION_SELL_COLORS = ['#b71c1c', '#c62828', '#e53935', '#ef5350', '#ef9a9a'];
+
+const OperationChartTooltip: React.FC<any> = ({ active, payload, label }) => {
     if (!active || !payload || payload.length === 0) return null;
-    const row = payload[0]?.payload;
+    const row = payload.find((item: any) => item?.payload)?.payload;
     if (!row) return null;
 
-    return (
-        <Paper variant="outlined" sx={{ p: 1.5 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>{row.batch_action_type === 'listing' ? '上架批次' : '下架批次'} {row.batch_id}</Typography>
-            <Typography variant="body2">开始：{row.batch_start_time}</Typography>
-            <Typography variant="body2">结束：{row.batch_end_time}</Typography>
-            <Typography variant="body2">记录数：{row.record_count}</Typography>
-            <Typography variant="body2">覆盖时段：{row.covered_period_count}</Typography>
-            <Typography variant="body2">申报电量：{formatNumber(row.batch_listing_mwh, 3)} MWh</Typography>
-        </Paper>
-    );
-};
+    const renderPriceLines = (prefix: string, levels: OrderLevelItem[]) => levels.map((level) => (
+        <Typography key={`${prefix}-price-${level.level_index}`} variant="body2" sx={{ color: '#334155' }}>
+            {`${prefix}${level.level_index}价格： ${formatNumber(level.price, 3)} 元/MWh`}
+        </Typography>
+    ));
 
-const BatchChartTooltip: React.FC<any> = ({ active, payload, label }) => {
-    if (!active || !payload || payload.length === 0) return null;
-    const row = payload[0]?.payload;
-    if (!row) return null;
+    const renderVolumeLines = (prefix: string, levels: OrderLevelItem[]) => levels.map((level) => (
+        <Typography key={`${prefix}-volume-${level.level_index}`} variant="body2" sx={{ color: '#334155' }}>
+            {`${prefix}${level.level_index}电量： ${formatNumber(level.volume_mwh, 2)} MWh`}
+        </Typography>
+    ));
 
     return (
-        <Paper variant="outlined" sx={{ p: 1.5 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>时段 {label}</Typography>
-            <Typography variant="body2">申报电量：{formatNumber(row.listing_mwh, 3)} MWh</Typography>
-            <Typography variant="body2">挂牌价格：{formatNumber(row.listing_price, 3)} 元/MWh</Typography>
-            <Typography variant="body2">市场均价：{formatNumber(row.market_monthly_price, 3)} 元/MWh</Typography>
-            <Typography variant="body2">现货价格：{formatNumber(row.spot_price, 3)} 元/MWh</Typography>
-            <Typography variant="body2">实际/预测电量：{formatNumber(row.actual_or_forecast_load_mwh, 3)} MWh</Typography>
+        <Paper elevation={0} sx={{ p: 2, minWidth: 320, borderRadius: 3, border: '1px solid rgba(30, 41, 59, 0.12)', background: 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.96) 100%)', boxShadow: '0 14px 36px rgba(15, 23, 42, 0.16)' }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#0f172a', mb: 1 }}>时段 {label}</Typography>
+            <Box sx={{ borderTop: '1px dashed rgba(148, 163, 184, 0.7)', my: 1 }} />
+            <Box sx={{ display: 'grid', gap: 0.5 }}>
+                {renderPriceLines('买', row.buy_order_levels)}
+                {renderPriceLines('卖', row.sell_order_levels)}
+                <Typography variant="body2" sx={{ color: '#334155' }}>
+                    实时价格：{row.spot_price === null ? '-' : `${formatNumber(row.spot_price, 3)} 元/MWh`}
+                </Typography>
+            </Box>
+            <Box sx={{ borderTop: '1px dashed rgba(148, 163, 184, 0.7)', my: 1 }} />
+            <Box sx={{ display: 'grid', gap: 0.5 }}>
+                {renderVolumeLines('买', row.buy_order_levels)}
+                {renderVolumeLines('卖', row.sell_order_levels)}
+                <Typography variant="body2" sx={{ color: '#334155' }}>
+                    实际电量：{row.actual_or_forecast_load_mwh === null ? '-' : `${formatNumber(row.actual_or_forecast_load_mwh, 2)} MWh`}
+                </Typography>
+            </Box>
         </Paper>
     );
 };
@@ -184,19 +218,20 @@ export const TradeReviewPage: React.FC = () => {
     const [overview, setOverview] = useState<TradeOverviewResponse | null>(null);
     const [detail, setDetail] = useState<TradeDetailResponse | null>(null);
     const [selectedDeliveryDate, setSelectedDeliveryDate] = useState('');
-    const [selectedBatchId, setSelectedBatchId] = useState('');
-    const [batchDetail, setBatchDetail] = useState<BatchDetailResponse | null>(null);
+    const [selectedOperationId, setSelectedOperationId] = useState('');
+    const [operationDetail, setOperationDetail] = useState<OperationDetailResponse | null>(null);
+    const [reviewTab, setReviewTab] = useState(0);
     const [executionTab, setExecutionTab] = useState(0);
-    const [batchTab, setBatchTab] = useState(0);
+    const [operationTab, setOperationTab] = useState(0);
     const [loading, setLoading] = useState(false);
-    const [loadingBatch, setLoadingBatch] = useState(false);
+    const [loadingOperation, setLoadingOperation] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     const executionChartRef = useRef<HTMLDivElement>(null);
-    const batchChartRef = useRef<HTMLDivElement>(null);
+    const operationChartRef = useRef<HTMLDivElement>(null);
     const tradeDateStr = selectedTradeDate ? format(selectedTradeDate, 'yyyy-MM-dd') : '';
     const executionFullscreen = useChartFullscreen({ chartRef: executionChartRef, title: `月内交易成交分析 (${tradeDateStr} / ${selectedDeliveryDate || '-'})` });
-    const batchFullscreen = useChartFullscreen({ chartRef: batchChartRef, title: `批次详情 (${selectedBatchId || '-'})` });
+    const operationFullscreen = useChartFullscreen({ chartRef: operationChartRef, title: `申报过程复盘 (${selectedOperationId || '-'})` });
 
     const { seriesVisibility: executionPriceVisibility, handleLegendClick: handleExecutionPriceLegendClick } = useSelectableSeries<ExecutionPriceSeriesKey>({ trade_avg_price: true, spot_price: true, market_monthly_price: false });
     const { seriesVisibility: executionVolumeVisibility, handleLegendClick: handleExecutionVolumeLegendClick } = useSelectableSeries<ExecutionVolumeSeriesKey>({ actual_or_forecast_load_mwh: true, annual_monthly_mwh: true, monthly_mwh: true, mechanism_mwh: true, historical_buy_mwh: true, historical_sell_mwh: true, trade_day_buy_mwh: true, trade_day_sell_mwh: true, final_position_mwh: true });
@@ -221,9 +256,9 @@ export const TradeReviewPage: React.FC = () => {
     useEffect(() => {
         setOverview(null);
         setDetail(null);
-        setBatchDetail(null);
+        setOperationDetail(null);
         setSelectedDeliveryDate('');
-        setSelectedBatchId('');
+        setSelectedOperationId('');
     }, [tradeDateStr]);
 
     useEffect(() => {
@@ -256,11 +291,11 @@ export const TradeReviewPage: React.FC = () => {
             try {
                 const response = await tradeReviewApi.fetchTradeDetail(tradeDateStr, selectedDeliveryDate);
                 setDetail(response.data);
-                setBatchDetail(response.data.default_batch_detail);
-                setSelectedBatchId(response.data.default_batch_id || response.data.default_batch_detail?.batch_id || '');
+                setOperationDetail(response.data.default_operation_detail);
+                setSelectedOperationId(response.data.default_operation_id || response.data.default_operation_detail?.operation_id || '');
             } catch (err: any) {
                 setDetail(null);
-                setBatchDetail(null);
+                setOperationDetail(null);
                 setError(err.response?.data?.detail || err.message || '加载成交结果复盘详情失败');
             } finally {
                 setLoading(false);
@@ -270,24 +305,24 @@ export const TradeReviewPage: React.FC = () => {
     }, [tradeDateStr, selectedDeliveryDate, overview]);
 
     useEffect(() => {
-        const loadBatchDetail = async () => {
-            if (!tradeDateStr || !selectedDeliveryDate || !selectedBatchId) return;
-            if (detail?.default_batch_detail?.batch_id === selectedBatchId) {
-                setBatchDetail(detail.default_batch_detail);
+        const loadOperationDetail = async () => {
+            if (!tradeDateStr || !selectedDeliveryDate || !selectedOperationId) return;
+            if (detail?.default_operation_detail?.operation_id === selectedOperationId) {
+                setOperationDetail(detail.default_operation_detail);
                 return;
             }
-            setLoadingBatch(true);
+            setLoadingOperation(true);
             try {
-                const response = await tradeReviewApi.fetchBatchDetail(tradeDateStr, selectedDeliveryDate, selectedBatchId);
-                setBatchDetail(response.data);
+                const response = await tradeReviewApi.fetchOperationDetail(tradeDateStr, selectedDeliveryDate, selectedOperationId);
+                setOperationDetail(response.data);
             } catch (err: any) {
-                setError(err.response?.data?.detail || err.message || '加载批次详情失败');
+                setError(err.response?.data?.detail || err.message || '加载申报过程详情失败');
             } finally {
-                setLoadingBatch(false);
+                setLoadingOperation(false);
             }
         };
-        loadBatchDetail();
-    }, [tradeDateStr, selectedDeliveryDate, selectedBatchId, detail]);
+        loadOperationDetail();
+    }, [tradeDateStr, selectedDeliveryDate, selectedOperationId, detail]);
 
     const handleShiftTradeDate = (offset: number) => {
         if (!tradeDateStr) return;
@@ -307,13 +342,59 @@ export const TradeReviewPage: React.FC = () => {
         trade_avg_price_sell: row.trade_day_net_mwh < 0 ? row.trade_avg_price : null,
     })), [detail]);
 
-    const batchTimelineData = useMemo(() => (detail?.batch_timeline || []).map((item, index) => ({
-        ...item,
-        batch_label: `${item.batch_action_type === 'listing' ? '上架批次' : '下架批次'}${index + 1}`,
-    })), [detail]);
-
+    const operationButtons = useMemo(() => detail?.operation_buttons || [], [detail?.operation_buttons]);
     const summary = detail?.summary_cards;
     const executionAnalysisSummary = detail?.execution_analysis_summary;
+
+    const operationChartData = useMemo(() => {
+        const rows = operationDetail?.chart_rows || [];
+        return rows.map((row) => {
+            const flattened: Record<string, number | null> = {
+                period: row.period,
+                actual_or_forecast_load_mwh: row.actual_or_forecast_load_mwh ?? null,
+                spot_price: row.spot_price ?? null,
+            };
+
+            row.buy_order_levels.forEach((level) => {
+                flattened[`buy_level_${level.level_index}_volume`] = level.volume_mwh;
+                flattened[`buy_level_${level.level_index}_price`] = level.price;
+            });
+            row.sell_order_levels.forEach((level) => {
+                flattened[`sell_level_${level.level_index}_volume`] = -level.volume_mwh;
+                flattened[`sell_level_${level.level_index}_price`] = level.price;
+            });
+
+            return {
+                ...row,
+                ...flattened,
+            };
+        });
+    }, [operationDetail]);
+
+    const operationLevelConfig = useMemo(() => {
+        const config: Array<{ key: string; priceKey: string; color: string; name: string }> = [];
+        const maxBuyLevel = Math.max(0, ...((operationDetail?.chart_rows || []).map((row) => row.buy_order_levels.length)));
+        const maxSellLevel = Math.max(0, ...((operationDetail?.chart_rows || []).map((row) => row.sell_order_levels.length)));
+
+        for (let index = 1; index <= maxBuyLevel; index += 1) {
+            config.push({
+                key: `buy_level_${index}_volume`,
+                priceKey: `buy_level_${index}_price`,
+                color: OPERATION_BUY_COLORS[Math.min(index - 1, OPERATION_BUY_COLORS.length - 1)],
+                name: `买入挂单电量${index}`,
+            });
+        }
+        for (let index = 1; index <= maxSellLevel; index += 1) {
+            config.push({
+                key: `sell_level_${index}_volume`,
+                priceKey: `sell_level_${index}_price`,
+                color: OPERATION_SELL_COLORS[Math.min(index - 1, OPERATION_SELL_COLORS.length - 1)],
+                name: `卖出挂单电量${index}`,
+            });
+        }
+        return config;
+    }, [operationDetail]);
+
     const executionPeriods = useMemo(() => executionData.map((row) => row.period), [executionData]);
     const executionXAxisProps = {
         dataKey: 'period',
@@ -358,6 +439,41 @@ export const TradeReviewPage: React.FC = () => {
 
     const executionPanelBodyHeight = executionAnalysisSummary ? { xs: 390, sm: 480 } : { xs: 430, sm: 520 };
     const executionPanelTotalHeight = executionAnalysisSummary ? { xs: 480, sm: 580 } : executionPanelBodyHeight;
+    const operationPeriods = useMemo(() => operationChartData.map((row: any) => Number(row.period)), [operationChartData]);
+    const operationXAxisProps = {
+        dataKey: 'period',
+        type: 'number' as const,
+        domain: operationPeriods.length > 0 ? [Math.min(...operationPeriods) - 0.5, Math.max(...operationPeriods) + 0.5] : [0.5, 48.5],
+        ticks: operationPeriods,
+        allowDecimals: false,
+        tickFormatter: (value: number) => `${value}`,
+    };
+    const operationPriceDomain = useMemo<[number | 'auto', number | 'auto']>(() => {
+        const values = operationChartData.flatMap((row: any) => {
+            const levelPrices = operationLevelConfig
+                .map((level) => row[level.priceKey])
+                .filter((value): value is number => value !== null && value !== undefined && !Number.isNaN(value));
+            return row.spot_price !== null && row.spot_price !== undefined && !Number.isNaN(row.spot_price)
+                ? [...levelPrices, row.spot_price]
+                : levelPrices;
+        });
+        if (values.length === 0) return ['auto', 'auto'];
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const padding = Math.max((max - min) * 0.12, 5);
+        return [Math.floor(min - padding), Math.ceil(max + padding)];
+    }, [operationChartData, operationLevelConfig]);
+    const operationVolumeDomain = useMemo<[number, number]>(() => {
+        const values = operationChartData.flatMap((row: any) => [
+            row.actual_or_forecast_load_mwh ?? null,
+            ...operationLevelConfig.map((level) => row[level.key] ?? null),
+        ].filter((value): value is number => value !== null && value !== undefined && !Number.isNaN(value)));
+        if (values.length === 0) return [-1, 1];
+        const min = Math.min(0, ...values);
+        const max = Math.max(0, ...values);
+        const padding = Math.max((max - min) * 0.08, 1);
+        return [Math.floor(min - padding), Math.ceil(max + padding)];
+    }, [operationChartData, operationLevelConfig]);
     const executionTableTotals = useMemo(
         () => {
             const rows = detail?.execution_table ?? [];
@@ -401,20 +517,115 @@ export const TradeReviewPage: React.FC = () => {
         '& .MuiTab-root': { minHeight: 36, px: 2, borderRadius: 1.5, fontSize: '0.95rem', fontWeight: 600, color: 'text.secondary', textTransform: 'none' as const },
         '& .MuiTab-root.Mui-selected': { color: 'text.primary', bgcolor: 'background.paper', boxShadow: theme.shadows[1] },
     };
+    const primaryTabsSx = {
+        minHeight: 48,
+        '& .MuiTabs-indicator': {
+            height: 3,
+            borderRadius: 999,
+            background: 'linear-gradient(90deg, #0f766e 0%, #2563eb 100%)',
+        },
+        '& .MuiTab-root': {
+            minHeight: 48,
+            px: { xs: 1.5, sm: 2.5 },
+            textTransform: 'none' as const,
+            fontWeight: 700,
+            fontSize: { xs: '0.95rem', sm: '1rem' },
+            color: 'text.secondary',
+            alignItems: 'flex-start',
+        },
+        '& .MuiTab-root.Mui-selected': {
+            color: '#0f172a',
+        },
+    };
+    const contentPaperSx = {
+        p: { xs: 1, sm: 2 },
+        mt: 2,
+        borderRadius: 3,
+        borderColor: 'rgba(148, 163, 184, 0.22)',
+        background: 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.96) 100%)',
+        boxShadow: '0 16px 36px rgba(15, 23, 42, 0.06)',
+    };
 
     return (
         <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
-            <Box sx={{ width: '100%' }}>
-                {isTablet && <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 700, color: 'text.primary' }}>月内交易复盘 / 成交结果与批次分析</Typography>}
+            <Box
+                sx={{
+                    width: '100%',
+                    background: 'radial-gradient(circle at top left, rgba(14,165,233,0.08) 0%, rgba(255,255,255,0) 32%), radial-gradient(circle at top right, rgba(15,118,110,0.08) 0%, rgba(255,255,255,0) 28%)',
+                }}
+            >
+                {isTablet && <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 700, color: 'text.primary' }}>月内交易复盘 / 成交结果与申报过程复盘</Typography>}
 
-                <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <IconButton onClick={() => handleShiftTradeDate(-1)} disabled={loading}><ArrowLeftIcon /></IconButton>
-                    <DatePicker label="选择交易日" value={selectedTradeDate} onChange={(date) => setSelectedTradeDate(date)} disabled={loading} slotProps={{ textField: { size: 'small', sx: { width: { xs: '150px', sm: '200px' } } } }} />
-                    <IconButton onClick={() => handleShiftTradeDate(1)} disabled={loading}><ArrowRightIcon /></IconButton>
-                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', ml: { md: 'auto' } }}>
+                <Paper
+                    variant="outlined"
+                    sx={{
+                        p: 2,
+                        mb: 2,
+                        display: 'flex',
+                        gap: 1.5,
+                        alignItems: 'center',
+                        flexWrap: { xs: 'wrap', lg: 'nowrap' },
+                        borderRadius: 3,
+                        borderColor: 'rgba(148, 163, 184, 0.22)',
+                        background: 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.96) 100%)',
+                        boxShadow: '0 18px 34px rgba(15, 23, 42, 0.06)',
+                    }}
+                >
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'nowrap' }}>
+                        <IconButton
+                            onClick={() => handleShiftTradeDate(-1)}
+                            disabled={loading}
+                            sx={{ border: '1px solid rgba(148, 163, 184, 0.24)', bgcolor: 'rgba(255,255,255,0.88)' }}
+                        >
+                            <ArrowLeftIcon />
+                        </IconButton>
+                        <DatePicker
+                            label={"\u4ea4\u6613\u65e5\u671f"}
+                            value={selectedTradeDate}
+                            onChange={(date) => setSelectedTradeDate(date)}
+                            disabled={loading}
+                            slotProps={{
+                                textField: {
+                                    size: 'small',
+                                    variant: 'standard',
+                                    sx: {
+                                        width: { xs: '150px', sm: '200px' },
+                                        '& .MuiInput-underline:before, & .MuiInput-underline:after': { display: 'none' },
+                                        '& .MuiInputBase-root': { bgcolor: 'rgba(255,255,255,0.72)', borderRadius: 2, px: 1.25, py: 0.25 },
+                                    },
+                                },
+                            }}
+                        />
+                        <IconButton
+                            onClick={() => handleShiftTradeDate(1)}
+                            disabled={loading}
+                            sx={{ border: '1px solid rgba(148, 163, 184, 0.24)', bgcolor: 'rgba(255,255,255,0.88)' }}
+                        >
+                            <ArrowRightIcon />
+                        </IconButton>
+                    </Box>
+                    <TextField
+                        select
+                        size="small"
+                        variant="standard"
+                        label={"\u76ee\u6807\u65e5\u671f"}
+                        value={selectedDeliveryDate}
+                        onChange={(event) => setSelectedDeliveryDate(event.target.value)}
+                        disabled={loading || (overview?.delivery_summaries || []).length === 0}
+                        sx={{
+                            width: { xs: '150px', sm: '200px' },
+                            '& .MuiInput-underline:before, & .MuiInput-underline:after': { display: 'none' },
+                            '& .MuiInputBase-root': { bgcolor: 'rgba(255,255,255,0.72)', borderRadius: 2, px: 1.25, py: 0.25 },
+                        }}
+                    >
                         {(overview?.delivery_summaries || []).map((item) => (
-                            <Chip key={item.delivery_date} label={`${item.delivery_date} (${item.record_count})`} color={selectedDeliveryDate === item.delivery_date ? 'primary' : 'default'} variant={selectedDeliveryDate === item.delivery_date ? 'filled' : 'outlined'} onClick={() => setSelectedDeliveryDate(item.delivery_date)} disabled={loading} />
+                            <MenuItem key={item.delivery_date} value={item.delivery_date}>
+                                {`${item.delivery_date} (${item.record_count})`}
+                            </MenuItem>
                         ))}
+                    </TextField>
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', ml: { lg: 'auto' } }}>
+                        {selectedDeliveryDate && <Chip label={`\u5df2\u9009\u76ee\u6807\u65e5\u671f\uff1a${selectedDeliveryDate}`} color="primary" variant="filled" sx={{ borderRadius: 2.5, fontWeight: 700 }} />}
                     </Box>
                 </Paper>
 
@@ -427,13 +638,23 @@ export const TradeReviewPage: React.FC = () => {
                 ) : detail ? (
                     <>
                         <Grid container spacing={{ xs: 1, sm: 2 }}>
-                            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><StatCard title="记录概览" lines={[`总记录数：${summary?.record_overview.total_records ?? 0}`, `有成交记录：${summary?.record_overview.traded_records ?? 0}`]} /></Grid>
-                            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><StatCard title="成交电量" lines={[`总成交电量：${formatNumber(summary?.trade_overview.traded_mwh, 3)} MWh`, `买入 / 卖出：${formatNumber(summary?.trade_overview.buy_traded_mwh, 3)} / ${formatNumber(summary?.trade_overview.sell_traded_mwh, 3)} MWh`]} /></Grid>
-                            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><StatCard title="成交时段" lines={[`有成交时段：${summary?.period_overview.traded_period_count ?? 0}`, `买入 / 卖出：${summary?.period_overview.buy_traded_period_count ?? 0} / ${summary?.period_overview.sell_traded_period_count ?? 0}`]} /></Grid>
-                            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><StatCard title="批次概览" lines={[`上架批次：${summary?.batch_overview.listing_batch_count ?? 0}`, `下架批次：${summary?.batch_overview.off_shelf_batch_count ?? 0}`]} /></Grid>
+                            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><StatCard title={"\u8bb0\u5f55\u6982\u89c8"} lines={[`\u603b\u8bb0\u5f55\u6570\uff1a${summary?.record_overview.total_records ?? 0}`, `\u6709\u6210\u4ea4\u8bb0\u5f55\uff1a${summary?.record_overview.traded_records ?? 0}`]} /></Grid>
+                            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><StatCard title={"\u6210\u4ea4\u7535\u91cf"} lines={[`\u603b\u6210\u4ea4\u7535\u91cf\uff1a${formatNumber(summary?.trade_overview.traded_mwh, 3)} MWh`, `\u4e70\u5165 / \u5356\u51fa\uff1a${formatNumber(summary?.trade_overview.buy_traded_mwh, 3)} / ${formatNumber(summary?.trade_overview.sell_traded_mwh, 3)} MWh`]} /></Grid>
+                            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><StatCard title={"\u6210\u4ea4\u65f6\u6bb5"} lines={[`\u6709\u6210\u4ea4\u65f6\u6bb5\uff1a${summary?.period_overview.traded_period_count ?? 0}`, `\u4e70\u5165 / \u5356\u51fa\uff1a${summary?.period_overview.buy_traded_period_count ?? 0} / ${summary?.period_overview.sell_traded_period_count ?? 0}`]} /></Grid>
+                            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><StatCard title={"\u7533\u62a5\u8fc7\u7a0b"} lines={[`\u6302\u724c\u7533\u62a5\uff1a${summary?.operation_overview.listing_operation_count ?? 0}`, `\u4eba\u5de5\u4e0b\u67b6\uff1a${summary?.operation_overview.manual_off_shelf_operation_count ?? 0}  \u81ea\u52a8\u4e0b\u67b6\uff1a${summary?.operation_overview.auto_off_shelf_operation_count ?? 0}`]} /></Grid>
                         </Grid>
-                        <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 }, mt: 2 }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap', mb: 2 }}>
+                        <Paper variant="outlined" sx={{ p: 0, mt: 2, border: 'none', backgroundColor: 'transparent', boxShadow: 'none' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 2, flexWrap: 'wrap', mb: 0, '& > .MuiTypography-root:first-of-type': { display: 'none' } }}>
+                                <Typography variant="h6" sx={{ fontWeight: 700 }}>{"\u6708\u5185\u4ea4\u6613\u590d\u76d8"}</Typography>
+                                <Tabs value={reviewTab} onChange={(_, value) => setReviewTab(value)} sx={primaryTabsSx}>
+                                    <Tab icon={<BarChartOutlinedIcon fontSize="small" />} iconPosition="start" label={"\u6210\u4ea4\u5206\u6790"} />
+                                    <Tab icon={<TimelineOutlinedIcon fontSize="small" />} iconPosition="start" label={"\u7533\u62a5\u590d\u76d8"} />
+                                </Tabs>
+                            </Box>
+                        </Paper>
+                        {reviewTab === 0 && (
+                        <Paper variant="outlined" sx={contentPaperSx}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2, flexWrap: 'wrap', mb: 2, '& > .MuiTypography-root:first-of-type': { display: 'none' } }}>
                                 <Typography variant="h6" sx={{ fontWeight: 700 }}>月内交易成交分析</Typography>
                                 <Tabs value={executionTab} onChange={(_, value) => setExecutionTab(value)} sx={{ ...segmentedTabsSx, mb: 0, ml: 'auto' }}>
                                     <Tab label="图表" />
@@ -672,70 +893,176 @@ export const TradeReviewPage: React.FC = () => {
                                 </Paper>
                             )}
                         </Paper>
-                        <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 }, mt: 2 }}>
-                            <Typography variant="h6" sx={{ mb: 2 }}>批次维度复盘</Typography>
-                            <Grid container spacing={{ xs: 1, sm: 2 }}>
-                                <Grid size={{ xs: 12, lg: 4 }}>
-                                    <Paper variant="outlined" sx={{ p: 1, height: '100%' }}>
-                                        <Typography variant="subtitle1" sx={{ mb: 1 }}>批次申报时间轴</Typography>
-                                        <Box sx={{ height: { xs: 280, sm: 320 } }}>
-                                            <ResponsiveContainer width="100%" height="100%">
-                                                <ComposedChart data={batchTimelineData}>
-                                                    <CartesianGrid strokeDasharray="3 3" />
-                                                    <XAxis dataKey="batch_label" interval={0} angle={-20} textAnchor="end" height={60} />
-                                                    <YAxis />
-                                                    <Tooltip content={<BatchTooltip />} />
-                                                    <Bar dataKey="batch_listing_mwh" name="批次申报电量" fill="#90caf9" />
-                                                </ComposedChart>
-                                            </ResponsiveContainer>
-                                        </Box>
-                                        <Box sx={{ mt: 1, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                                            {batchTimelineData.map((item) => (
-                                                <Chip key={item.batch_id} size="small" label={`${item.batch_action_type === 'listing' ? '上架批次' : '下架批次'} ${item.batch_start_time.slice(11)}`} color={selectedBatchId === item.batch_id ? 'primary' : 'default'} variant={selectedBatchId === item.batch_id ? 'filled' : 'outlined'} onClick={() => setSelectedBatchId(item.batch_id)} />
-                                            ))}
-                                        </Box>
-                                    </Paper>
-                                </Grid>
-                                <Grid size={{ xs: 12, lg: 8 }}>
-                                    <Paper variant="outlined" sx={{ p: 1, height: '100%' }}>
-                                        <Tabs value={batchTab} onChange={(_, value) => setBatchTab(value)} sx={segmentedTabsSx}><Tab label="图表" /><Tab label="明细" /></Tabs>
-                                        {batchTab === 0 ? (
-                                            <Box ref={batchChartRef} sx={{ height: { xs: 350, sm: 400 }, position: 'relative', backgroundColor: batchFullscreen.isFullscreen ? 'background.paper' : 'transparent', p: batchFullscreen.isFullscreen ? 2 : 0, ...(batchFullscreen.isFullscreen && { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1400 }) }}>
-                                                <batchFullscreen.FullscreenEnterButton />
-                                                <batchFullscreen.FullscreenExitButton />
-                                                <batchFullscreen.FullscreenTitle />
-                                                {loadingBatch && !batchDetail ? (
-                                                    <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CircularProgress /></Box>
-                                                ) : (
-                                                    <ResponsiveContainer width="100%" height="100%">
-                                                        <ComposedChart data={batchDetail?.batch_chart_rows || []}>
-                                                            <CartesianGrid strokeDasharray="3 3" />
-                                                            <XAxis dataKey="period" />
-                                                            <YAxis yAxisId="price" orientation="left" />
-                                                            <YAxis yAxisId="volume" orientation="right" />
-                                                            <Tooltip content={<BatchChartTooltip />} />
-                                                            <Legend />
-                                                            <Area yAxisId="volume" type="monotone" dataKey="actual_or_forecast_load_mwh" name="实际/预测电量" fill="#cfd8dc" stroke="#b0bec5" fillOpacity={0.3} />
-                                                            <Bar yAxisId="volume" dataKey="listing_mwh" name="申报电量" fill="#90caf9" />
-                                                            <Line yAxisId="price" type="monotone" dataKey="listing_price" name="挂牌价格" stroke="#ef6c00" />
-                                                            <Line yAxisId="price" type="monotone" dataKey="market_monthly_price" name="市场均价" stroke="#8e24aa" dot={false} />
-                                                            <Line yAxisId="price" type="monotone" dataKey="spot_price" name="现货价格" stroke="#d81b60" dot={false} />
-                                                        </ComposedChart>
-                                                    </ResponsiveContainer>
-                                                )}
+                        )}
+                        {reviewTab === 1 && (
+                        <Paper variant="outlined" sx={{ ...contentPaperSx, '& > .MuiTypography-root:first-of-type': { display: 'none' } }}>
+                            <Typography variant="h6" sx={{ mb: 2 }}>申报过程复盘</Typography>
+                            {isTablet ? (
+                                <TextField
+                                    select
+                                    fullWidth
+                                    size="small"
+                                    label={"\u9009\u62e9\u7533\u62a5\u8fc7\u7a0b"}
+                                    value={selectedOperationId}
+                                    onChange={(event) => setSelectedOperationId(event.target.value)}
+                                    sx={{ mb: 1.5 }}
+                                >
+                                    {operationButtons.map((item) => (
+                                        <MenuItem key={item.operation_id} value={item.operation_id}>
+                                            {item.button_title} | {item.button_subtitle}
+                                        </MenuItem>
+                                    ))}
+                                </TextField>
+                            ) : (
+                                <Box sx={{ display: 'flex', gap: 1, overflowX: 'auto', pb: 1, mb: 1, flexWrap: 'nowrap' }}>
+                                    {operationButtons.map((item) => {
+                                        const isSelected = selectedOperationId === item.operation_id;
+
+                                        return (
+                                            <Chip
+                                                key={item.operation_id}
+                                                clickable
+                                                color={isSelected ? 'primary' : 'default'}
+                                                variant={isSelected ? 'filled' : 'outlined'}
+                                                onClick={() => setSelectedOperationId(item.operation_id)}
+                                                label={
+                                                    <Box sx={{ py: 0.25 }}>
+                                                        <Typography variant="body2" sx={{ fontWeight: 700 }}>{item.button_title}</Typography>
+                                                        <Typography variant="caption" sx={{ opacity: 0.85 }}>{item.button_subtitle}</Typography>
+                                                    </Box>
+                                                }
+                                                sx={{ height: 'auto', alignItems: 'flex-start', px: 0.5, '& .MuiChip-label': { display: 'block', py: 0.75 } }}
+                                            />
+                                        );
+                                    })}
+                                </Box>
+                            )}
+
+                            {operationDetail?.operation_summary && (
+                                <Paper variant="outlined" sx={{ p: { xs: 1.25, sm: 1.5 }, mb: 1.5, backgroundColor: '#f8fafc', borderColor: 'divider' }}>
+                                    <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 0.5 }}>{operationDetail.operation_summary.operation_title}</Typography>
+                                    <Typography variant="body2" color="text.secondary">{operationDetail.operation_summary.operation_effect_text}</Typography>
+                                    <Typography variant="body2" color="text.secondary">{operationDetail.operation_summary.post_operation_text}</Typography>
+                                </Paper>
+                            )}
+
+                            <Paper variant="outlined" sx={{ p: 1, borderRadius: 2.5, borderColor: 'rgba(148, 163, 184, 0.22)', backgroundColor: 'rgba(255,255,255,0.72)' }}>
+                                <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+                                <Tabs value={operationTab} onChange={(_, value) => setOperationTab(value)} sx={segmentedTabsSx}>
+                                    <Tab label="图表" />
+                                    <Tab label="数据" />
+                                </Tabs>
+                                </Box>
+
+                                {operationTab === 0 ? (
+                                    <Box
+                                        ref={operationChartRef}
+                                        sx={{
+                                            height: { xs: 420, sm: 500 },
+                                            position: 'relative',
+                                            backgroundColor: operationFullscreen.isFullscreen ? 'background.paper' : 'transparent',
+                                            p: operationFullscreen.isFullscreen ? 2 : 0,
+                                            ...(operationFullscreen.isFullscreen && {
+                                                position: 'fixed',
+                                                top: 0,
+                                                left: 0,
+                                                width: '100vw',
+                                                height: '100vh',
+                                                zIndex: 1400,
+                                            }),
+                                        }}
+                                    >
+                                        <operationFullscreen.FullscreenEnterButton />
+                                        <operationFullscreen.FullscreenExitButton />
+                                        <operationFullscreen.FullscreenTitle />
+                                        {loadingOperation && operationDetail && (
+                                            <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.6)', zIndex: 1000 }}>
+                                                <CircularProgress />
                                             </Box>
-                                        ) : (
-                                            <TableContainer sx={{ overflowX: 'auto' }}>
-                                                <Table sx={{ '& .MuiTableCell-root': { fontSize: { xs: '0.75rem', sm: '0.875rem' }, px: { xs: 0.5, sm: 2 } } }}>
-                                                    <TableHead><TableRow><TableCell>时段</TableCell><TableCell>交易方向</TableCell><TableCell>申报电量</TableCell><TableCell>成交电量</TableCell><TableCell>挂牌价格</TableCell><TableCell>上架时间</TableCell><TableCell>下架时间</TableCell><TableCell>下架类型</TableCell></TableRow></TableHead>
-                                                    <TableBody>{(batchDetail?.batch_records || []).map((row) => (<TableRow key={row.record_key}><TableCell>{row.period}</TableCell><TableCell>{row.trade_direction}</TableCell><TableCell>{formatNumber(row.listing_mwh, 3)}</TableCell><TableCell>{formatNumber(row.traded_mwh, 3)}</TableCell><TableCell>{formatNumber(row.listing_price, 3)}</TableCell><TableCell>{row.listing_time || '-'}</TableCell><TableCell>{row.off_shelf_time || '-'}</TableCell><TableCell>{row.off_shelf_type || '-'}</TableCell></TableRow>))}</TableBody>
-                                                </Table>
-                                            </TableContainer>
                                         )}
-                                    </Paper>
-                                </Grid>
-                            </Grid>
+                                        {loadingOperation && !operationDetail ? (
+                                            <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CircularProgress /></Box>
+                                        ) : (
+                                            <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, px: 0.5, pb: 1 }}>
+                                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}><Box sx={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: OPERATION_BUY_COLORS[2] }} /><Typography variant="body2">买入挂单价格</Typography></Box>
+                                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}><Box sx={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: OPERATION_SELL_COLORS[2] }} /><Typography variant="body2">卖出挂单价格</Typography></Box>
+                                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}><Box sx={{ width: 12, height: 12, backgroundColor: OPERATION_BUY_COLORS[2] }} /><Typography variant="body2">买入挂单电量</Typography></Box>
+                                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}><Box sx={{ width: 12, height: 12, backgroundColor: OPERATION_SELL_COLORS[2] }} /><Typography variant="body2">卖出挂单电量</Typography></Box>
+                                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}><Box sx={{ width: 16, borderTop: '2px dashed #1e88e5' }} /><Typography variant="body2">实时价格</Typography></Box>
+                                                    <Typography variant="body2" color="text.secondary">同色系深浅代表不同价格档</Typography>
+                                                </Box>
+                                                <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 1 }}>
+                                                    <Box sx={{ height: '40%', minHeight: 0 }}>
+                                                        <ResponsiveContainer width="100%" height="100%">
+                                                            <ComposedChart data={operationChartData} syncId="operation-review" margin={{ top: 12, right: 24, left: 8, bottom: 4 }}>
+                                                                <CartesianGrid strokeDasharray="3 3" />
+                                                                <XAxis {...operationXAxisProps} hide />
+                                                                <YAxis yAxisId="price" orientation="right" domain={operationPriceDomain} />
+                                                                <Tooltip content={<OperationChartTooltip />} />
+                                                                <Line yAxisId="price" type="monotone" dataKey="spot_price" name={'\u5b9e\u65f6\u4ef7\u683c'} stroke="#1e88e5" strokeDasharray="6 4" dot={false} />
+                                                                {operationLevelConfig.map((level) => (
+                                                                    <Scatter key={level.priceKey} yAxisId="price" dataKey={level.priceKey} fill={level.color} stroke="#ffffff" strokeWidth={1.2} />
+                                                                ))}
+                                                            </ComposedChart>
+                                                        </ResponsiveContainer>
+                                                    </Box>
+                                                    <Box sx={{ height: '58%', minHeight: 0 }}>
+                                                        <ResponsiveContainer width="100%" height="100%">
+                                                            <ComposedChart data={operationChartData} syncId="operation-review" margin={{ top: 4, right: 24, left: 8, bottom: 12 }}>
+                                                                <CartesianGrid strokeDasharray="3 3" />
+                                                                <XAxis {...operationXAxisProps} />
+                                                                <YAxis yAxisId="volume" orientation="right" domain={operationVolumeDomain} />
+                                                                <Tooltip content={() => null} cursor={false} wrapperStyle={{ display: 'none' }} />
+                                                                <ReferenceLine yAxisId="volume" y={0} stroke="#94a3b8" />
+                                                                <Area yAxisId="volume" type="monotone" dataKey="actual_or_forecast_load_mwh" name={'\u5b9e\u9645/\u9884\u6d4b\u7535\u91cf'} fill="#cfd8dc" stroke="#b0bec5" fillOpacity={0.22} />
+                                                                {operationLevelConfig.map((level) => (
+                                                                    <Bar key={`${level.key}-volume`} yAxisId="volume" dataKey={level.key} stackId={level.key.startsWith('buy_') ? 'buy' : 'sell'} fill={level.color} barSize={16} fillOpacity={0.96} />
+                                                                ))}
+                                                            </ComposedChart>
+                                                        </ResponsiveContainer>
+                                                    </Box>
+                                                </Box>
+                                            </Box>
+                                        )}
+                                    </Box>
+                                ) : (
+                                    <Box sx={{ height: { xs: 420, sm: 500 }, overflow: 'hidden' }}>
+                                        <TableContainer sx={{ overflowX: 'auto', maxHeight: { xs: 420, sm: 500 } }}>
+                                            <Table sx={{ '& .MuiTableCell-root': { fontSize: { xs: '0.75rem', sm: '0.875rem' }, px: { xs: 0.5, sm: 1.5 } } }}>
+                                                <TableHead>
+                                                    <TableRow>
+                                                        <TableCell>时段</TableCell>
+                                                        <TableCell>方向</TableCell>
+                                                        <TableCell>档位</TableCell>
+                                                        <TableCell>挂单价格</TableCell>
+                                                        <TableCell>挂单电量</TableCell>
+                                                        <TableCell>实时价格</TableCell>
+                                                        <TableCell>动作影响</TableCell>
+                                                        <TableCell>影响电量</TableCell>
+                                                    </TableRow>
+                                                </TableHead>
+                                                <TableBody>
+                                                    {(operationDetail?.table_rows || []).map((row) => (
+                                                        <TableRow key={row.record_key}>
+                                                            <TableCell>{row.period}</TableCell>
+                                                            <TableCell sx={{ color: row.trade_direction === 'buy' ? 'success.main' : 'error.main', fontWeight: 700 }}>{row.trade_direction === 'buy' ? '买入' : '卖出'}</TableCell>
+                                                            <TableCell>{row.price_level_index}/{row.same_direction_level_count}</TableCell>
+                                                            <TableCell>{formatNumber(row.listing_price, 3)}</TableCell>
+                                                            <TableCell>{formatNumber(row.listing_mwh, 3)}</TableCell>
+                                                            <TableCell>{formatNumber(row.spot_price, 3)}</TableCell>
+                                                            <TableCell>{row.operation_effect_type === 'add' ? '\u65b0\u589e' : row.operation_effect_type === 'partial_fill' ? '\u90e8\u5206\u6210\u4ea4' : '\u4fdd\u7559'}</TableCell>
+                                                            <TableCell>{row.operation_effect_mwh > 0 ? formatNumber(row.operation_effect_mwh, 3) : '-'}</TableCell>
+                                                        </TableRow>
+                                                    ))}
+                                                </TableBody>
+                                            </Table>
+                                        </TableContainer>
+                                    </Box>
+                                )}
+                            </Paper>
                         </Paper>
+                        )}
                     </>
                 ) : null}
             </Box>

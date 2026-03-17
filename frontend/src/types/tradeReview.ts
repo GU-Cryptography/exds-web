@@ -30,16 +30,17 @@ export interface PeriodOverviewCard {
     sell_traded_period_count: number;
 }
 
-export interface BatchOverviewCard {
-    listing_batch_count: number;
-    off_shelf_batch_count: number;
+export interface OperationOverviewCard {
+    listing_operation_count: number;
+    manual_off_shelf_operation_count: number;
+    auto_off_shelf_operation_count: number;
 }
 
 export interface SummaryCardsResponse {
     record_overview: RecordOverviewCard;
     trade_overview: TradeOverviewCard;
     period_overview: PeriodOverviewCard;
-    batch_overview: BatchOverviewCard;
+    operation_overview: OperationOverviewCard;
 }
 
 export interface ExecutionAnalysisSummary {
@@ -70,50 +71,60 @@ export interface ExecutionChartRow {
 
 export type ExecutionTableRow = ExecutionChartRow;
 
-export interface BatchTimelineItem {
-    batch_id: string;
-    batch_action_type: 'listing' | 'off_shelf';
-    batch_start_time: string;
-    batch_end_time: string;
+export interface OperationButtonItem {
+    operation_id: string;
+    operation_type: 'listing' | 'manual_off_shelf' | 'auto_off_shelf' | 'partial_fill';
+    operation_time: string;
+    button_title: string;
+    button_subtitle: string;
     record_count: number;
     covered_period_count: number;
     buy_record_count: number;
     sell_record_count: number;
-    batch_listing_mwh: number;
 }
 
-export interface BatchChartRow {
+export interface OrderLevelItem {
+    level_index: number;
+    price: number;
+    volume_mwh: number;
+    color_token: string;
+}
+
+export interface OperationChartRow {
     period: number;
-    trade_direction: string;
-    listing_mwh: number;
-    traded_mwh: number;
-    listing_price: number | null;
-    market_monthly_price: number | null;
+    buy_order_levels: OrderLevelItem[];
+    sell_order_levels: OrderLevelItem[];
     spot_price: number | null;
     actual_or_forecast_load_mwh: number | null;
     load_source: string | null;
 }
 
-export interface BatchRecordItem {
+export interface OperationTableRow {
     record_key: string;
     period: number;
-    trade_direction: string;
-    listing_mwh: number;
-    traded_mwh: number;
+    trade_direction: 'buy' | 'sell';
+    price_level_index: number;
+    same_direction_level_count: number;
     listing_price: number | null;
-    listing_time: string | null;
-    off_shelf_time: string | null;
-    off_shelf_type: string | null;
-    is_traded: boolean;
+    listing_mwh: number;
+    spot_price: number | null;
+    operation_effect_type: 'add' | 'remove' | 'auto_remove' | 'partial_fill' | 'keep';
+    operation_effect_mwh: number;
 }
 
-export interface BatchDetailResponse {
-    batch_id: string;
-    batch_action_type: 'listing' | 'off_shelf';
-    batch_start_time: string;
-    batch_end_time: string;
-    batch_chart_rows: BatchChartRow[];
-    batch_records: BatchRecordItem[];
+export interface OperationSummary {
+    operation_title: string;
+    operation_effect_text: string;
+    post_operation_text: string;
+}
+
+export interface OperationDetailResponse {
+    operation_id: string;
+    operation_type: 'listing' | 'manual_off_shelf' | 'auto_off_shelf' | 'partial_fill';
+    operation_time: string;
+    operation_summary: OperationSummary;
+    chart_rows: OperationChartRow[];
+    table_rows: OperationTableRow[];
 }
 
 export interface TradeDetailResponse {
@@ -123,8 +134,8 @@ export interface TradeDetailResponse {
     execution_analysis_summary: ExecutionAnalysisSummary | null;
     execution_chart: ExecutionChartRow[];
     execution_table: ExecutionTableRow[];
-    batch_timeline: BatchTimelineItem[];
-    default_batch_id: string | null;
-    default_batch_detail: BatchDetailResponse | null;
+    operation_buttons: OperationButtonItem[];
+    default_operation_id: string | null;
+    default_operation_detail: OperationDetailResponse | null;
     review_texts: string[];
 }

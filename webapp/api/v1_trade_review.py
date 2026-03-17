@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query, status
 
 from webapp.models.trade_review import (
-    BatchDetailResponse,
+    OperationDetailResponse,
     TradeDateListResponse,
     TradeDetailResponse,
     TradeOverviewResponse,
@@ -70,18 +70,18 @@ def get_trade_detail(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
-@router.get("/batch-detail", response_model=BatchDetailResponse, summary="获取单个批次详情")
-def get_batch_detail(
+@router.get("/operation-detail", response_model=OperationDetailResponse, summary="获取单个申报过程详情")
+def get_operation_detail(
     trade_date: str = Query(..., description="交易日期 YYYY-MM-DD"),
     delivery_date: str = Query(..., description="目标日期 YYYY-MM-DD"),
-    batch_id: str = Query(..., description="批次ID"),
-) -> BatchDetailResponse:
+    operation_id: str = Query(..., description="申报过程ID"),
+) -> OperationDetailResponse:
     _validate_date(trade_date)
     _validate_date(delivery_date)
     try:
-        return get_service().get_batch_detail(trade_date, delivery_date, batch_id)
+        return get_service().get_operation_detail(trade_date, delivery_date, operation_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except Exception as exc:
-        logger.error("get_batch_detail error: %s", exc, exc_info=True)
+        logger.error("get_operation_detail error: %s", exc, exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc

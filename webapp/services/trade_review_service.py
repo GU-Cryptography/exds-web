@@ -7,19 +7,18 @@ from typing import Any, Dict, List, Optional, Tuple
 from pymongo.database import Database
 
 from webapp.models.load_enums import FusionStrategy
-from webapp.services.contract_service import ContractService
-from webapp.services.load_forecast_service import LoadForecastService
-from webapp.services.load_query_service import LoadQueryService
 from webapp.models.trade_review import (
-    BatchDetailResponse,
-    BatchRecordItem,
-    BatchTimelineItem,
-    BatchChartRow,
-    BatchOverviewCard,
     DeliveryDateSummary,
     ExecutionAnalysisSummary,
     ExecutionChartRow,
     ExecutionTableRow,
+    OperationButtonItem,
+    OperationChartRow,
+    OperationDetailResponse,
+    OperationOverviewCard,
+    OperationSummary,
+    OperationTableRow,
+    OrderLevelItem,
     PeriodOverviewCard,
     RecordOverviewCard,
     SummaryCardsResponse,
@@ -28,9 +27,14 @@ from webapp.models.trade_review import (
     TradeOverviewCard,
     TradeOverviewResponse,
 )
+from webapp.services.contract_service import ContractService
+from webapp.services.load_forecast_service import LoadForecastService
+from webapp.services.load_query_service import LoadQueryService
 from webapp.services.spot_price_service import get_spot_prices
 
 logger = logging.getLogger(__name__)
+
+AUTO_OFF_SHELF_TYPES = {"自动下架", "自动下架-成交"}
 
 
 class TradeReviewService:
@@ -72,18 +76,12 @@ class TradeReviewService:
         records = [self._normalize_record(record) for record in delivery_group.get("records", [])]
         spot_price_map = self._load_spot_prices(delivery_date)
 
-        listing_batches = self._build_batches(records, time_field="listing_time", action_type="listing")
-        off_shelf_batches = self._build_batches(records, time_field="off_shelf_time", action_type="off_shelf")
-        batch_timeline = sorted(listing_batches + off_shelf_batches, key=lambda item: item["sort_time"])
-
+        operations = self._build_operations(records)
         execution_chart = self._build_execution_rows(trade_date, delivery_date, records, spot_price_map)
         execution_table = [ExecutionTableRow(**row.model_dump()) for row in execution_chart]
-        summary_cards = self._build_summary_cards(records, batch_timeline)
+        summary_cards = self._build_summary_cards(records, operations)
         execution_analysis_summary = self._build_execution_analysis_summary(records, spot_price_map)
-        default_batch_id = batch_timeline[0]["batch_id"] if batch_timeline else None
-        default_batch_detail = (
-            self._build_batch_detail(batch_timeline[0], delivery_date, spot_price_map) if batch_timeline else None
-        )
+        default_operation = operations[0] if operations else None
 
         return TradeDetailResponse(
             trade_date=trade_date,
@@ -92,24 +90,34 @@ class TradeReviewService:
             execution_analysis_summary=execution_analysis_summary,
             execution_chart=execution_chart,
             execution_table=execution_table,
-            batch_timeline=[self._to_batch_timeline_item(batch) for batch in batch_timeline],
-            default_batch_id=default_batch_id,
-            default_batch_detail=default_batch_detail,
+            operation_buttons=[self._to_operation_button_item(operation) for operation in operations],
+            default_operation_id=default_operation["operation_id"] if default_operation else None,
+            default_operation_detail=(
+                self._build_operation_detail(default_operation, records, delivery_date, spot_price_map)
+                if default_operation
+                else None
+            ),
             review_texts=self._build_review_texts(summary_cards),
         )
 
-    def get_batch_detail(self, trade_date: str, delivery_date: str, batch_id: str) -> BatchDetailResponse:
+    def get_operation_detail(
+        self,
+        trade_date: str,
+        delivery_date: str,
+        operation_id: str,
+    ) -> OperationDetailResponse:
         doc = self._get_trade_doc(trade_date)
         delivery_group = self._get_delivery_group(doc, delivery_date)
         records = [self._normalize_record(record) for record in delivery_group.get("records", [])]
         spot_price_map = self._load_spot_prices(delivery_date)
-        all_batches = self._build_batches(records, "listing_time", "listing") + self._build_batches(
-            records, "off_shelf_time", "off_shelf"
+        operations = self._build_operations(records)
+        target_operation = next(
+            (operation for operation in operations if operation["operation_id"] == operation_id),
+            None,
         )
-        target_batch = next((batch for batch in all_batches if batch["batch_id"] == batch_id), None)
-        if target_batch is None:
-            raise ValueError(f"未找到批次 {batch_id}")
-        return self._build_batch_detail(target_batch, delivery_date, spot_price_map)
+        if target_operation is None:
+            raise ValueError(f"未找到申报过程 {operation_id}")
+        return self._build_operation_detail(target_operation, records, delivery_date, spot_price_map)
 
     def _get_trade_doc(self, trade_date: str) -> Dict[str, Any]:
         doc = self.trade_declare_collection.find_one({"trade_date": trade_date}, {"_id": 0})
@@ -147,7 +155,9 @@ class TradeReviewService:
         return normalized
 
     def _build_summary_cards(
-        self, records: List[Dict[str, Any]], batch_timeline: List[Dict[str, Any]]
+        self,
+        records: List[Dict[str, Any]],
+        operations: List[Dict[str, Any]],
     ) -> SummaryCardsResponse:
         traded_records = [record for record in records if record["is_traded"]]
         buy_traded_mwh = sum(
@@ -174,9 +184,14 @@ class TradeReviewService:
                 buy_traded_period_count=len(buy_periods),
                 sell_traded_period_count=len(sell_periods),
             ),
-            batch_overview=BatchOverviewCard(
-                listing_batch_count=sum(1 for batch in batch_timeline if batch["batch_action_type"] == "listing"),
-                off_shelf_batch_count=sum(1 for batch in batch_timeline if batch["batch_action_type"] == "off_shelf"),
+            operation_overview=OperationOverviewCard(
+                listing_operation_count=sum(1 for operation in operations if operation["operation_type"] == "listing"),
+                manual_off_shelf_operation_count=sum(
+                    1 for operation in operations if operation["operation_type"] == "manual_off_shelf"
+                ),
+                auto_off_shelf_operation_count=sum(
+                    1 for operation in operations if operation["operation_type"] == "auto_off_shelf"
+                ),
             ),
         )
 
@@ -300,7 +315,8 @@ class TradeReviewService:
         )
 
     def _load_trade_day_aggregates(
-        self, records: List[Dict[str, Any]]
+        self,
+        records: List[Dict[str, Any]],
     ) -> Tuple[Dict[int, float], Dict[int, Optional[float]], Dict[int, int], Dict[int, float]]:
         net_map: Dict[int, float] = defaultdict(float)
         price_weighted_sum: Dict[int, float] = defaultdict(float)
@@ -403,7 +419,13 @@ class TradeReviewService:
 
     def _load_spot_prices(self, delivery_date: str) -> Dict[int, Optional[float]]:
         try:
-            spot_curve = get_spot_prices(self.db, delivery_date, data_type="real_time", resolution=48, include_volume=False)
+            spot_curve = get_spot_prices(
+                self.db,
+                delivery_date,
+                data_type="real_time",
+                resolution=48,
+                include_volume=False,
+            )
         except Exception as exc:
             logger.warning("加载现货价格失败: %s", exc)
             return {}
@@ -476,101 +498,92 @@ class TradeReviewService:
             logger.warning("加载聚合预测电量失败: %s", exc)
             return {}
 
-    def _load_system_load_curve(
-        self,
-        delivery_date: str,
-        collection_name: str,
-        field_name: str,
-    ) -> Dict[int, float]:
-        try:
-            query_date = datetime.strptime(delivery_date, "%Y-%m-%d")
-        except ValueError:
-            return {}
-
-        start_of_day = query_date.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_of_day = start_of_day + timedelta(days=1)
-        docs = list(
-            self.db[collection_name]
-            .find(
-                {"datetime": {"$gt": start_of_day, "$lte": end_of_day}},
-                {"_id": 0, "datetime": 1, field_name: 1},
-            )
-            .sort("datetime", 1)
+    def _build_operations(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        listing_operations = self._build_operation_groups(
+            records,
+            time_field="listing_time",
+            operation_type="listing",
         )
+        manual_operations = self._build_operation_groups(
+            records,
+            time_field="off_shelf_time",
+            operation_type="manual_off_shelf",
+            off_shelf_type="人工下架",
+        )
+        auto_operations = self._build_operation_groups(
+            records,
+            time_field="off_shelf_time",
+            operation_type="auto_off_shelf",
+            off_shelf_types=list(AUTO_OFF_SHELF_TYPES),
+        )
+        partial_fill_operations = self._build_operation_groups(
+            records,
+            time_field="listing_time",
+            operation_type="partial_fill",
+            record_filter=self._is_partial_fill_record,
+        )
+        operations = listing_operations + manual_operations + auto_operations + partial_fill_operations
+        operations.sort(key=lambda item: item["sort_time"])
+        return operations
 
-        period_map: Dict[int, float] = defaultdict(float)
-        for doc in docs:
-            dt = doc.get("datetime")
-            raw_value = doc.get(field_name)
-            if not isinstance(dt, datetime) or raw_value is None:
-                continue
-            try:
-                load_mw = float(raw_value)
-            except (TypeError, ValueError):
-                continue
-
-            period_96 = self._datetime_to_period_96(dt, start_of_day)
-            if period_96 is None:
-                continue
-            period_48 = (period_96 - 1) // 2 + 1
-            period_map[period_48] += load_mw * 0.25
-
-        return {period: round(value, 3) for period, value in period_map.items()}
-
-    def _datetime_to_period_96(self, dt: datetime, start_of_day: datetime) -> Optional[int]:
-        next_day = start_of_day + timedelta(days=1)
-        if dt.hour == 0 and dt.minute == 0 and dt.date() == next_day.date():
-            return 96
-        if dt.date() != start_of_day.date():
-            return None
-
-        minutes = dt.hour * 60 + dt.minute
-        if minutes <= 0 or minutes > 24 * 60:
-            return None
-        period_96 = minutes // 15
-        return period_96 if 1 <= period_96 <= 95 else None
-
-    def _build_batches(
-        self, records: List[Dict[str, Any]], time_field: str, action_type: str
+    def _build_operation_groups(
+        self,
+        records: List[Dict[str, Any]],
+        time_field: str,
+        operation_type: str,
+        off_shelf_type: Optional[str] = None,
+        off_shelf_types: Optional[List[str]] = None,
+        record_filter: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
-        candidates = []
+        candidates: List[Tuple[datetime, Dict[str, Any]]] = []
         for record in records:
+            if record_filter is not None and not record_filter(record):
+                continue
+            if off_shelf_type is not None and record.get("off_shelf_type") != off_shelf_type:
+                continue
+            if off_shelf_types is not None and record.get("off_shelf_type") not in off_shelf_types:
+                continue
             dt = self._parse_datetime(record.get(time_field))
             if dt is not None:
                 candidates.append((dt, record))
         candidates.sort(key=lambda item: item[0])
 
-        batches: List[Dict[str, Any]] = []
+        operations: List[Dict[str, Any]] = []
         current_records: List[Dict[str, Any]] = []
         current_start: Optional[datetime] = None
         current_end: Optional[datetime] = None
         seen_periods: set[int] = set()
         index = 1
 
-        def flush_batch() -> None:
-            nonlocal index, current_records, current_start, current_end, seen_periods
+        def flush_operation() -> None:
+            nonlocal current_records, current_start, current_end, seen_periods, index
             if not current_records or current_start is None or current_end is None:
                 return
-            batches.append(
+            operations.append(
                 {
-                    "batch_id": f"{action_type}_{index:03d}",
-                    "batch_action_type": action_type,
-                    "batch_start_time": current_start.strftime("%Y-%m-%d %H:%M:%S"),
-                    "batch_end_time": current_end.strftime("%Y-%m-%d %H:%M:%S"),
+                    "operation_id": f"{operation_type}_{index:03d}",
+                    "operation_type": operation_type,
+                    "operation_time": current_start.strftime("%Y-%m-%d %H:%M:%S"),
+                    "operation_end_time": current_end.strftime("%Y-%m-%d %H:%M:%S"),
                     "record_count": len(current_records),
-                    "covered_period_count": len({record["period"] for record in current_records if record["period"] > 0}),
-                    "buy_record_count": sum(1 for record in current_records if record["trade_direction"] == "buy"),
-                    "sell_record_count": sum(1 for record in current_records if record["trade_direction"] == "sell"),
-                    "batch_listing_mwh": round(sum(record["listing_mwh"] for record in current_records), 3),
+                    "covered_period_count": len(
+                        {record["period"] for record in current_records if record["period"] > 0}
+                    ),
+                    "buy_record_count": sum(
+                        1 for record in current_records if record["trade_direction"] == "buy"
+                    ),
+                    "sell_record_count": sum(
+                        1 for record in current_records if record["trade_direction"] == "sell"
+                    ),
                     "records": [dict(record) for record in current_records],
                     "sort_time": current_start,
                 }
             )
-            index += 1
             current_records = []
             current_start = None
             current_end = None
             seen_periods = set()
+            index += 1
 
         for dt, record in candidates:
             should_split = False
@@ -580,105 +593,288 @@ class TradeReviewService:
                 if record["period"] in seen_periods:
                     should_split = True
             if should_split:
-                flush_batch()
+                flush_operation()
             if current_start is None:
                 current_start = dt
             current_end = dt
             seen_periods.add(record["period"])
             current_records.append(record)
-        flush_batch()
-        return batches
+        flush_operation()
+        return operations
 
-    def _build_batch_detail(
+    def _build_operation_detail(
         self,
-        batch: Dict[str, Any],
+        operation: Dict[str, Any],
+        all_records: List[Dict[str, Any]],
         delivery_date: str,
         spot_price_map: Dict[int, Optional[float]],
-    ) -> BatchDetailResponse:
-        market_price_map = self._load_contract_period_prices(delivery_date, "月内")
+    ) -> OperationDetailResponse:
+        snapshot_records = self._build_post_operation_snapshot_v2(all_records, operation)
         load_map, load_source = self._load_target_load_curve(delivery_date)
-        chart_map: Dict[Tuple[int, str], Dict[str, Any]] = {}
-        record_items: List[BatchRecordItem] = []
+        operation_record_keys = {record["record_key"] for record in operation["records"]}
 
-        for record in batch["records"]:
-            key = (record["period"], record["trade_direction"])
-            if key not in chart_map:
-                chart_map[key] = {
-                    "listing_mwh": 0.0,
-                    "traded_mwh": 0.0,
-                    "listing_price_sum": 0.0,
-                    "listing_price_weight": 0.0,
-                }
-            chart_map[key]["listing_mwh"] += record["listing_mwh"]
-            chart_map[key]["traded_mwh"] += record["traded_mwh"]
-            if record.get("listing_price") is not None:
-                weight = max(record["listing_mwh"], 1.0)
-                chart_map[key]["listing_price_sum"] += float(record["listing_price"]) * weight
-                chart_map[key]["listing_price_weight"] += weight
+        chart_rows: List[OperationChartRow] = []
+        table_rows: List[OperationTableRow] = []
+        for period in range(1, 49):
+            period_records = [record for record in snapshot_records if record["period"] == period]
+            buy_levels = self._build_order_levels(period_records, "buy")
+            sell_levels = self._build_order_levels(period_records, "sell")
 
-            record_items.append(
-                BatchRecordItem(
-                    record_key=record["record_key"],
-                    period=record["period"],
-                    trade_direction=record["trade_direction"],
-                    listing_mwh=round(record["listing_mwh"], 3),
-                    traded_mwh=round(record["traded_mwh"], 3),
-                    listing_price=record.get("listing_price"),
-                    listing_time=record.get("listing_time"),
-                    off_shelf_time=record.get("off_shelf_time"),
-                    off_shelf_type=record.get("off_shelf_type"),
-                    is_traded=record["is_traded"],
-                )
-            )
-
-        chart_rows: List[BatchChartRow] = []
-        for period, trade_direction in sorted(chart_map.keys(), key=lambda item: (item[0], item[1])):
-            item = chart_map[(period, trade_direction)]
-            avg_price = None
-            if item["listing_price_weight"] > 0:
-                avg_price = round(item["listing_price_sum"] / item["listing_price_weight"], 3)
             chart_rows.append(
-                BatchChartRow(
+                OperationChartRow(
                     period=period,
-                    trade_direction=trade_direction,
-                    listing_mwh=round(item["listing_mwh"], 3),
-                    traded_mwh=round(item["traded_mwh"], 3),
-                    listing_price=avg_price,
-                    market_monthly_price=market_price_map.get(period),
+                    buy_order_levels=buy_levels,
+                    sell_order_levels=sell_levels,
                     spot_price=spot_price_map.get(period),
                     actual_or_forecast_load_mwh=load_map.get(period),
                     load_source=load_source,
                 )
             )
 
-        return BatchDetailResponse(
-            batch_id=batch["batch_id"],
-            batch_action_type=batch["batch_action_type"],
-            batch_start_time=batch["batch_start_time"],
-            batch_end_time=batch["batch_end_time"],
-            batch_chart_rows=chart_rows,
-            batch_records=record_items,
+            table_rows.extend(
+                self._build_operation_table_rows(
+                    period_records=period_records,
+                    period=period,
+                    spot_price=spot_price_map.get(period),
+                    operation_type=operation["operation_type"],
+                    operation_record_keys=operation_record_keys,
+                )
+            )
+
+        return OperationDetailResponse(
+            operation_id=operation["operation_id"],
+            operation_type=operation["operation_type"],
+            operation_time=operation["operation_time"],
+            operation_summary=self._build_operation_summary(operation, snapshot_records),
+            chart_rows=chart_rows,
+            table_rows=table_rows,
         )
 
-    def _to_batch_timeline_item(self, batch: Dict[str, Any]) -> BatchTimelineItem:
-        return BatchTimelineItem(
-            batch_id=batch["batch_id"],
-            batch_action_type=batch["batch_action_type"],
-            batch_start_time=batch["batch_start_time"],
-            batch_end_time=batch["batch_end_time"],
-            record_count=batch["record_count"],
-            covered_period_count=batch["covered_period_count"],
-            buy_record_count=batch["buy_record_count"],
-            sell_record_count=batch["sell_record_count"],
-            batch_listing_mwh=batch["batch_listing_mwh"],
+    def _build_post_operation_snapshot(
+        self,
+        all_records: List[Dict[str, Any]],
+        operation: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        operation_time = self._parse_datetime(operation.get("operation_end_time") or operation["operation_time"])
+        if operation_time is None:
+            return []
+
+        snapshot_records: List[Dict[str, Any]] = []
+        operation_record_keys = {record["record_key"] for record in operation["records"]}
+        for record in all_records:
+            listing_dt = self._parse_datetime(record.get("listing_time"))
+            if listing_dt is None or listing_dt > operation_time:
+                continue
+            off_shelf_dt = self._parse_datetime(record.get("off_shelf_time"))
+            if off_shelf_dt is not None and off_shelf_dt <= operation_time:
+                continue
+            if record["period"] <= 0 or record["trade_direction"] not in {"buy", "sell"}:
+                continue
+            if record.get("listing_price") is None:
+                continue
+            snapshot_record = dict(record)
+            # 第四层展示的是历史时点的挂单状态，挂牌后在下架前按原始挂牌电量计入。
+            snapshot_record["active_mwh"] = record["listing_mwh"]
+            snapshot_records.append(snapshot_record)
+
+        return snapshot_records
+
+    def _build_post_operation_snapshot_v2(
+        self,
+        all_records: List[Dict[str, Any]],
+        operation: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        operation_time = self._parse_datetime(operation.get("operation_end_time") or operation["operation_time"])
+        if operation_time is None:
+            return []
+
+        operation_record_keys = {record["record_key"] for record in operation["records"]}
+        snapshot_records: List[Dict[str, Any]] = []
+        for record in all_records:
+            listing_dt = self._parse_datetime(record.get("listing_time"))
+            if listing_dt is None or listing_dt > operation_time:
+                continue
+            off_shelf_dt = self._parse_datetime(record.get("off_shelf_time"))
+            if off_shelf_dt is not None and off_shelf_dt <= operation_time:
+                continue
+            if record["period"] <= 0 or record["trade_direction"] not in {"buy", "sell"}:
+                continue
+            if record.get("listing_price") is None:
+                continue
+
+            snapshot_record = dict(record)
+            if operation["operation_type"] == "partial_fill" and record["record_key"] in operation_record_keys:
+                snapshot_record["active_mwh"] = record["remaining_mwh"]
+            else:
+                snapshot_record["active_mwh"] = record["listing_mwh"]
+            snapshot_records.append(snapshot_record)
+
+        return snapshot_records
+
+    def _build_order_levels(
+        self,
+        period_records: List[Dict[str, Any]],
+        direction: str,
+    ) -> List[OrderLevelItem]:
+        grouped: Dict[float, float] = defaultdict(float)
+        for record in period_records:
+            if record["trade_direction"] != direction or record.get("listing_price") is None:
+                continue
+            grouped[float(record["listing_price"])] += record["active_mwh"]
+
+        sorted_prices = sorted(grouped.keys(), reverse=True)
+        return [
+            OrderLevelItem(
+                level_index=index,
+                price=round(price, 3),
+                volume_mwh=round(grouped[price], 3),
+                color_token=f"{direction}_level_{index}",
+            )
+            for index, price in enumerate(sorted_prices, start=1)
+        ]
+
+    def _build_operation_table_rows(
+        self,
+        period_records: List[Dict[str, Any]],
+        period: int,
+        spot_price: Optional[float],
+        operation_type: str,
+        operation_record_keys: set[str],
+    ) -> List[OperationTableRow]:
+        rows: List[OperationTableRow] = []
+        for direction in ("buy", "sell"):
+            direction_records = [
+                record
+                for record in period_records
+                if record["trade_direction"] == direction and record.get("listing_price") is not None
+            ]
+            sorted_records = sorted(
+                direction_records,
+                key=lambda item: float(item["listing_price"]),
+                reverse=True,
+            )
+            same_direction_level_count = len(sorted_records)
+            for index, record in enumerate(sorted_records, start=1):
+                effect_type = "keep"
+                effect_mwh = 0.0
+                if record["record_key"] in operation_record_keys and operation_type == "listing":
+                    effect_type = "add"
+                    effect_mwh = record["listing_mwh"]
+                elif record["record_key"] in operation_record_keys and operation_type == "partial_fill":
+                    effect_type = "partial_fill"
+                    effect_mwh = record["traded_mwh"]
+
+                rows.append(
+                    OperationTableRow(
+                        record_key=record["record_key"],
+                        period=period,
+                        trade_direction=direction,
+                        price_level_index=index,
+                        same_direction_level_count=same_direction_level_count,
+                        listing_price=record.get("listing_price"),
+                        listing_mwh=round(record["active_mwh"], 3),
+                        spot_price=spot_price,
+                        operation_effect_type=effect_type,
+                        operation_effect_mwh=round(effect_mwh, 3),
+                    )
+                )
+        return rows
+
+    def _build_operation_summary(
+        self,
+        operation: Dict[str, Any],
+        snapshot_records: List[Dict[str, Any]],
+    ) -> OperationSummary:
+        buy_period_count = len(
+            {
+                record["period"]
+                for record in operation["records"]
+                if record["trade_direction"] == "buy" and record["period"] > 0
+            }
+        )
+        sell_period_count = len(
+            {
+                record["period"]
+                for record in operation["records"]
+                if record["trade_direction"] == "sell" and record["period"] > 0
+            }
+        )
+        remaining_period_count = len({record["period"] for record in snapshot_records if record["period"] > 0})
+        remaining_buy_mwh = round(
+            sum(record["active_mwh"] for record in snapshot_records if record["trade_direction"] == "buy"),
+            3,
+        )
+        remaining_sell_mwh = round(
+            sum(record["active_mwh"] for record in snapshot_records if record["trade_direction"] == "sell"),
+            3,
+        )
+
+        operation_title = f"{self._get_operation_label(operation['operation_type'])} {operation['operation_time'][11:]}"
+        if operation["operation_type"] == "listing":
+            effect_text = f"新增买入挂单 {buy_period_count} 个时段，新增卖出挂单 {sell_period_count} 个时段"
+        elif operation["operation_type"] == "manual_off_shelf":
+            effect_text = f"撤销买入挂单 {buy_period_count} 个时段，撤销卖出挂单 {sell_period_count} 个时段"
+        elif operation["operation_type"] == "partial_fill":
+            traded_buy_mwh = round(
+                sum(record["traded_mwh"] for record in operation["records"] if record["trade_direction"] == "buy"),
+                3,
+            )
+            traded_sell_mwh = round(
+                sum(record["traded_mwh"] for record in operation["records"] if record["trade_direction"] == "sell"),
+                3,
+            )
+            effect_text = (
+                f"部分成交买入挂单 {buy_period_count} 个时段，部分成交卖出挂单 {sell_period_count} 个时段；"
+                f"买入成交 {traded_buy_mwh:.2f} MWh，卖出成交 {traded_sell_mwh:.2f} MWh"
+            )
+        else:
+            effect_text = f"自动下架买入挂单 {buy_period_count} 个时段，自动下架卖出挂单 {sell_period_count} 个时段"
+
+        post_operation_text = (
+            f"操作后保留 {remaining_period_count} 个时段有效挂单，"
+            f"买入总量 {remaining_buy_mwh:.2f} MWh，卖出总量 {remaining_sell_mwh:.2f} MWh"
+        )
+
+        return OperationSummary(
+            operation_title=operation_title,
+            operation_effect_text=effect_text,
+            post_operation_text=post_operation_text,
+        )
+
+    def _to_operation_button_item(self, operation: Dict[str, Any]) -> OperationButtonItem:
+        return OperationButtonItem(
+            operation_id=operation["operation_id"],
+            operation_type=operation["operation_type"],
+            operation_time=operation["operation_time"],
+            button_title=f"{self._get_operation_label(operation['operation_type'])} {operation['operation_time'][11:]}",
+            button_subtitle=f"买{operation['buy_record_count']} 卖{operation['sell_record_count']}",
+            record_count=operation["record_count"],
+            covered_period_count=operation["covered_period_count"],
+            buy_record_count=operation["buy_record_count"],
+            sell_record_count=operation["sell_record_count"],
         )
 
     def _build_review_texts(self, summary_cards: SummaryCardsResponse) -> List[str]:
         return [
             f"本目标日共 {summary_cards.record_overview.total_records} 条申报记录，其中 {summary_cards.record_overview.traded_records} 笔产生了成交。",
             f"累计成交电量 {summary_cards.trade_overview.traded_mwh:.3f} MWh，其中买入 {summary_cards.trade_overview.buy_traded_mwh:.3f} MWh，卖出 {summary_cards.trade_overview.sell_traded_mwh:.3f} MWh。",
-            f"共识别上架批次 {summary_cards.batch_overview.listing_batch_count} 个、下架批次 {summary_cards.batch_overview.off_shelf_batch_count} 个。",
+            (
+                f"共识别挂牌申报 {summary_cards.operation_overview.listing_operation_count} 次、"
+                f"人工下架 {summary_cards.operation_overview.manual_off_shelf_operation_count} 次、"
+                f"自动下架 {summary_cards.operation_overview.auto_off_shelf_operation_count} 次。"
+            ),
         ]
+
+    def _get_operation_label(self, operation_type: str) -> str:
+        if operation_type == "listing":
+            return "挂牌申报"
+        if operation_type == "manual_off_shelf":
+            return "人工下架"
+        if operation_type == "auto_off_shelf":
+            return "自动下架"
+        if operation_type == "partial_fill":
+            return "部分成交"
+        return "未知动作"
 
     def _map_trade_direction(self, listing_side: Optional[str]) -> str:
         value = str(listing_side or "")
@@ -689,13 +885,21 @@ class TradeReviewService:
         return "unknown"
 
     def _resolve_record_result(self, record: Dict[str, Any]) -> str:
-        if record["is_traded"] and record.get("off_shelf_type") == "自动下架-成交":
+        if record["is_traded"] and record.get("off_shelf_type") in AUTO_OFF_SHELF_TYPES:
             return "成交自动下架"
         if record["is_traded"]:
             return "成交未下架"
         if record.get("off_shelf_type") == "人工下架":
             return "人工下架"
         return "未成交结束"
+
+    def _is_partial_fill_record(self, record: Dict[str, Any]) -> bool:
+        return (
+            record["is_traded"]
+            and record["remaining_mwh"] > 0
+            and record.get("off_shelf_type") not in AUTO_OFF_SHELF_TYPES
+            and record.get("off_shelf_type") != "人工下架"
+        )
 
     def _calc_holding_seconds(self, listing_time: Optional[str], off_shelf_time: Optional[str]) -> Optional[int]:
         listing_dt = self._parse_datetime(listing_time)
