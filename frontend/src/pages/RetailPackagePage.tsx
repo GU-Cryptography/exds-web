@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, IconButton, CircularProgress, Button, TextField, InputAdornment, Select, MenuItem, InputLabel, FormControl, SelectChangeEvent, Typography, TablePagination, useMediaQuery, useTheme, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, Alert, Tooltip, Snackbar, Collapse } from '@mui/material';
+import { Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, IconButton, CircularProgress, Button, TextField, InputAdornment, Select, MenuItem, InputLabel, FormControl, SelectChangeEvent, Typography, TablePagination, useMediaQuery, useTheme, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, Alert, Tooltip, Snackbar, Collapse, TableSortLabel } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import ArchiveIcon from '@mui/icons-material/Archive';
@@ -30,6 +30,9 @@ interface Package {
   created_at: string;
   updated_at: string;
 }
+
+type SortField = 'package_name' | 'package_type' | 'is_green_power' | 'model_code' | 'status' | 'created_at';
+type SortOrder = 'asc' | 'desc';
 
 // 辅助函数：获取套餐ID（兼容 id 和 _id）
 const getPackageId = (pkg: Package): string => {
@@ -92,6 +95,8 @@ const RetailPackagePage: React.FC = () => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [totalCount, setTotalCount] = useState(0);
+  const [sortField, setSortField] = useState<SortField>('created_at');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
 
   // 编辑对话框状态 (仅桌面端使用)
   const [isEditorOpen, setEditorOpen] = useState(false);
@@ -196,6 +201,8 @@ const RetailPackagePage: React.FC = () => {
           ...filters,
           page: page + 1, // API is 1-indexed
           page_size: rowsPerPage,
+          sort_field: sortField,
+          sort_order: sortOrder,
         }
       });
       console.log("API响应:", response.data); // 调试信息
@@ -215,7 +222,7 @@ const RetailPackagePage: React.FC = () => {
 
   useEffect(() => {
     fetchPackages();
-  }, [filters, page, rowsPerPage]);
+  }, [filters, page, rowsPerPage, sortField, sortOrder]);
 
   const handleFilterChange = (event: SelectChangeEvent) => {
     const { name, value } = event.target;
@@ -443,6 +450,16 @@ const RetailPackagePage: React.FC = () => {
     setPage(0);
   };
 
+  const handleRequestSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+    setSortField(field);
+    setSortOrder('asc');
+    setPage(0);
+  };
+
   // 移动端：渲染新增页面
   if (isMobile && isCreateView) {
     return (
@@ -611,12 +628,12 @@ const RetailPackagePage: React.FC = () => {
               sx={{ width: { xs: '100%', sm: '200px' } }}
             />
             <FormControl variant="outlined" size="small" sx={{ width: { xs: '100%', sm: '150px' } }}>
-              <InputLabel>套餐类型</InputLabel>
+              <InputLabel>{'\u5957\u9910\u7c7b\u578b'}</InputLabel>
               <Select
                 name="package_type"
                 value={filters.package_type}
                 onChange={handleFilterChange}
-                label="套餐类型"
+                label={'\u5957\u9910\u7c7b\u578b'}
               >
                 <MenuItem value="">所有</MenuItem>
                 <MenuItem value="time_based">分时段</MenuItem>
@@ -624,12 +641,12 @@ const RetailPackagePage: React.FC = () => {
               </Select>
             </FormControl>
             <FormControl variant="outlined" size="small" sx={{ width: { xs: '100%', sm: '150px' } }}>
-              <InputLabel>绿电套餐</InputLabel>
+              <InputLabel>{'\u7eff\u7535\u5957\u9910'}</InputLabel>
               <Select
                 name="is_green_power"
                 value={filters.is_green_power}
                 onChange={handleFilterChange}
-                label="绿电套餐"
+                label={'\u7eff\u7535\u5957\u9910'}
               >
                 <MenuItem value="">所有</MenuItem>
                 <MenuItem value="true">是</MenuItem>
@@ -696,13 +713,61 @@ const RetailPackagePage: React.FC = () => {
               >
                 <TableHead>
                   <TableRow>
-                    <TableCell>套餐名称</TableCell>
-                    <TableCell>套餐类型</TableCell>
-                    <TableCell>绿电套餐</TableCell>
-                    <TableCell>定价模型</TableCell>
-                    <TableCell>状态</TableCell>
+                    <TableCell>
+                      <TableSortLabel
+                        active={sortField === 'package_name'}
+                        direction={sortField === 'package_name' ? sortOrder : 'asc'}
+                        onClick={() => handleRequestSort('package_name')}
+                      >
+                        套餐名称
+                      </TableSortLabel>
+                    </TableCell>
+                    <TableCell>
+                      <TableSortLabel
+                        active={sortField === 'package_type'}
+                        direction={sortField === 'package_type' ? sortOrder : 'asc'}
+                        onClick={() => handleRequestSort('package_type')}
+                      >
+                        {'\u5957\u9910\u7c7b\u578b'}
+                      </TableSortLabel>
+                    </TableCell>
+                    <TableCell>
+                      <TableSortLabel
+                        active={sortField === 'is_green_power'}
+                        direction={sortField === 'is_green_power' ? sortOrder : 'asc'}
+                        onClick={() => handleRequestSort('is_green_power')}
+                      >
+                        {'\u7eff\u7535\u5957\u9910'}
+                      </TableSortLabel>
+                    </TableCell>
+                    <TableCell>
+                      <TableSortLabel
+                        active={sortField === 'model_code'}
+                        direction={sortField === 'model_code' ? sortOrder : 'asc'}
+                        onClick={() => handleRequestSort('model_code')}
+                      >
+                        定价模型
+                      </TableSortLabel>
+                    </TableCell>
+                    <TableCell>
+                      <TableSortLabel
+                        active={sortField === 'status'}
+                        direction={sortField === 'status' ? sortOrder : 'asc'}
+                        onClick={() => handleRequestSort('status')}
+                      >
+                        状态
+                      </TableSortLabel>
+                    </TableCell>
                     <TableCell>合同数</TableCell>
-                    <TableCell>创建时间</TableCell>
+                    <TableCell>
+                      <TableSortLabel
+                        active={sortField === 'created_at'}
+                        direction={sortField === 'created_at' ? sortOrder : 'asc'}
+                        onClick={() => handleRequestSort('created_at')}
+                      >
+                        创建时间
+                      </TableSortLabel>
+                    </TableCell>
                     <TableCell align="right">操作</TableCell>
                   </TableRow>
                 </TableHead>
@@ -734,15 +799,15 @@ const RetailPackagePage: React.FC = () => {
                   {pkg.package_name}
                 </Typography>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="body2" color="text.secondary">类型:</Typography>
-                  <Chip label={pkg.package_type === 'time_based' ? '分时段' : '不分时段'} size="small" />
+                  <Typography variant="body2" color="text.secondary">{'\u5957\u9910\u7c7b\u578b:'}</Typography>
+                  <Chip label={pkg.package_type === 'time_based' ? '\u5206\u65f6\u6bb5' : '\u4e0d\u5206\u65f6\u6bb5'} size="small" />
                 </Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="body2" color="text.secondary">绿电套餐:</Typography>
+                  <Typography variant="body2" color="text.secondary">{'\u7eff\u7535\u5957\u9910:'}</Typography>
                   {pkg.is_green_power ? (
-                    <Chip label="是" size="small" color="success" />
+                    <Chip label={'\u662f'} size="small" color="success" />
                   ) : (
-                    <Chip label="否" size="small" variant="outlined" />
+                    <Chip label={'\u5426'} size="small" variant="outlined" />
                   )}
                 </Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
@@ -827,13 +892,61 @@ const RetailPackagePage: React.FC = () => {
             >
               <TableHead>
                 <TableRow>
-                  <TableCell>套餐名称</TableCell>
-                  <TableCell>套餐类型</TableCell>
-                  <TableCell>绿电套餐</TableCell>
-                  <TableCell>定价模型</TableCell>
-                  <TableCell>状态</TableCell>
+                  <TableCell>
+                    <TableSortLabel
+                      active={sortField === 'package_name'}
+                      direction={sortField === 'package_name' ? sortOrder : 'asc'}
+                      onClick={() => handleRequestSort('package_name')}
+                    >
+                      套餐名称
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell>
+                    <TableSortLabel
+                      active={sortField === 'package_type'}
+                      direction={sortField === 'package_type' ? sortOrder : 'asc'}
+                      onClick={() => handleRequestSort('package_type')}
+                    >
+                      {'\u5957\u9910\u7c7b\u578b'}
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell>
+                    <TableSortLabel
+                      active={sortField === 'is_green_power'}
+                      direction={sortField === 'is_green_power' ? sortOrder : 'asc'}
+                      onClick={() => handleRequestSort('is_green_power')}
+                    >
+                      {'\u7eff\u7535\u5957\u9910'}
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell>
+                    <TableSortLabel
+                      active={sortField === 'model_code'}
+                      direction={sortField === 'model_code' ? sortOrder : 'asc'}
+                      onClick={() => handleRequestSort('model_code')}
+                    >
+                      定价模型
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell>
+                    <TableSortLabel
+                      active={sortField === 'status'}
+                      direction={sortField === 'status' ? sortOrder : 'asc'}
+                      onClick={() => handleRequestSort('status')}
+                    >
+                      状态
+                    </TableSortLabel>
+                  </TableCell>
                   <TableCell>合同数</TableCell>
-                  <TableCell>创建时间</TableCell>
+                  <TableCell>
+                    <TableSortLabel
+                      active={sortField === 'created_at'}
+                      direction={sortField === 'created_at' ? sortOrder : 'asc'}
+                      onClick={() => handleRequestSort('created_at')}
+                    >
+                      创建时间
+                    </TableSortLabel>
+                  </TableCell>
                   <TableCell align="right">操作</TableCell>
                 </TableRow>
               </TableHead>
@@ -854,15 +967,15 @@ const RetailPackagePage: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <Chip
-                        label={pkg.package_type === 'time_based' ? '分时段' : '不分时段'}
+                        label={pkg.package_type === 'time_based' ? '\u5206\u65f6\u6bb5' : '\u4e0d\u5206\u65f6\u6bb5'}
                         size="small"
                       />
                     </TableCell>
                     <TableCell>
                       {pkg.is_green_power ? (
-                        <Chip label="是" size="small" color="success" />
+                        <Chip label={'\u662f'} size="small" color="success" />
                       ) : (
-                        <Chip label="否" size="small" variant="outlined" />
+                        <Chip label={'\u5426'} size="small" variant="outlined" />
                       )}
                     </TableCell>
                     <TableCell>

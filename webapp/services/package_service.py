@@ -89,7 +89,14 @@ class PackageService:
             "created_at": package.created_at.isoformat()
         }
 
-    def list(self, filters: Dict[str, Optional[str]], page: int, page_size: int) -> Dict[str, Any]:
+    def list(
+        self,
+        filters: Dict[str, Optional[str]],
+        page: int,
+        page_size: int,
+        sort_field: str = "created_at",
+        sort_order: str = "desc"
+    ) -> Dict[str, Any]:
         """
         Retrieves a paginated list of retail packages.
         """
@@ -112,7 +119,25 @@ class PackageService:
 
         total = self.collection.count_documents(query)
 
-        cursor = self.collection.find(query).skip((page - 1) * page_size).limit(page_size)
+        allowed_sort_fields = {
+            "package_name",
+            "package_type",
+            "is_green_power",
+            "model_code",
+            "status",
+            "created_at",
+            "updated_at",
+        }
+        safe_sort_field = sort_field if sort_field in allowed_sort_fields else "created_at"
+        safe_sort_order = -1 if str(sort_order).lower() == "desc" else 1
+
+        cursor = (
+            self.collection
+            .find(query)
+            .sort(safe_sort_field, safe_sort_order)
+            .skip((page - 1) * page_size)
+            .limit(page_size)
+        )
 
         items = []
         for doc in cursor:

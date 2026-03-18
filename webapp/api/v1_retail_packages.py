@@ -97,6 +97,8 @@ async def list_packages(
     is_green_power: Optional[str] = None,
     model_code: Optional[str] = None,
     status: Optional[str] = None,
+    sort_field: str = "created_at",
+    sort_order: str = "desc",
     page: int = 1,
     page_size: int = 20,
     current_user: User = Depends(get_current_active_user)
@@ -112,7 +114,9 @@ async def list_packages(
             "status": status
         },
         page=page,
-        page_size=page_size
+        page_size=page_size,
+        sort_field=sort_field,
+        sort_order=sort_order
     )
     return result
 
