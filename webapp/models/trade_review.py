@@ -1,4 +1,4 @@
-from typing import List, Optional
+﻿from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -54,6 +54,27 @@ class ExecutionAnalysisSummary(BaseModel):
     loss_count: int = Field(..., description="亏损笔数")
     loss_amount: float = Field(..., description="亏损金额")
     total_profit_amount: float = Field(..., description="当日交易总收益")
+
+
+class DayAheadReviewChartRow(BaseModel):
+    period: int = Field(..., ge=1, le=48, description="48时段")
+    time: str = Field(..., description="时间标签")
+    period_type: str = Field(..., description="分时时段类型")
+    declared_mwh: float = Field(0.0, description="日前申报电量")
+    price_rt: Optional[float] = Field(None, description="实时价格")
+    price_da: Optional[float] = Field(None, description="日前物理出清价格")
+    price_da_econ: Optional[float] = Field(None, description="日前经济出清价格")
+    price_da_forecast: Optional[float] = Field(None, description="日前预测价格")
+
+
+class DayAheadReviewResponse(BaseModel):
+    target_date: str = Field(..., description="目标日期 YYYY-MM-DD")
+    settlement_price_type: str = Field(..., description="physical / econ")
+    chart_rows: List[DayAheadReviewChartRow] = Field(default_factory=list, description="48时段图表数据")
+    execution_analysis_summary: Optional[ExecutionAnalysisSummary] = Field(
+        None,
+        description="盈亏汇总，价格未完整发布时为空",
+    )
 
 
 class ExecutionChartRow(BaseModel):

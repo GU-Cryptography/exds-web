@@ -51,6 +51,24 @@ export interface ExecutionAnalysisSummary {
     total_profit_amount: number;
 }
 
+export interface DayAheadReviewChartRow {
+    period: number;
+    time: string;
+    period_type: string;
+    declared_mwh: number;
+    price_rt: number | null;
+    price_da: number | null;
+    price_da_econ: number | null;
+    price_da_forecast: number | null;
+}
+
+export interface DayAheadReviewResponse {
+    target_date: string;
+    settlement_price_type: 'physical' | 'econ';
+    chart_rows: DayAheadReviewChartRow[];
+    execution_analysis_summary: ExecutionAnalysisSummary | null;
+}
+
 export interface ExecutionChartRow {
     period: number;
     annual_monthly_mwh: number;

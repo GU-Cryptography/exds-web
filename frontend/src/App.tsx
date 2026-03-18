@@ -1,4 +1,4 @@
-
+﻿
 import React from 'react';
 import {
     BrowserRouter as Router,
@@ -42,33 +42,34 @@ import MonthlySettlementAnalysisPage from './pages/MonthlySettlementAnalysisPage
 import SingleCustomerMonthlyDetailPage from './pages/SingleCustomerMonthlyDetailPage';
 import { MonthlySettlementOverviewPage } from './pages/MonthlySettlementOverviewPage';
 import TradeReviewPage from './pages/TradeReviewPage';
+import DayAheadTradeReviewPage from './pages/DayAheadTradeReviewPage';
 import { IntentCustomerDiagnosisPage } from './pages/IntentCustomerDiagnosisPage';
 import { TabProvider } from './contexts/TabContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { DesktopTabLayout } from './layouts/DesktopTabLayout';
 import { MobileSimpleLayout } from './layouts/MobileSimpleLayout';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-// 响应式布局选择组件
+// 鍝嶅簲寮忓竷灞€閫夋嫨缁勪欢
 const ResponsiveLayout: React.FC = () => {
     const theme = useTheme();
-    // 使用 md 断点（960px）作为桌面端和移动端的分界
+    // 浣跨敤 md 鏂偣锛?60px锛変綔涓烘闈㈢鍜岀Щ鍔ㄧ鐨勫垎鐣?
     const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
 
     if (isDesktop) {
-        // 桌面端：使用多页签布局
+        // 妗岄潰绔細浣跨敤澶氶〉绛惧竷灞€
         return <DesktopTabLayout />;
     } else {
-        // 移动端：使用单页布局，需要配置路由
+        // 绉诲姩绔細浣跨敤鍗曢〉甯冨眬锛岄渶瑕侀厤缃矾鐢?
         return (
             <Routes>
                 <Route path="/" element={<MobileSimpleLayout />}>
-                    {/* 默认页 */}
+                    {/* 榛樿椤?*/}
                     <Route index element={<LoadAnalysisPage />} />
 
-                    {/* 菜单路由 */}
+                    {/* 鑿滃崟璺敱 */}
                     <Route path="dashboard" element={<PlaceholderPage />} />
 
-                    {/* 客户管理 */}
+                    {/* 瀹㈡埛绠＄悊 */}
                     <Route path="customer/profiles" element={<CustomerManagementPage />} />
                     <Route path="customer/profiles/create" element={<CustomerManagementPage />} />
                     <Route path="customer/profiles/view/:customerId" element={<CustomerManagementPage />} />
@@ -89,7 +90,7 @@ const ResponsiveLayout: React.FC = () => {
                     <Route path="customer/load-characteristics/:customerId" element={<LoadCharacteristicsDetailPage />} />
                     <Route path="customer/external-diagnosis" element={<IntentCustomerDiagnosisPage />} />
 
-                    {/* 负荷预测 */}
+                    {/* 璐熻嵎棰勬祴 */}
                     <Route path="load-forecast/overall-analysis" element={<LoadAnalysisPage />} />
                     <Route path="load-forecast/short-term" element={<LoadForecastWorkbench />} />
                     <Route path="load-forecast/accuracy-analysis" element={<PlaceholderPage />} />
@@ -97,29 +98,29 @@ const ResponsiveLayout: React.FC = () => {
 
 
 
-                    {/* 价格分析 */}
+                    {/* 浠锋牸鍒嗘瀽 */}
                     <Route path="price-analysis/spot-market" element={<SpotIntradayAnalysisPage />} />
                     <Route path="price-analysis/spot-trend" element={<SpotTrendAnalysisPage />} />
                     <Route path="price-analysis/mid-long-term" element={<ContractPriceDailyPage />} />
                     <Route path="price-analysis/mid-long-trend" element={<ContractPriceTrendPage />} />
 
-                    {/* 价格预测 */}
+                    {/* 浠锋牸棰勬祴 */}
                     <Route path="price-forecast/baseline-data" element={<ForecastBaseDataPage />} />
                     <Route path="price-forecast/d-2" element={<PlaceholderPage />} />
                     <Route path="price-forecast/day-ahead" element={<DayAheadPriceForecastPage />} />
                     <Route path="price-forecast/monthly" element={<PlaceholderPage />} />
 
-                    {/* 交易决策 */}
+                    {/* 浜ゆ槗鍐崇瓥 */}
                     <Route path="trading-strategy/contract-curve" element={<PlaceholderPage />} />
                     <Route path="trading-strategy/monthly" element={<PlaceholderPage />} />
                     <Route path="trading-strategy/d-2" element={<PlaceholderPage />} />
                     <Route path="trading-strategy/day-ahead" element={<PlaceholderPage />} />
 
-                    {/* 交易复盘 */}
+                    {/* 浜ゆ槗澶嶇洏 */}
                     <Route path="trade-review/monthly-trading-review" element={<TradeReviewPage />} />
-                    <Route path="trade-review/spot-review" element={<PlaceholderPage />} />
+                    <Route path="trade-review/spot-review" element={<DayAheadTradeReviewPage />} />
 
-                    {/* 结算管理 */}
+                    {/* 缁撶畻绠＄悊 */}
                     <Route path="settlement/monthly-overview" element={<MonthlySettlementOverviewPage />} />
                     <Route path="settlement/pre-settlement-overview" element={<PreSettlementOverviewPage />} />
                     <Route path="settlement/pre-settlement-detail" element={<PreSettlementDetailPage />} />
@@ -128,14 +129,14 @@ const ResponsiveLayout: React.FC = () => {
                     <Route path="settlement/monthly-customer-detail" element={<SingleCustomerMonthlyDetailPage />} />
                     <Route path="settlement/profit-analysis" element={<PlaceholderPage />} />
 
-                    {/* 基础数据 */}
+                    {/* 鍩虹鏁版嵁 */}
                     <Route path="basic-data/grid-price" element={<GridAgencyPricePage />} />
                     <Route path="basic-data/tou-definition" element={<TouRulesPage />} />
                     <Route path="basic-data/weather-data" element={<WeatherDataPage />} />
                     <Route path="basic-data/load-validation" element={<LoadDataDiagnosisPage />} />
                     <Route path="basic-data/monthly-manual-data" element={<MonthlyManualDataPage />} />
 
-                    {/* 系统管理 */}
+                    {/* 绯荤粺绠＄悊 */}
                     <Route path="system-settings/user-permissions" element={<PlaceholderPage />} />
                     <Route path="system-settings/data-access" element={<RpaMonitorPage />} />
                     <Route path="system-settings/system-logs" element={<SystemLogsPage />} />
@@ -156,10 +157,10 @@ function App() {
                 <Router>
                     <AuthProvider>
                         <Routes>
-                            {/* 登录页面 */}
+                            {/* 鐧诲綍椤甸潰 */}
                             <Route path="/login" element={<LoginPage />} />
 
-                            {/* 受保护的路由 */}
+                            {/* 鍙椾繚鎶ょ殑璺敱 */}
                             <Route element={<ProtectedRoute />}>
                                 <Route
                                     path="/*"
@@ -179,3 +180,4 @@ function App() {
 }
 
 export default App;
+

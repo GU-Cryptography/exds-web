@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { LoadAnalysisPage } from '../pages/LoadAnalysisPage';
 import { SpotIntradayAnalysisPage } from '../pages/SpotIntradayAnalysisPage';
 import PlaceholderPage from '../components/PlaceholderPage';
@@ -28,6 +28,7 @@ import MonthlySettlementAnalysisPage from '../pages/MonthlySettlementAnalysisPag
 import { MonthlySettlementOverviewPage } from '../pages/MonthlySettlementOverviewPage';
 import { LoadForecastWorkbench } from '../pages/LoadForecastWorkbench';
 import TradeReviewPage from '../pages/TradeReviewPage';
+import DayAheadTradeReviewPage from '../pages/DayAheadTradeReviewPage';
 import { IntentCustomerDiagnosisPage } from '../pages/IntentCustomerDiagnosisPage';
 
 export interface RouteConfig {
@@ -74,7 +75,7 @@ export const routeConfigs: RouteConfig[] = [
 
     // 交易复盘
     { path: '/trade-review/monthly-trading-review', title: '月内交易复盘', component: TradeReviewPage },
-    { path: '/trade-review/spot-review', title: '现货交易复盘', component: PlaceholderPage },
+    { path: '/trade-review/spot-review', title: '日前交易复盘', component: DayAheadTradeReviewPage },
 
     // 结算管理
     { path: '/settlement/monthly-overview', title: '月度结算总览', component: MonthlySettlementOverviewPage },

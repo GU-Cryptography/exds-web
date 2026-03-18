@@ -1,9 +1,10 @@
-import logging
+﻿import logging
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, status
 
 from webapp.models.trade_review import (
+    DayAheadReviewResponse,
     OperationDetailResponse,
     TradeDateListResponse,
     TradeDetailResponse,
@@ -84,4 +85,18 @@ def get_operation_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except Exception as exc:
         logger.error("get_operation_detail error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@router.get("/day-ahead-review", response_model=DayAheadReviewResponse, summary="获取日前交易复盘数据")
+def get_day_ahead_review(
+    target_date: str = Query(..., description="目标日期 YYYY-MM-DD"),
+) -> DayAheadReviewResponse:
+    _validate_date(target_date)
+    try:
+        return get_service().get_day_ahead_review(target_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("get_day_ahead_review error: %s", exc, exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc

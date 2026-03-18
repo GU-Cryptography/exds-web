@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import { Box, Collapse, Divider, List, ListItemButton, ListItemIcon, ListItemText, Toolbar } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -117,7 +117,7 @@ const menuItems: MenuItem[] = [
         icon: <ShieldIcon />,
         subItems: [
             { text: '月内交易复盘', path: '/trade-review/monthly-trading-review', icon: <FunctionsOutlined /> },
-            { text: '现货交易复盘', path: '/trade-review/spot-review', icon: <BarChartOutlined /> },
+            { text: '日前交易复盘', path: '/trade-review/spot-review', icon: <BarChartOutlined /> },
         ],
     },
     {

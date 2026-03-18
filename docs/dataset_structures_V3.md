@@ -398,3 +398,33 @@
 - `intent_customer_load_curve_daily`
 - `intent_customer_monthly_wholesale`
 - `intent_customer_monthly_retail_simulation`
+
+---
+
+## 7. `day_ahead_energy_declare` - 日前申报电量
+
+该集合用于存储日前申报电量时序数据，供交易复盘、结算等模块使用。  
+**代码依据**: [`webapp/services/settlement_service.py`](/d:/Gitworks/exds-web/webapp/services/settlement_service.py)、[`webapp/services/trade_review_service.py`](/d:/Gitworks/exds-web/webapp/services/trade_review_service.py)
+
+### 7.1. 字段说明
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `_id` | `ObjectId` | 数据唯一 ID |
+| `date_str` | `String` | 数据日期，格式 `YYYY-MM-DD` |
+| `datetime` | `DateTime` | 时间戳，支持按日区间查询（`(date, date+1]`） |
+| `time_str` | `String` | 时刻标签（常见为 96 点：`00:15` ... `24:00`） |
+| `energy_mwh` | `Number` | 该时刻申报电量，单位 `MWh` |
+| `period` | `Number` | 可选字段，时段序号（如 1~48 或 1~96） |
+
+### 7.2. 使用口径（当前实现）
+
+- 复盘与结算的 48 时段口径由原始序列重采样得到。
+- 当源数据为 96 点时：按相邻两个点求和聚合为 48 点（电量口径使用 `sum`，非 `mean`）。
+- 当源数据为 48 点时：直接使用。
+- 查询优先级：优先按 `date_str` 查询；若无结果，回退到 `datetime` 日区间查询。
+
+### 7.3. 相关说明
+
+- 该集合是“日前交易复盘”页面申报电量曲线与红点标注的核心数据源。
+- 盈亏计算中使用的申报电量即来自该集合重采样后的 48 时段序列。

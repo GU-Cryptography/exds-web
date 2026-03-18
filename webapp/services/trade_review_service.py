@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 from calendar import monthrange
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -8,6 +8,8 @@ from pymongo.database import Database
 
 from webapp.models.load_enums import FusionStrategy
 from webapp.models.trade_review import (
+    DayAheadReviewChartRow,
+    DayAheadReviewResponse,
     DeliveryDateSummary,
     ExecutionAnalysisSummary,
     ExecutionChartRow,
@@ -30,7 +32,8 @@ from webapp.models.trade_review import (
 from webapp.services.contract_service import ContractService
 from webapp.services.load_forecast_service import LoadForecastService
 from webapp.services.load_query_service import LoadQueryService
-from webapp.services.spot_price_service import get_spot_prices
+from webapp.services.spot_price_service import get_spot_prices, resample_to_48
+from webapp.services.tou_service import get_tou_timeline_by_date
 
 logger = logging.getLogger(__name__)
 
@@ -116,8 +119,124 @@ class TradeReviewService:
             None,
         )
         if target_operation is None:
-            raise ValueError(f"未找到申报过程 {operation_id}")
+            raise ValueError(f"未找到对应操作: {operation_id}")
         return self._build_operation_detail(target_operation, records, delivery_date, spot_price_map)
+
+    def get_day_ahead_review(self, target_date: str) -> DayAheadReviewResponse:
+        target_dt = datetime.strptime(target_date, "%Y-%m-%d")
+        use_econ_price = target_date >= "2026-02-01"
+        settlement_price_type = "econ" if use_econ_price else "physical"
+
+        rt_curve = get_spot_prices(
+            self.db,
+            target_date,
+            data_type="real_time",
+            resolution=48,
+            include_volume=False,
+        )
+        da_curve = get_spot_prices(
+            self.db,
+            target_date,
+            data_type="day_ahead",
+            resolution=48,
+            include_volume=False,
+        )
+        da_econ_curve = get_spot_prices(
+            self.db,
+            target_date,
+            data_type="day_ahead_econ",
+            resolution=48,
+            include_volume=False,
+        )
+
+        rt_map = {point.period: point.price for point in rt_curve.points}
+        da_map = {point.period: point.price for point in da_curve.points}
+        da_econ_map = {point.period: point.price for point in da_econ_curve.points}
+        declared_map = self._load_day_ahead_declared_volume_map(target_date)
+        tou_timeline_48 = get_tou_timeline_by_date(target_dt, points=48)
+
+        chart_rows: List[DayAheadReviewChartRow] = []
+        can_compute_summary = True
+        period_pnl_list: List[float] = []
+
+        for period in range(1, 49):
+            minutes = period * 30
+            hour = minutes // 60
+            minute = minutes % 60
+            time_str = f"{hour:02d}:{minute:02d}"
+            period_type = tou_timeline_48[period - 1] if len(tou_timeline_48) == 48 else "平段"
+            declared_mwh = round(float(declared_map.get(period, 0.0) or 0.0), 6)
+            rt_price = rt_map.get(period)
+            da_price = da_map.get(period)
+            da_econ_price = da_econ_map.get(period)
+
+            chosen_da_price = da_econ_price if use_econ_price else da_price
+            if declared_mwh > 0:
+                if rt_price is None or chosen_da_price is None:
+                    can_compute_summary = False
+                else:
+                    period_pnl_list.append((rt_price - chosen_da_price) * declared_mwh)
+
+            chart_rows.append(
+                DayAheadReviewChartRow(
+                    period=period,
+                    time=time_str,
+                    period_type=period_type,
+                    declared_mwh=declared_mwh,
+                    price_rt=round(rt_price, 3) if rt_price is not None else None,
+                    price_da=round(da_price, 3) if da_price is not None else None,
+                    price_da_econ=round(da_econ_price, 3) if da_econ_price is not None else None,
+                    price_da_forecast=None,
+                )
+            )
+
+        summary: Optional[ExecutionAnalysisSummary] = None
+        if can_compute_summary and period_pnl_list:
+            profit_values = [value for value in period_pnl_list if value >= 0]
+            loss_values = [value for value in period_pnl_list if value < 0]
+            summary = ExecutionAnalysisSummary(
+                profit_count=len(profit_values),
+                profit_amount=round(sum(profit_values), 2),
+                loss_count=len(loss_values),
+                loss_amount=round(abs(sum(loss_values)), 2),
+                total_profit_amount=round(sum(period_pnl_list), 2),
+            )
+
+        return DayAheadReviewResponse(
+            target_date=target_date,
+            settlement_price_type=settlement_price_type,
+            chart_rows=chart_rows,
+            execution_analysis_summary=summary,
+        )
+
+    def _load_day_ahead_declared_volume_map(self, target_date: str) -> Dict[int, float]:
+        docs = list(
+            self.db.day_ahead_energy_declare.find(
+                {"date_str": target_date},
+                {"_id": 0, "energy_mwh": 1, "time_str": 1, "period": 1, "datetime": 1},
+            ).sort("time_str", 1)
+        )
+        if not docs:
+            start_dt = datetime.strptime(target_date, "%Y-%m-%d")
+            end_dt = start_dt + timedelta(days=1)
+            docs = list(
+                self.db.day_ahead_energy_declare.find(
+                    {"datetime": {"$gt": start_dt, "$lte": end_dt}},
+                    {"_id": 0, "energy_mwh": 1, "time_str": 1, "period": 1, "datetime": 1},
+                ).sort("datetime", 1)
+            )
+        if not docs:
+            return {}
+
+        raw_values: List[float] = []
+        for doc in docs:
+            try:
+                raw_values.append(float(doc.get("energy_mwh", 0) or 0))
+            except (TypeError, ValueError):
+                raw_values.append(0.0)
+
+        values_48 = resample_to_48(raw_values, method="sum")
+        return {idx + 1: round(values_48[idx], 6) for idx in range(min(48, len(values_48)))}
 
     def _get_trade_doc(self, trade_date: str) -> Dict[str, Any]:
         doc = self.trade_declare_collection.find_one({"trade_date": trade_date}, {"_id": 0})
@@ -859,8 +978,8 @@ class TradeReviewService:
             f"本目标日共 {summary_cards.record_overview.total_records} 条申报记录，其中 {summary_cards.record_overview.traded_records} 笔产生了成交。",
             f"累计成交电量 {summary_cards.trade_overview.traded_mwh:.3f} MWh，其中买入 {summary_cards.trade_overview.buy_traded_mwh:.3f} MWh，卖出 {summary_cards.trade_overview.sell_traded_mwh:.3f} MWh。",
             (
-                f"共识别挂牌申报 {summary_cards.operation_overview.listing_operation_count} 次、"
-                f"人工下架 {summary_cards.operation_overview.manual_off_shelf_operation_count} 次、"
+                f"共识别挂牌申报 {summary_cards.operation_overview.listing_operation_count} 次，"
+                f"人工下架 {summary_cards.operation_overview.manual_off_shelf_operation_count} 次，"
                 f"自动下架 {summary_cards.operation_overview.auto_off_shelf_operation_count} 次。"
             ),
         ]
@@ -923,3 +1042,5 @@ class TradeReviewService:
             return float(value)
         except (TypeError, ValueError):
             return None if allow_none else 0.0
+
+

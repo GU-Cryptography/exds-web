@@ -1,5 +1,6 @@
 import apiClient from './client';
 import {
+    DayAheadReviewResponse,
     OperationDetailResponse,
     TradeDateListResponse,
     TradeDetailResponse,
@@ -19,5 +20,9 @@ export const tradeReviewApi = {
     fetchOperationDetail: (tradeDate: string, deliveryDate: string, operationId: string) =>
         apiClient.get<OperationDetailResponse>('/api/v1/trade-review/operation-detail', {
             params: { trade_date: tradeDate, delivery_date: deliveryDate, operation_id: operationId },
+        }),
+    fetchDayAheadReview: (targetDate: string) =>
+        apiClient.get<DayAheadReviewResponse>('/api/v1/trade-review/day-ahead-review', {
+            params: { target_date: targetDate },
         }),
 };
