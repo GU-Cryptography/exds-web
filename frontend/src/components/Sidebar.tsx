@@ -16,14 +16,12 @@ import {
     FunctionsOutlined,
     GavelOutlined as GavelIcon,
     LogoutOutlined as LogoutIcon,
-    ModelTrainingOutlined,
     NotificationsActiveOutlined,
     PaymentOutlined as PaymentIcon,
     PeopleOutlined as PeopleIcon,
     PriceChangeOutlined as PriceChangeIcon,
     QueryStatsOutlined,
     RequestQuoteOutlined,
-    RuleOutlined,
     SettingsOutlined as SettingsIcon,
     ShieldOutlined as ShieldIcon,
     ShowChartOutlined,
@@ -64,22 +62,14 @@ const menuItems: MenuItem[] = [
         ],
     },
     {
-        text: '负荷分析',
+        text: '客户分析',
         icon: <ShowChartOutlined />,
         subItems: [
             { text: '总体负荷分析', path: '/load-forecast/overall-analysis', icon: <StackedLineChartOutlined /> },
             { text: '客户负荷分析', path: '/customer/load-analysis', icon: <ShowChartOutlined /> },
-            { text: '负荷特征分析', path: '/customer/load-characteristics', icon: <BubbleChartOutlined /> },
-            { text: '外部客户诊断', path: '/customer/external-diagnosis', icon: <VerifiedUserOutlined /> },
-        ],
-    },
-    {
-        text: '负荷预测',
-        icon: <TimelineIcon />,
-        subItems: [
-            { text: '年度负荷预测', path: '/load-forecast/long-term', icon: <CalendarMonthOutlined /> },
-            { text: '短期负荷预测', path: '/load-forecast/short-term', icon: <QueryStatsOutlined /> },
-            { text: '预测精度分析', path: '/load-forecast/accuracy-analysis', icon: <RuleOutlined /> },
+            { text: '用电特征分析', path: '/customer/load-characteristics', icon: <BubbleChartOutlined /> },
+            { text: '客户收益分析', path: '/settlement/profit-analysis', icon: <AssessmentOutlined /> },
+            { text: '意向客户诊断', path: '/customer/external-diagnosis', icon: <VerifiedUserOutlined /> },
         ],
     },
     {
@@ -93,22 +83,23 @@ const menuItems: MenuItem[] = [
         ],
     },
     {
-        text: '价格预测',
+        text: '市场预测',
         icon: <QueryStatsOutlined />,
         subItems: [
-            { text: '预测基础数据', path: '/price-forecast/baseline-data', icon: <StorageOutlined /> },
+            { text: '天气预测数据', path: '/basic-data/weather-data', icon: <AnalyticsOutlined /> },
+            { text: '价格基础数据', path: '/price-forecast/baseline-data', icon: <StorageOutlined /> },
             { text: '日前价格预测', path: '/price-forecast/day-ahead', icon: <TrendingUpOutlined /> },
             { text: 'D-2价格预测', path: '/price-forecast/d-2', icon: <CrisisAlertOutlined /> },
-            { text: '月度价格预测', path: '/price-forecast/monthly', icon: <CalendarMonthOutlined /> },
+            { text: '短期负荷预测', path: '/load-forecast/short-term', icon: <QueryStatsOutlined /> },
+            { text: '中期负荷预测', path: '/load-forecast/long-term', icon: <CalendarMonthOutlined /> },
         ],
     },
     {
-        text: '交易决策',
+        text: '交易策略',
         icon: <GavelIcon />,
         subItems: [
-            { text: '合同曲线生成', path: '/trading-strategy/contract-curve', icon: <FunctionsOutlined /> },
             { text: '月度交易策略', path: '/trading-strategy/monthly', icon: <CalendarMonthOutlined /> },
-            { text: 'D-2交易策略', path: '/trading-strategy/d-2', icon: <CrisisAlertOutlined /> },
+            { text: '月内交易策略', path: '/trading-strategy/contract-curve', icon: <FunctionsOutlined /> },
             { text: '日前交易策略', path: '/trading-strategy/day-ahead', icon: <TrendingUpOutlined /> },
         ],
     },
@@ -117,7 +108,7 @@ const menuItems: MenuItem[] = [
         icon: <ShieldIcon />,
         subItems: [
             { text: '月内交易复盘', path: '/trade-review/monthly-trading-review', icon: <FunctionsOutlined /> },
-            { text: '日前交易复盘', path: '/trade-review/spot-review', icon: <BarChartOutlined /> },
+            { text: '现货交易复盘', path: '/trade-review/spot-review', icon: <BarChartOutlined /> },
         ],
     },
     {
@@ -128,7 +119,6 @@ const menuItems: MenuItem[] = [
             { text: '日清结算详情', path: '/settlement/pre-settlement-detail', icon: <FactCheckOutlined /> },
             { text: '月度结算总览', path: '/settlement/monthly-overview', icon: <AssessmentOutlined /> },
             { text: '月度结算详情', path: '/settlement/monthly-analysis', icon: <PaymentIcon /> },
-            { text: '经营利润分析', path: '/settlement/profit-analysis', icon: <ShowChartOutlined /> },
         ],
     },
     {
@@ -137,7 +127,6 @@ const menuItems: MenuItem[] = [
         subItems: [
             { text: '国网代理购电', path: '/basic-data/grid-price', icon: <PriceChangeIcon /> },
             { text: '时段电价分布', path: '/basic-data/tou-definition', icon: <StyleOutlined /> },
-            { text: '天气预测数据', path: '/basic-data/weather-data', icon: <AnalyticsOutlined /> },
             { text: '负荷数据诊断', path: '/basic-data/load-validation', icon: <VerifiedUserOutlined /> },
             { text: '基础数据导入', path: '/basic-data/monthly-manual-data', icon: <PriceChangeIcon /> },
         ],
@@ -149,7 +138,6 @@ const menuItems: MenuItem[] = [
             { text: '用户与权限', path: '/system-settings/user-permissions', icon: <VpnKeyOutlined /> },
             { text: '数据下载监控', path: '/system-settings/data-access', icon: <SourceOutlined /> },
             { text: '告警与日志', path: '/system-settings/system-logs', icon: <NotificationsActiveOutlined /> },
-            { text: '预测模型参数', path: '/system-settings/model-parameters', icon: <ModelTrainingOutlined /> },
         ],
     },
 ];

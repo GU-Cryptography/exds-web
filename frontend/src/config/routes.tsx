@@ -47,13 +47,13 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/customer/load-analysis', title: '客户负荷分析', component: CustomerLoadOverviewPage },
     { path: '/customer/load-characteristics', title: '负荷特征分析', component: LoadCharacteristicsOverviewPage },
     { path: '/customer/load-characteristics/:customerId', title: '客户特征详情', component: LoadCharacteristicsDetailPage },
-    { path: '/customer/external-diagnosis', title: '外部客户诊断', component: IntentCustomerDiagnosisPage },
+    { path: '/customer/external-diagnosis', title: '意向客户诊断', component: IntentCustomerDiagnosisPage },
 
     // 负荷预测
     { path: '/load-forecast/overall-analysis', title: '总体负荷分析', component: LoadAnalysisPage },
     { path: '/load-forecast/short-term', title: '短期负荷预测', component: LoadForecastWorkbench },
     { path: '/load-forecast/accuracy-analysis', title: '预测精度分析', component: PlaceholderPage },
-    { path: '/load-forecast/long-term', title: '年度负荷预测', component: PlaceholderPage },
+    { path: '/load-forecast/long-term', title: '中期负荷预测', component: PlaceholderPage },
 
     // 价格分析
     { path: '/price-analysis/spot-market', title: '现货日内分析', component: SpotIntradayAnalysisPage },
@@ -62,20 +62,20 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/price-analysis/mid-long-trend', title: '中长期趋势分析', component: ContractPriceTrendPage },
 
     // 价格预测
-    { path: '/price-forecast/baseline-data', title: '预测基础数据', component: ForecastBaseDataPage },
+    { path: '/price-forecast/baseline-data', title: '价格基础数据', component: ForecastBaseDataPage },
     { path: '/price-forecast/d-2', title: 'D-2价格预测', component: PlaceholderPage },
     { path: '/price-forecast/day-ahead', title: '日前价格预测', component: DayAheadPriceForecastPage },
     { path: '/price-forecast/monthly', title: '月度价格预测', component: PlaceholderPage },
 
     // 交易决策
-    { path: '/trading-strategy/contract-curve', title: '合同曲线生成', component: PlaceholderPage },
+    { path: '/trading-strategy/contract-curve', title: '月内交易策略', component: PlaceholderPage },
     { path: '/trading-strategy/monthly', title: '月度交易策略', component: PlaceholderPage },
     { path: '/trading-strategy/d-2', title: 'D-2交易策略', component: PlaceholderPage },
     { path: '/trading-strategy/day-ahead', title: '日前交易策略', component: PlaceholderPage },
 
     // 交易复盘
     { path: '/trade-review/monthly-trading-review', title: '月内交易复盘', component: TradeReviewPage },
-    { path: '/trade-review/spot-review', title: '日前交易复盘', component: DayAheadTradeReviewPage },
+    { path: '/trade-review/spot-review', title: '现货交易复盘', component: DayAheadTradeReviewPage },
 
     // 结算管理
     { path: '/settlement/monthly-overview', title: '月度结算总览', component: MonthlySettlementOverviewPage },
@@ -84,7 +84,7 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/settlement/customer-settlement-detail', title: '单客户结算详情', component: SingleCustomerSettlementDetailPage as any },
     { path: '/settlement/monthly-analysis', title: '月度结算详情', component: MonthlySettlementAnalysisPage },
     { path: '/settlement/monthly-customer-detail', title: '单客户月度结算详情', component: SingleCustomerMonthlyDetailPage },
-    { path: '/settlement/profit-analysis', title: '经营利润分析', component: PlaceholderPage },
+    { path: '/settlement/profit-analysis', title: '客户收益分析', component: PlaceholderPage },
 
     // 基础数据
     { path: '/basic-data/grid-price', title: '国网代理购电', component: GridAgencyPricePage },
