@@ -8,7 +8,12 @@ from bson import ObjectId
 
 from webapp.services.load_aggregation_service import LoadAggregationService
 from webapp.services.meter_data_import_service import MeterDataImportService
+from webapp.services.retail_monthly_settlement_service import (
+    EXCESS_PROFIT_THRESHOLD_PER_MWH,
+    RetailMonthlySettlementService,
+)
 from webapp.services.retail_settlement_service import RetailSettlementService
+from webapp.services.tou_service import get_tou_timeline_by_date
 from webapp.tools.mongo import DATABASE
 
 logger = logging.getLogger(__name__)
@@ -20,7 +25,10 @@ class IntentCustomerDiagnosisService:
         self.raw_collection = DATABASE["intent_customer_meter_reads_daily"]
         self.curve_collection = DATABASE["intent_customer_load_curve_daily"]
         self.wholesale_result_collection = DATABASE["intent_customer_monthly_wholesale"]
+        self.retail_result_collection = DATABASE["intent_customer_monthly_retail_simulation"]
+        self.package_collection = DATABASE["retail_packages"]
         self.retail_settlement_service = RetailSettlementService()
+        self.retail_monthly_service = RetailMonthlySettlementService()
         self._ensure_indexes()
 
     def _ensure_indexes(self) -> None:
@@ -37,6 +45,13 @@ class IntentCustomerDiagnosisService:
             unique=True,
         )
         self.wholesale_result_collection.create_index([("customer_id", 1), ("updated_at", -1)])
+        self.retail_result_collection.create_index(
+            [("customer_id", 1), ("settlement_month", 1), ("package_id", 1)],
+            unique=True,
+        )
+        self.retail_result_collection.create_index(
+            [("customer_id", 1), ("package_id", 1), ("updated_at", -1)]
+        )
 
     def preview_files(self, files: List[Tuple[str, bytes]]) -> Dict[str, Any]:
         preview_items: List[Dict[str, Any]] = []
@@ -352,13 +367,183 @@ class IntentCustomerDiagnosisService:
             "month_details": month_details,
         }
 
+    def list_active_retail_packages(self) -> Dict[str, Any]:
+        docs = list(
+            self.package_collection.find(
+                {"status": "active"},
+                {
+                    "package_name": 1,
+                    "package_type": 1,
+                    "model_code": 1,
+                    "is_green_power": 1,
+                    "status": 1,
+                },
+            ).sort("updated_at", -1)
+        )
+        return {
+            "items": [
+                {
+                    "package_id": str(doc["_id"]),
+                    "package_name": doc.get("package_name", ""),
+                    "package_type": doc.get("package_type"),
+                    "model_code": doc.get("model_code"),
+                    "is_green_power": bool(doc.get("is_green_power", False)),
+                    "status": doc.get("status"),
+                }
+                for doc in docs
+            ]
+        }
+
+    def list_retail_simulation_packages(self, customer_id: str) -> Dict[str, Any]:
+        self._get_profile_doc(customer_id)
+        docs = list(
+            self.retail_result_collection.aggregate(
+                [
+                    {"$match": {"customer_id": customer_id}},
+                    {"$sort": {"updated_at": -1}},
+                    {
+                        "$group": {
+                            "_id": "$package_id",
+                            "package_name": {"$first": "$package_name"},
+                            "model_code": {"$first": "$model_code"},
+                            "updated_at": {"$first": "$updated_at"},
+                        }
+                    },
+                    {"$sort": {"updated_at": -1}},
+                ]
+            )
+        )
+        return {
+            "items": [
+                {
+                    "package_id": doc["_id"],
+                    "package_name": doc.get("package_name", ""),
+                    "model_code": doc.get("model_code"),
+                    "updated_at": doc.get("updated_at"),
+                }
+                for doc in docs
+            ]
+        }
+
+    def list_retail_simulation_months(self, customer_id: str, package_id: str) -> Dict[str, Any]:
+        profile_doc = self._get_profile_doc(customer_id)
+        docs = list(
+            self.retail_result_collection.find(
+                {"customer_id": customer_id, "package_id": package_id},
+                {
+                    "settlement_month": 1,
+                    "package_name": 1,
+                    "price_model.is_capped": 1,
+                    "final_stage": 1,
+                },
+            ).sort("settlement_month", 1)
+        )
+        package_name = docs[0].get("package_name", "") if docs else ""
+        rows: List[Dict[str, Any]] = []
+        for doc in docs:
+            final_stage = doc.get("final_stage", {}) or {}
+            rows.append(
+                {
+                    "settlement_month": doc.get("settlement_month", ""),
+                    "total_energy_mwh": round(float(final_stage.get("energy_mwh") or 0.0), 6),
+                    "wholesale_unit_price": round(
+                        float(final_stage.get("wholesale_unit_price") or 0.0), 6
+                    ),
+                    "wholesale_amount": round(float(final_stage.get("wholesale_fee") or 0.0), 2),
+                    "retail_unit_price": round(float(final_stage.get("retail_unit_price") or 0.0), 6),
+                    "retail_amount": round(float(final_stage.get("retail_fee") or 0.0), 2),
+                    "monthly_gross_profit": round(
+                        float(final_stage.get("gross_profit") or 0.0), 2
+                    ),
+                    "price_spread_per_mwh": round(
+                        float(final_stage.get("price_spread_per_mwh") or 0.0), 6
+                    ),
+                    "is_capped": bool((doc.get("price_model", {}) or {}).get("is_capped", False)),
+                }
+            )
+
+        return {
+            "customer": self._to_customer_list_item(profile_doc),
+            "package_id": package_id,
+            "package_name": package_name,
+            "rows": rows,
+        }
+
+    def calculate_retail_simulation(
+        self,
+        customer_id: str,
+        package_id: str,
+    ) -> Dict[str, Any]:
+        profile_doc = self._get_profile_doc(customer_id)
+        package_doc = self._get_active_package_doc(package_id)
+        available_months = self._get_available_wholesale_months(customer_id)
+        if not available_months:
+            raise ValueError("?????????????????????????")
+
+        latest_result: Optional[Dict[str, Any]] = None
+        for settlement_month in available_months:
+            wholesale_doc = self.wholesale_result_collection.find_one(
+                {"customer_id": customer_id, "settlement_month": settlement_month}
+            )
+            if not wholesale_doc:
+                continue
+
+            curve_docs = self._get_month_curve_docs(customer_id, settlement_month)
+            if not curve_docs:
+                continue
+
+            result = self._build_single_retail_simulation(
+                profile_doc=profile_doc,
+                package_doc=package_doc,
+                wholesale_doc=wholesale_doc,
+                curve_docs=curve_docs,
+                settlement_month=settlement_month,
+            )
+            self._save_retail_result(result)
+            latest_result = result
+
+        if latest_result is None:
+            raise ValueError("?????????????????????????????")
+        return latest_result
+
+    def get_retail_simulation_detail(
+        self,
+        customer_id: str,
+        package_id: str,
+        settlement_month: str,
+    ) -> Dict[str, Any]:
+        self._get_profile_doc(customer_id)
+        doc = self.retail_result_collection.find_one(
+            {
+                "customer_id": customer_id,
+                "package_id": package_id,
+                "settlement_month": settlement_month,
+            }
+        )
+        if not doc:
+            raise ValueError("??????????????")
+        doc.pop("_id", None)
+        return doc
+
+    def delete_retail_simulation_package(self, customer_id: str, package_id: str) -> Dict[str, Any]:
+        self._get_profile_doc(customer_id)
+        result = self.retail_result_collection.delete_many(
+            {"customer_id": customer_id, "package_id": package_id}
+        )
+        if result.deleted_count == 0:
+            raise ValueError("?????????????")
+        return {
+            "deleted_count": int(result.deleted_count),
+            "message": "???????????",
+        }
+
     def _get_profile_doc(self, customer_id: str) -> Dict[str, Any]:
         if not ObjectId.is_valid(customer_id):
-            raise ValueError("无效的客户ID")
+            raise ValueError("?????ID")
 
         profile_doc = self.profile_collection.find_one({"_id": ObjectId(customer_id)})
         if not profile_doc:
-            raise ValueError("客户不存在")
+            raise ValueError("?????")
         return profile_doc
 
     def _get_available_wholesale_months(self, customer_id: str) -> List[str]:
@@ -369,7 +554,9 @@ class IntentCustomerDiagnosisService:
         }
         wholesale_months = {
             str(month)
-            for month in self.wholesale_result_collection.database["wholesale_settlement_monthly"].distinct("month")
+            for month in self.wholesale_result_collection.distinct(
+                "settlement_month", {"customer_id": customer_id}
+            )
             if isinstance(month, str) and len(month) == 7
         }
         return sorted(curve_months & wholesale_months)
@@ -434,6 +621,7 @@ class IntentCustomerDiagnosisService:
 
         surplus_cost = total_energy_mwh * surplus_unit_price
         total_cost = daily_cost_total + surplus_cost
+        daily_cost_unit_price = daily_cost_total / total_energy_mwh if total_energy_mwh > 0 else 0.0
         unit_cost_yuan_per_mwh = total_cost / total_energy_mwh if total_energy_mwh > 0 else 0.0
         unit_cost_yuan_per_kwh = unit_cost_yuan_per_mwh / 1000 if unit_cost_yuan_per_mwh > 0 else 0.0
 
@@ -441,6 +629,7 @@ class IntentCustomerDiagnosisService:
             "settlement_month": month,
             "total_energy_mwh": round(total_energy_mwh, 6),
             "daily_cost_total": round(daily_cost_total, 2),
+            "daily_cost_unit_price": round(daily_cost_unit_price, 6),
             "surplus_unit_price": round(surplus_unit_price, 6),
             "surplus_cost": round(surplus_cost, 2),
             "total_cost": round(total_cost, 2),
@@ -451,6 +640,7 @@ class IntentCustomerDiagnosisService:
         }
 
         period_details: List[Dict[str, Any]] = []
+        monthly_period_types = self._build_month_period_types(daily_curves)
         for index in range(48):
             load_mwh = period_loads[index]
             period_surplus_cost = load_mwh * surplus_unit_price
@@ -465,6 +655,7 @@ class IntentCustomerDiagnosisService:
                     "daily_cost_total": round(period_daily_costs[index], 2),
                     "surplus_cost": round(period_surplus_cost, 2),
                     "total_cost": round(period_total_cost, 2),
+                    "period_type": monthly_period_types[index],
                     "daily_cost_unit_price": round(daily_unit_price, 6),
                     "final_unit_price": round(final_unit_price, 6),
                 }
@@ -472,11 +663,10 @@ class IntentCustomerDiagnosisService:
 
         now = datetime.now()
         return {
-            "_id": f"{customer_id}_{month}_intent_monthly_v1",
+            "_id": f"{customer_id}_{month}",
             "customer_id": customer_id,
             "customer_name": profile_doc.get("customer_name", ""),
             "settlement_month": month,
-            "settlement_version": "intent_monthly_v1",
             "calc_status": "success",
             "calc_message": "",
             "summary": summary,
@@ -528,8 +718,39 @@ class IntentCustomerDiagnosisService:
         end_minute = end_minutes % 60
         return f"{start_hour:02d}:{start_minute:02d}-{end_hour:02d}:{end_minute:02d}"
 
+    @staticmethod
+    def _normalize_period_type(period_type: str) -> str:
+        return period_type if period_type in {"尖峰", "高峰", "平段", "低谷", "深谷"} else "平段"
+
+    def _build_month_period_types(self, curve_docs: List[Dict[str, Any]]) -> List[str]:
+        period_type_sets: List[set[str]] = [set() for _ in range(48)]
+
+        for curve_doc in curve_docs:
+            date_str = curve_doc.get("date")
+            if not date_str:
+                continue
+            try:
+                timeline_48 = get_tou_timeline_by_date(datetime.strptime(date_str, "%Y-%m-%d"), points=48)
+            except Exception:
+                logger.warning("构建意向客户批发月结 48 时段类型失败: %s", date_str, exc_info=True)
+                timeline_48 = []
+
+            for index in range(min(48, len(timeline_48))):
+                period_type_sets[index].add(self._normalize_period_type(timeline_48[index]))
+
+        result: List[str] = []
+        for type_set in period_type_sets:
+            if not type_set:
+                result.append("平段")
+            elif len(type_set) == 1:
+                result.append(next(iter(type_set)))
+            else:
+                result.append("period_type_mix")
+        return result
+
     def _save_wholesale_result(self, result: Dict[str, Any]) -> None:
         payload = result.copy()
+        payload.pop("_id", None)
         created_at = payload.pop("created_at", datetime.now())
         self.wholesale_result_collection.update_one(
             {
@@ -553,6 +774,7 @@ class IntentCustomerDiagnosisService:
         self.raw_collection.delete_many({"customer_id": customer_id})
         self.curve_collection.delete_many({"customer_id": customer_id})
         self.wholesale_result_collection.delete_many({"customer_id": customer_id})
+        self.retail_result_collection.delete_many({"customer_id": customer_id})
 
     def _aggregate_customer_curves(
         self,

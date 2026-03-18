@@ -82,6 +82,7 @@ import {
     previewIntentCustomerFiles
 } from '../api/intentCustomerDiagnosis';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
+import IntentRetailSimulationTab from '../components/intent-customer-diagnosis/IntentRetailSimulationTab';
 
 type DiagnosisTabKey = 'load' | 'wholesale' | 'retail';
 
@@ -152,6 +153,15 @@ const PlaceholderTabCard: React.FC<{ title: string; description: string }> = ({ 
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>{description}</Typography>
     </Paper>
 );
+
+const WHOLESALE_PERIOD_COLORS: Record<string, string> = {
+    '\u5c16\u5cf0': '#ff5252',
+    '\u9ad8\u5cf0': '#ff9800',
+    '\u5e73\u6bb5': '#4caf50',
+    '\u4f4e\u8c37': '#2196f3',
+    '\u6df1\u8c37': '#3f51b5',
+    period_type_mix: '#9e9e9e'
+};
 
 const ImportDialog: React.FC<{
     open: boolean;
@@ -545,7 +555,8 @@ const WholesaleSimulationTab: React.FC<{
     const periodChartData = useMemo(
         () => (selectedMonthDetail?.period_details || []).map((item) => ({
             ...item,
-            short_label: item.period.toString()
+            short_label: item.period.toString(),
+            period_type: item.period_type || 'period_type_mix'
         })),
         [selectedMonthDetail]
     );
@@ -617,7 +628,7 @@ const WholesaleSimulationTab: React.FC<{
                         <TableCell>结算月份</TableCell>
                         <TableCell align="right">总电量(MWh)</TableCell>
                         <TableCell align="right">每日成本汇总(元)</TableCell>
-                        <TableCell align="right">资金余缺分摊单价(元/MWh)</TableCell>
+                        <TableCell align="right">每日成本均价(元/MWh)</TableCell>
                         <TableCell align="right">资金余缺分摊(元)</TableCell>
                         <TableCell align="right">批发总成本(元)</TableCell>
                         <TableCell align="right">批发单价(元/MWh)</TableCell>
@@ -626,6 +637,9 @@ const WholesaleSimulationTab: React.FC<{
                 <TableBody>
                     {summaryRows.map((row) => {
                         const active = row.settlement_month === selectedMonth;
+                        const dailyCostUnitPrice = row.total_energy_mwh > 0
+                            ? row.daily_cost_total / row.total_energy_mwh
+                            : 0;
                         return (
                             <TableRow
                                 key={row.settlement_month}
@@ -637,7 +651,7 @@ const WholesaleSimulationTab: React.FC<{
                                 <TableCell>{row.settlement_month}</TableCell>
                                 <TableCell align="right">{row.total_energy_mwh.toFixed(3)}</TableCell>
                                 <TableCell align="right">{row.daily_cost_total.toFixed(3)}</TableCell>
-                                <TableCell align="right">{row.surplus_unit_price.toFixed(3)}</TableCell>
+                                <TableCell align="right">{dailyCostUnitPrice.toFixed(3)}</TableCell>
                                 <TableCell align="right">{row.surplus_cost.toFixed(3)}</TableCell>
                                 <TableCell align="right">{row.total_cost.toFixed(3)}</TableCell>
                                 <TableCell align="right">{row.unit_cost_yuan_per_mwh.toFixed(3)}</TableCell>
@@ -873,7 +887,14 @@ const WholesaleSimulationTab: React.FC<{
                                                         <YAxis yAxisId="right" orientation="right" />
                                                         <RechartsTooltip />
                                                         <Legend />
-                                                        <Bar yAxisId="left" dataKey="load_mwh" name="电量(MWh)" fill="#8caac4" />
+                                                        <Bar yAxisId="left" dataKey="load_mwh" name="电量(MWh)">
+                                                            {periodChartData.map((entry) => (
+                                                                <Cell
+                                                                    key={`period-load-${entry.period}`}
+                                                                    fill={`${WHOLESALE_PERIOD_COLORS[entry.period_type || 'period_type_mix'] || '#9e9e9e'}CC`}
+                                                                />
+                                                            ))}
+                                                        </Bar>
                                                         <Line yAxisId="right" type="monotone" dataKey="total_cost" name="总成本(元)" stroke="#ef6c00" strokeWidth={2.5} dot={false} />
                                                     </ComposedChart>
                                                 </ResponsiveContainer>
@@ -1483,27 +1504,7 @@ export const IntentCustomerDiagnosisPage: React.FC = () => {
                 </TabPanel>
 
                 <TabPanel value={activeTab} index="retail">
-                    <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
-                        <Stack
-                            direction={{ xs: 'column', md: 'row' }}
-                            justifyContent="space-between"
-                            alignItems={{ xs: 'flex-start', md: 'center' }}
-                            spacing={1.5}
-                        >
-                            <Box>
-                                <Typography variant="h6" fontSize="1rem" fontWeight="bold">零售侧结算结果</Typography>
-                                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                                    零售侧区域将支持按多个套餐版本分别测算，计算按钮与批发侧分开，不共用。
-                                </Typography>
-                            </Box>
-                            <Button variant="contained" disabled>
-                                计算零售侧结算
-                            </Button>
-                        </Stack>
-                        <Box sx={{ mt: 2 }}>
-                            <PlaceholderTabCard title="零售套餐分析" description="下一步将在这里接入套餐选择、多版本测算和推荐分析。" />
-                        </Box>
-                    </Paper>
+                    <IntentRetailSimulationTab selectedCustomer={selectedCustomer} />
                 </TabPanel>
 
                 <ImportDialog

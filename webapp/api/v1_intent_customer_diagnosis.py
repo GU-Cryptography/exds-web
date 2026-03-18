@@ -6,14 +6,23 @@ from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadF
 
 from webapp.models.intent_customer_diagnosis import (
     DeleteIntentCustomerRequest,
+    IntentDeleteResultResponse,
     ImportMeterConfig,
     ImportResult,
     IntentCustomerListResponse,
+    IntentRetailCalculatedPackagesResponse,
+    IntentRetailMonthResultsResponse,
+    IntentRetailPackageOptionsResponse,
+    IntentRetailSimulationDetailResponse,
+    IntentRetailSimulationRequest,
     IntentWholesaleSimulationResponse,
     LoadSummaryResponse,
     PreviewResponse,
 )
 from webapp.services.intent_customer_diagnosis_service import IntentCustomerDiagnosisService
+from webapp.services.intent_customer_retail_simulation_service import (
+    IntentCustomerRetailSimulationService,
+)
 from webapp.tools.mongo import DATABASE as db_instance
 from webapp.tools.security import (
     User,
@@ -113,7 +122,7 @@ async def calculate_intent_customer_wholesale_simulation(
 @router.get(
     "/customers/{customer_id}/wholesale-simulation",
     response_model=IntentWholesaleSimulationResponse,
-    summary="获取已保存的意向客户批发侧月度模拟结算",
+    summary="获取意向客户批发侧月度模拟结算结果",
 )
 async def get_intent_customer_wholesale_simulation(
     customer_id: str,
@@ -123,6 +132,119 @@ async def get_intent_customer_wholesale_simulation(
     service = IntentCustomerDiagnosisService()
     try:
         return service.get_wholesale_simulation(customer_id=customer_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get(
+    "/retail-simulation/packages/active",
+    response_model=IntentRetailPackageOptionsResponse,
+    summary="获取活跃零售套餐列表",
+)
+async def list_active_retail_packages(
+    current_user: User = Depends(get_current_active_user),
+):
+    del current_user
+    service = IntentCustomerRetailSimulationService()
+    return service.list_active_retail_packages()
+
+
+@router.get(
+    "/customers/{customer_id}/retail-simulation/packages",
+    response_model=IntentRetailCalculatedPackagesResponse,
+    summary="获取当前客户已计算套餐列表",
+)
+async def list_intent_customer_retail_packages(
+    customer_id: str,
+    current_user: User = Depends(get_current_active_user),
+):
+    del current_user
+    service = IntentCustomerRetailSimulationService()
+    try:
+        return service.list_retail_simulation_packages(customer_id=customer_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get(
+    "/customers/{customer_id}/retail-simulation/months",
+    response_model=IntentRetailMonthResultsResponse,
+    summary="获取当前套餐的月份结算结果",
+)
+async def list_intent_customer_retail_months(
+    customer_id: str,
+    package_id: str,
+    current_user: User = Depends(get_current_active_user),
+):
+    del current_user
+    service = IntentCustomerRetailSimulationService()
+    try:
+        return service.list_retail_simulation_months(customer_id=customer_id, package_id=package_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post(
+    "/customers/{customer_id}/retail-simulation",
+    response_model=IntentRetailSimulationDetailResponse,
+    summary="计算意向客户零售结算模拟",
+)
+async def calculate_intent_customer_retail_simulation(
+    customer_id: str,
+    payload: IntentRetailSimulationRequest,
+    current_user: User = Depends(get_current_active_user),
+):
+    del current_user
+    service = IntentCustomerRetailSimulationService()
+    try:
+        return service.calculate_retail_simulation(
+            customer_id=customer_id,
+            package_id=payload.package_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get(
+    "/customers/{customer_id}/retail-simulation/detail",
+    response_model=IntentRetailSimulationDetailResponse,
+    summary="获取意向客户零售结算模拟详情",
+)
+async def get_intent_customer_retail_simulation_detail(
+    customer_id: str,
+    package_id: str,
+    settlement_month: str,
+    current_user: User = Depends(get_current_active_user),
+):
+    del current_user
+    service = IntentCustomerRetailSimulationService()
+    try:
+        return service.get_retail_simulation_detail(
+            customer_id=customer_id,
+            package_id=package_id,
+            settlement_month=settlement_month,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.delete(
+    "/customers/{customer_id}/retail-simulation/packages/{package_id}",
+    response_model=IntentDeleteResultResponse,
+    summary="?????????????",
+)
+async def delete_intent_customer_retail_package(
+    customer_id: str,
+    package_id: str,
+    current_user: User = Depends(get_current_active_user),
+):
+    del current_user
+    service = IntentCustomerRetailSimulationService()
+    try:
+        return service.delete_retail_simulation_package(
+            customer_id=customer_id,
+            package_id=package_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
