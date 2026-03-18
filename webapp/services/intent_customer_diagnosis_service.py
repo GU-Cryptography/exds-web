@@ -552,14 +552,12 @@ class IntentCustomerDiagnosisService:
             for doc in self.curve_collection.find({"customer_id": customer_id}, {"date": 1})
             if str(doc.get("date", "")).startswith("20")
         }
-        wholesale_months = {
+        source_months = {
             str(month)
-            for month in self.wholesale_result_collection.distinct(
-                "settlement_month", {"customer_id": customer_id}
-            )
+            for month in self.wholesale_result_collection.database["wholesale_settlement_monthly"].distinct("_id")
             if isinstance(month, str) and len(month) == 7
         }
-        return sorted(curve_months & wholesale_months)
+        return sorted(curve_months & source_months)
 
     def _calculate_single_wholesale_month(
         self,

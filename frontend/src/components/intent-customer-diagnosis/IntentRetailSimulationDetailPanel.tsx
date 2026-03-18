@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+﻿import React, { useRef, useState } from 'react';
 import {
     Alert,
     Box,
@@ -86,6 +86,15 @@ const TEXT = {
 const formatYuan = (val: number): string => val.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const formatMwh = (val: number): string => val.toLocaleString('zh-CN', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 const formatPrice = (val: number): string => val.toLocaleString('zh-CN', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+const formatTooltipValue = (value: number | string): string | number => {
+    if (typeof value === 'number') {
+        return value.toLocaleString('zh-CN', {
+            minimumFractionDigits: 3,
+            maximumFractionDigits: 3,
+        });
+    }
+    return value;
+};
 const profitColor = (val: number): string => (val >= 0 ? '#4caf50' : '#f44336');
 const UNIT_YUAN = '\u5143';
 const UNIT_YUAN_PER_MWH = '\u5143/MWh';
@@ -299,14 +308,14 @@ const IntentRetailSimulationDetailPanel: React.FC<Props> = ({ detail, loading, e
 
                         {renderInfoCard(TEXT.priceCheck, <>
                             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.2 }}>
-                                <Typography variant="caption" color="text.secondary">{'校核状态'}</Typography>
+                                <Typography variant="caption" color="text.secondary">{TEXT.calibrationStatus}</Typography>
                                 {pm.price_ratio_adjusted ? (
                                     <Box sx={{ px: 0.6, py: 0.1, bgcolor: 'warning.50', color: 'warning.dark', borderRadius: 0.5, border: '1px solid', borderColor: 'warning.100', fontSize: '12px', fontWeight: 700 }}>
-                                        {'比例调整已应用'}
+                                        {TEXT.ratioAdjustedApplied}
                                     </Box>
                                 ) : (
                                     <Typography variant="caption" sx={{ fontSize: '12px', color: 'success.main', fontWeight: 700 }}>
-                                        {'正常'}
+                                        {TEXT.normalStatus}
                                     </Typography>
                                 )}
                             </Box>
@@ -418,7 +427,7 @@ const IntentRetailSimulationDetailPanel: React.FC<Props> = ({ detail, loading, e
                                 <XAxis dataKey="period" tick={{ fontSize: 10 }} interval={isFullscreen ? 1 : 3} />
                                 <YAxis yAxisId="left" label={{ value: 'MWh', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} tick={{ fontSize: 10 }} />
                                 <YAxis yAxisId="right" orientation="right" label={{ value: UNIT_YUAN_PER_MWH, angle: 90, position: 'insideRight', style: { fontSize: 10 } }} tick={{ fontSize: 10 }} />
-                                <Tooltip />
+                                <Tooltip formatter={(value) => formatTooltipValue(value as number | string)} />
                                 <Legend />
                                 <Bar yAxisId="left" dataKey="load" name={TEXT.energy} barSize={20}>
                                     {chartData.map((entry, index) => <Cell key={`${entry.period}-${index}`} fill={(PERIOD_TYPE_COLORS[entry.periodType] || '#ccc') + '88'} />)}
@@ -503,7 +512,7 @@ const IntentRetailSimulationDetailPanel: React.FC<Props> = ({ detail, loading, e
                                             <CartesianGrid strokeDasharray="3 3" vertical={false} />
                                             <XAxis dataKey="date" tick={{ fontSize: 10 }} interval={isDailyLeftFullscreen ? 1 : 2} />
                                             <YAxis tick={{ fontSize: 10 }} label={{ value: UNIT_YUAN_PER_MWH, angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
-                                            <Tooltip />
+                                            <Tooltip formatter={(value) => formatTooltipValue(value as number | string)} />
                                             <Legend />
                                             <Line type="monotone" dataKey="wholesaleAvgPrice" name={TEXT.wholesaleUnitPrice} stroke="#1565c0" strokeWidth={2} dot={{ r: 2 }} />
                                             <Line type="monotone" dataKey="retailAvgPrice" name={TEXT.retailUnitPrice} stroke="#2e7d32" strokeWidth={2} dot={{ r: 2 }} />
@@ -522,7 +531,7 @@ const IntentRetailSimulationDetailPanel: React.FC<Props> = ({ detail, loading, e
                                             <XAxis dataKey="date" tick={{ fontSize: 10 }} interval={isDailyRightFullscreen ? 1 : 2} />
                                             <YAxis yAxisId="left" tick={{ fontSize: 10 }} label={{ value: UNIT_YUAN_PER_MWH, angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
                                             <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10 }} label={{ value: '\u7d2f\u8ba1\u5747\u4ef7\u5dee', angle: 90, position: 'insideRight', style: { fontSize: 10 } }} />
-                                            <Tooltip />
+                                            <Tooltip formatter={(value) => formatTooltipValue(value as number | string)} />
                                             <Legend />
                                             <ReferenceLine yAxisId="left" y={0} stroke="#999" strokeDasharray="3 3" />
                                             <Bar yAxisId="left" dataKey="spread" name={TEXT.spread}>
@@ -583,3 +592,5 @@ const IntentRetailSimulationDetailPanel: React.FC<Props> = ({ detail, loading, e
 };
 
 export default IntentRetailSimulationDetailPanel;
+
+
