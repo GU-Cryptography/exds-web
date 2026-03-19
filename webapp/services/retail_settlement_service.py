@@ -8,6 +8,8 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, Optional, List, Any, Union
 
+from bson import ObjectId
+
 from webapp.services.retail_price_service import retail_price_service
 from webapp.services.contract_service import ContractService
 from webapp.services.load_query_service import LoadQueryService
@@ -131,6 +133,12 @@ class RetailSettlementService:
 
         load_values = daily_curve.values  # 48个值 (MWh)
         total_load = sum(load_values)
+        estimated_monthly_mwh = self._estimate_monthly_energy_mwh(
+            customer_id=customer_id,
+            date_str=date_str,
+            contract=contract,
+            daily_total_mwh=total_load,
+        )
 
         # 4. 计算各时段最终价格
         if model_code.startswith("price_spread"):
@@ -139,12 +147,15 @@ class RetailSettlementService:
                 pricing_config, date_str, 
                 is_time_based_package=is_time_based_pkg,
                 total_load_mwh=total_load,
-                settlement_type=settlement_type
+                settlement_type=settlement_type,
+                floating_fee_divisor_mwh=(estimated_monthly_mwh if settlement_type == "daily" else None),
             )
         elif model_code.startswith("fixed_linked"):
             price_result = self._calculate_fixed_linked(
                 pricing_config, date_str,
-                settlement_type=settlement_type
+                total_load_mwh=total_load,
+                settlement_type=settlement_type,
+                floating_fee_divisor_mwh=(estimated_monthly_mwh if settlement_type == "daily" else None),
             )
         elif model_code.startswith("reference_linked"):
             is_time_based_pkg = model_code.endswith("_time") and not model_code.endswith("_non_time")
@@ -152,7 +163,8 @@ class RetailSettlementService:
                 pricing_config, date_str,
                 is_time_based_package=is_time_based_pkg,
                 total_load_mwh=total_load,
-                settlement_type=settlement_type
+                settlement_type=settlement_type,
+                floating_fee_divisor_mwh=(estimated_monthly_mwh if settlement_type == "daily" else None),
             )
         elif model_code.startswith("single_comprehensive"):
             price_result = self._calculate_single_comprehensive(
@@ -432,7 +444,8 @@ class RetailSettlementService:
         date_str: str,
         is_time_based_package: bool = True,
         total_load_mwh: float = 0.0,
-        settlement_type: str = "daily"
+        settlement_type: str = "daily",
+        floating_fee_divisor_mwh: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         价差分成类定价计算
@@ -481,8 +494,9 @@ class RetailSettlementService:
         # 计算摊分到每kWh的浮动费用
         floating_fee_per_kwh = 0.0
         floating_fee = float(pricing_config.get("floating_fee", 0) or 0)
-        if floating_fee > 0 and total_load_mwh > 0:
-            floating_fee_per_kwh = floating_fee / (total_load_mwh * 1000.0)
+        fee_divisor_mwh = floating_fee_divisor_mwh if (floating_fee_divisor_mwh and floating_fee_divisor_mwh > 0) else total_load_mwh
+        if floating_fee > 0 and fee_divisor_mwh > 0:
+            floating_fee_per_kwh = floating_fee / (fee_divisor_mwh * 1000.0)
 
         use_base_only_ratio_adjustment = self._should_exclude_floating_from_463(date_str)
         final_prices_48 = None
@@ -562,7 +576,9 @@ class RetailSettlementService:
         self,
         pricing_config: Dict[str, Any],
         date_str: str,
-        settlement_type: str = "daily"
+        total_load_mwh: float = 0.0,
+        settlement_type: str = "daily",
+        floating_fee_divisor_mwh: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         固定价+联动类定价计算 (fixed_linked_*)
@@ -576,6 +592,10 @@ class RetailSettlementService:
             "valley": float(pricing_config.get("fixed_price_valley", 0) or 0),
             "deep": float(pricing_config.get("fixed_price_deep_valley", 0) or 0),
         }
+        fixed_price_value = float(pricing_config.get("fixed_price_value", 0) or 0)
+        if fixed_price_value > 0 and all(abs(v) < 1e-12 for v in fixed.values()):
+            # 兼容 non_time 模型仅传 fixed_price_value 的情况
+            fixed = {k: fixed_price_value for k in DEFAULT_RATIOS}
 
         # 第一阶段：固定价校核 (满足 463 号文)
         adjusted_fixed, was_adjusted_base = self._adjust_price_ratios(fixed, date_str)
@@ -584,6 +604,10 @@ class RetailSettlementService:
         linked_ratio = float(pricing_config.get("linked_ratio", 0) or 0) / 100.0
         linked_target = pricing_config.get("linked_target", "real_time_avg")
         target_data = self._get_linked_target_prices(linked_target, date_str, settlement_type=settlement_type)
+        floating = float(pricing_config.get("floating_price", 0) or 0)
+        floating_fee = float(pricing_config.get("floating_fee", 0) or 0)
+        fee_divisor_mwh = floating_fee_divisor_mwh if (floating_fee_divisor_mwh and floating_fee_divisor_mwh > 0) else total_load_mwh
+        floating_fee_per_kwh = (floating_fee / (fee_divisor_mwh * 1000.0)) if (floating_fee > 0 and fee_divisor_mwh > 0) else 0.0
 
         # 第二阶段：现货联动叠加 (支持 48 点向量)
         tou_48 = self._get_tou_48(date_str)
@@ -600,7 +624,7 @@ class RetailSettlementService:
             else:
                 tp = target_data.get(pkey, 0.0)
                 
-            final_prices_48[i] = fp * (1 - linked_ratio) + tp * linked_ratio
+            final_prices_48[i] = fp * (1 - linked_ratio) + tp * linked_ratio + floating + floating_fee_per_kwh
 
         # 聚合 5 时段展示价 (算术均值，仅用于显示)
         prices_5 = {}
@@ -633,7 +657,8 @@ class RetailSettlementService:
         date_str: str,
         is_time_based_package: bool = True,
         total_load_mwh: float = 0.0,
-        settlement_type: str = "daily"
+        settlement_type: str = "daily",
+        floating_fee_divisor_mwh: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         参考价+联动类定价计算 (reference_linked_*)
@@ -668,7 +693,8 @@ class RetailSettlementService:
         # 3. 混合计算
         floating = float(pricing_config.get("floating_price", 0) or 0)
         floating_fee = float(pricing_config.get("floating_fee", 0) or 0)
-        floating_fee_per_kwh = (floating_fee / (total_load_mwh * 1000.0)) if (floating_fee > 0 and total_load_mwh > 0) else 0.0
+        fee_divisor_mwh = floating_fee_divisor_mwh if (floating_fee_divisor_mwh and floating_fee_divisor_mwh > 0) else total_load_mwh
+        floating_fee_per_kwh = (floating_fee / (fee_divisor_mwh * 1000.0)) if (floating_fee > 0 and fee_divisor_mwh > 0) else 0.0
 
         tou_48 = self._get_tou_48(date_str)
         final_prices_48 = [0.0] * 48
@@ -774,6 +800,104 @@ class RetailSettlementService:
         """
         _ = date_str
         return dict(DEFAULT_RATIOS)
+
+    @staticmethod
+    def _normalize_customer_no(raw_value: Any) -> str:
+        """统一 customer_no，兼容 Excel 导入后的 12345.0 形式。"""
+        if raw_value is None:
+            return ""
+        text = str(raw_value).strip()
+        if not text:
+            return ""
+        if text.endswith(".0"):
+            try:
+                return str(int(float(text)))
+            except (ValueError, TypeError):
+                return text
+        return text
+
+    def _estimate_monthly_energy_mwh(
+        self,
+        customer_id: str,
+        date_str: str,
+        contract: Dict[str, Any],
+        daily_total_mwh: float,
+    ) -> float:
+        """
+        估算客户当月总电量（MWh），用于在日清阶段摊分月度浮动费用。
+        优先级：
+        1) customer_monthly_energy 当月已导入值
+        2) 合同购电量按合同月份平均
+        3) 当日电量 * 当月天数
+        """
+        month_key = date_str[:7]
+        contract_customer_name = str(contract.get("customer_name") or "").strip()
+
+        # 1) 月度电量数据（优先）
+        try:
+            energy_doc = self.db["customer_monthly_energy"].find_one(
+                {"_id": month_key},
+                {"records.customer_name": 1, "records.customer_no": 1, "records.energy_mwh": 1},
+            )
+            records = list((energy_doc or {}).get("records") or [])
+            if records:
+                monthly_by_name = 0.0
+                if contract_customer_name:
+                    for rec in records:
+                        if str(rec.get("customer_name") or "").strip() == contract_customer_name:
+                            monthly_by_name += float(rec.get("energy_mwh") or 0.0)
+                if monthly_by_name > 0:
+                    return monthly_by_name
+
+                # 按 customer_no 再匹配一次（避免名称不一致）
+                customer_nos: set[str] = set()
+                try:
+                    archive = self.db["customer_archives"].find_one(
+                        {"_id": ObjectId(customer_id)},
+                        {"accounts.account_id": 1},
+                    )
+                    for acc in (archive or {}).get("accounts", []):
+                        normalized = self._normalize_customer_no(acc.get("account_id"))
+                        if normalized:
+                            customer_nos.add(normalized)
+                except Exception:
+                    customer_nos = set()
+
+                if customer_nos:
+                    monthly_by_no = 0.0
+                    for rec in records:
+                        rec_no = self._normalize_customer_no(rec.get("customer_no"))
+                        if rec_no and rec_no in customer_nos:
+                            monthly_by_no += float(rec.get("energy_mwh") or 0.0)
+                    if monthly_by_no > 0:
+                        return monthly_by_no
+        except Exception as exc:
+            logger.warning("读取 customer_monthly_energy 失败，转入回退估算: %s", exc)
+
+        # 2) 合同购电量按合同月平均（合同值为 kWh）
+        try:
+            contract_kwh = float(contract.get("purchasing_electricity_quantity") or 0.0)
+            start_dt = contract.get("purchase_start_month")
+            end_dt = contract.get("purchase_end_month")
+            if contract_kwh > 0 and isinstance(start_dt, datetime) and isinstance(end_dt, datetime):
+                month_span = (end_dt.year - start_dt.year) * 12 + (end_dt.month - start_dt.month) + 1
+                if month_span > 0:
+                    return contract_kwh / 1000.0 / month_span
+        except Exception:
+            pass
+
+        # 3) 当日电量按当月天数外推
+        try:
+            current = datetime.strptime(date_str, "%Y-%m-%d")
+            month_start = current.replace(day=1)
+            next_month = (month_start + timedelta(days=32)).replace(day=1)
+            days_in_month = (next_month - month_start).days
+            if daily_total_mwh > 0 and days_in_month > 0:
+                return daily_total_mwh * days_in_month
+        except Exception:
+            pass
+
+        return max(daily_total_mwh, 0.0)
 
     def _should_exclude_floating_from_463(self, date_str: str) -> bool:
         """2026-02 起，浮动价/浮动费折价不纳入 463 比例校验。"""

@@ -102,6 +102,7 @@ class RetailMonthlySettlementService:
             result = self.retail_service._calculate_fixed_linked(
                 pricing_config,
                 date_str,
+                total_load_mwh=total_energy,
                 settlement_type="monthly",
             )
         elif model_code.startswith("reference_linked"):
