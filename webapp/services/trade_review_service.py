@@ -327,7 +327,7 @@ class TradeReviewService:
         historical_map = self._load_historical_within_month_net(delivery_date, trade_date)
         current_day_map, price_map, count_map, volume_map = self._load_trade_day_aggregates(records)
         period_profit_map = self._build_period_profit_map(records, spot_price_map)
-        market_price_map = self._load_contract_period_prices(delivery_date, "月内")
+        market_price_map = self._load_marketized_annual_monthly_weighted_prices(delivery_date)
         load_map, load_source = self._load_target_load_curve(delivery_date)
 
         rows: List[ExecutionChartRow] = []
@@ -500,24 +500,60 @@ class TradeReviewService:
                 result[period] = self._safe_float(item.get("quantity_mwh"))
         return result
 
-    def _load_contract_period_prices(self, delivery_date: str, contract_period: str) -> Dict[int, Optional[float]]:
-        doc = self.contracts_collection.find_one(
-            {
-                "date": delivery_date,
-                "entity": "全市场",
-                "contract_type": "整体",
-                "contract_period": contract_period,
-            },
-            {"_id": 0, "periods": 1},
+    def _load_marketized_annual_monthly_weighted_prices(self, delivery_date: str) -> Dict[int, Optional[float]]:
+        docs = list(
+            self.contracts_collection.find(
+                {
+                    "date": delivery_date,
+                    "entity": "售电公司",
+                    "contract_type": "市场化",
+                    "contract_period": {"$in": ["年度", "月度"]},
+                },
+                {"_id": 0, "contract_period": 1, "periods": 1},
+            )
         )
+
+        period_price_qty: Dict[str, Dict[int, Tuple[Optional[float], float]]] = {"年度": {}, "月度": {}}
+        for doc in docs:
+            period_key = str(doc.get("contract_period") or "")
+            if period_key not in period_price_qty:
+                continue
+            target = period_price_qty[period_key]
+            for item in doc.get("periods", []):
+                period = int(item.get("period") or 0)
+                if period <= 0:
+                    continue
+                price_raw = item.get("price_yuan_per_mwh")
+                price = float(price_raw) if price_raw is not None else None
+                qty = self._safe_float(item.get("quantity_mwh"))
+                target[period] = (price, qty)
+
         result: Dict[int, Optional[float]] = {}
-        if not doc:
-            return result
-        for item in doc.get("periods", []):
-            period = int(item.get("period") or 0)
-            price = item.get("price_yuan_per_mwh")
-            if period > 0 and price is not None:
-                result[period] = round(float(price), 3)
+        for period in range(1, 49):
+            annual_price, annual_qty = period_price_qty["年度"].get(period, (None, 0.0))
+            monthly_price, monthly_qty = period_price_qty["月度"].get(period, (None, 0.0))
+
+            weighted_sum = 0.0
+            total_qty = 0.0
+            if annual_price is not None and annual_qty > 0:
+                weighted_sum += annual_price * annual_qty
+                total_qty += annual_qty
+            if monthly_price is not None and monthly_qty > 0:
+                weighted_sum += monthly_price * monthly_qty
+                total_qty += monthly_qty
+
+            if total_qty > 0:
+                result[period] = round(weighted_sum / total_qty, 3)
+                continue
+
+            candidates = [price for price in [annual_price, monthly_price] if price is not None]
+            if not candidates:
+                result[period] = None
+            elif len(candidates) == 1:
+                result[period] = round(candidates[0], 3)
+            else:
+                result[period] = round(sum(candidates) / 2, 3)
+
         return result
 
     def _load_mechanism_quantities(self, delivery_date: str) -> Dict[int, float]:
@@ -730,6 +766,7 @@ class TradeReviewService:
     ) -> OperationDetailResponse:
         snapshot_records = self._build_post_operation_snapshot_v2(all_records, operation)
         load_map, load_source = self._load_target_load_curve(delivery_date)
+        market_price_map = self._load_marketized_annual_monthly_weighted_prices(delivery_date)
         operation_record_keys = {record["record_key"] for record in operation["records"]}
 
         chart_rows: List[OperationChartRow] = []
@@ -744,6 +781,7 @@ class TradeReviewService:
                     period=period,
                     buy_order_levels=buy_levels,
                     sell_order_levels=sell_levels,
+                    market_monthly_price=market_price_map.get(period),
                     spot_price=spot_price_map.get(period),
                     actual_or_forecast_load_mwh=load_map.get(period),
                     load_source=load_source,

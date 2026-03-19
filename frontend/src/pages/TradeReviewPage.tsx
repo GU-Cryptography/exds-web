@@ -113,6 +113,7 @@ const EmptyState: React.FC<{ tradeDate: string }> = ({ tradeDate }) => (
 
 type ExecutionPriceSeriesKey = 'trade_avg_price' | 'market_monthly_price' | 'spot_price';
 type ExecutionVolumeSeriesKey = 'actual_or_forecast_load_mwh' | 'annual_monthly_mwh' | 'monthly_mwh' | 'mechanism_mwh' | 'historical_buy_mwh' | 'historical_sell_mwh' | 'trade_day_buy_mwh' | 'trade_day_sell_mwh' | 'final_position_mwh';
+type OperationPriceSeriesKey = 'spot_price' | 'market_monthly_price';
 
 const TRADE_PRICE_BUY_COLOR = '#43a047';
 const TRADE_PRICE_SELL_COLOR = '#e53935';
@@ -120,7 +121,7 @@ const TRADE_PRICE_SELL_COLOR = '#e53935';
 const EXECUTION_PRICE_SERIES_META: Record<ExecutionPriceSeriesKey, { label: string; color: string }> = {
     trade_avg_price: { label: '成交均价', color: TRADE_PRICE_BUY_COLOR },
     spot_price: { label: '现货价格', color: '#90caf9' },
-    market_monthly_price: { label: '市场均价', color: '#ffe082' },
+    market_monthly_price: { label: '年度月度价格', color: '#ffe082' },
 };
 
 const EXECUTION_VOLUME_SERIES_META: Record<ExecutionVolumeSeriesKey, { label: string; color: string }> = {
@@ -146,7 +147,7 @@ const DetailedExecutionTooltipContent: React.FC<{ row: any; label: number | stri
             <Box sx={{ display: 'grid', gap: 0.75 }}>
                 <Typography variant="body2" sx={{ color: '#0f172a' }}>成交均价：<Box component="span" sx={{ fontWeight: 700 }}>{formatNumber(row.trade_avg_price, 3)} 元/MWh</Box>（{row.trade_count ?? 0}次）</Typography>
                 <Typography variant="body2" sx={{ color: '#334155' }}>现货价格：{formatNumber(row.spot_price, 3)} 元/MWh</Typography>
-                <Typography variant="body2" sx={{ color: '#334155' }}>市场均价：{formatNumber(row.market_monthly_price, 3)} 元/MWh</Typography>
+                <Typography variant="body2" sx={{ color: '#334155' }}>年度月度价格：{formatNumber(row.market_monthly_price, 3)} 元/MWh</Typography>
             </Box>
             <Box sx={{ borderTop: '1px dashed rgba(148, 163, 184, 0.7)', my: 1.25 }} />
             <Box sx={{ display: 'grid', gap: 0.75 }}>
@@ -169,6 +170,10 @@ const DetailedExecutionTooltip: React.FC<any> = ({ active, payload, label }) => 
 
 const OPERATION_BUY_COLORS = ['#1b5e20', '#2e7d32', '#43a047', '#66bb6a', '#81c784'];
 const OPERATION_SELL_COLORS = ['#b71c1c', '#c62828', '#e53935', '#ef5350', '#ef9a9a'];
+const OPERATION_PRICE_SERIES_META: Record<OperationPriceSeriesKey, { label: string; color: string; dash?: string }> = {
+    spot_price: { label: '实时价格', color: '#1e88e5', dash: '6 4' },
+    market_monthly_price: { label: '年度月度价格', color: '#f59e0b' },
+};
 
 const OperationChartTooltip: React.FC<any> = ({ active, payload, label }) => {
     if (!active || !payload || payload.length === 0) return null;
@@ -196,6 +201,9 @@ const OperationChartTooltip: React.FC<any> = ({ active, payload, label }) => {
                 {renderPriceLines('卖', row.sell_order_levels)}
                 <Typography variant="body2" sx={{ color: '#334155' }}>
                     实时价格：{row.spot_price === null ? '-' : `${formatNumber(row.spot_price, 3)} 元/MWh`}
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#334155' }}>
+                    年度月度价格：{row.market_monthly_price === null ? '-' : `${formatNumber(row.market_monthly_price, 3)} 元/MWh`}
                 </Typography>
             </Box>
             <Box sx={{ borderTop: '1px dashed rgba(148, 163, 184, 0.7)', my: 1 }} />
@@ -235,6 +243,7 @@ export const TradeReviewPage: React.FC = () => {
 
     const { seriesVisibility: executionPriceVisibility, handleLegendClick: handleExecutionPriceLegendClick } = useSelectableSeries<ExecutionPriceSeriesKey>({ trade_avg_price: true, spot_price: true, market_monthly_price: false });
     const { seriesVisibility: executionVolumeVisibility, handleLegendClick: handleExecutionVolumeLegendClick } = useSelectableSeries<ExecutionVolumeSeriesKey>({ actual_or_forecast_load_mwh: true, annual_monthly_mwh: true, monthly_mwh: true, mechanism_mwh: true, historical_buy_mwh: true, historical_sell_mwh: true, trade_day_buy_mwh: true, trade_day_sell_mwh: true, final_position_mwh: true });
+    const { seriesVisibility: operationPriceVisibility, handleLegendClick: handleOperationPriceLegendClick } = useSelectableSeries<OperationPriceSeriesKey>({ spot_price: true, market_monthly_price: false });
 
     useEffect(() => {
         const loadTradeDates = async () => {
@@ -352,6 +361,7 @@ export const TradeReviewPage: React.FC = () => {
             const flattened: Record<string, number | null> = {
                 period: row.period,
                 actual_or_forecast_load_mwh: row.actual_or_forecast_load_mwh ?? null,
+                market_monthly_price: row.market_monthly_price ?? null,
                 spot_price: row.spot_price ?? null,
             };
 
@@ -453,16 +463,18 @@ export const TradeReviewPage: React.FC = () => {
             const levelPrices = operationLevelConfig
                 .map((level) => row[level.priceKey])
                 .filter((value): value is number => value !== null && value !== undefined && !Number.isNaN(value));
-            return row.spot_price !== null && row.spot_price !== undefined && !Number.isNaN(row.spot_price)
-                ? [...levelPrices, row.spot_price]
-                : levelPrices;
+            const extraPrices = [
+                operationPriceVisibility.spot_price ? row.spot_price : null,
+                operationPriceVisibility.market_monthly_price ? row.market_monthly_price : null,
+            ].filter((value): value is number => value !== null && value !== undefined && !Number.isNaN(value));
+            return [...levelPrices, ...extraPrices];
         });
         if (values.length === 0) return ['auto', 'auto'];
         const min = Math.min(...values);
         const max = Math.max(...values);
         const padding = Math.max((max - min) * 0.12, 5);
         return [Math.floor(min - padding), Math.ceil(max + padding)];
-    }, [operationChartData, operationLevelConfig]);
+    }, [operationChartData, operationLevelConfig, operationPriceVisibility]);
     const operationVolumeDomain = useMemo<[number, number]>(() => {
         const values = operationChartData.flatMap((row: any) => [
             row.actual_or_forecast_load_mwh ?? null,
@@ -684,7 +696,7 @@ export const TradeReviewPage: React.FC = () => {
                                                     <YAxis yAxisId="price" orientation="right" domain={executionPriceDomain} label={{ value: '交易价格', angle: -90, position: 'insideRight' }} />
                                                     <Tooltip content={<DetailedExecutionTooltip />} cursor={{ stroke: '#9e9e9e', strokeDasharray: '3 3' }} wrapperStyle={{ zIndex: 1401 }} />
                                                     {executionPriceVisibility.trade_avg_price && <><Line yAxisId="price" type="linear" dataKey="trade_avg_price_buy" name="成交均价" stroke={TRADE_PRICE_BUY_COLOR} strokeWidth={0} connectNulls={false} dot={executionPriceDot} activeDot={false} /><Line yAxisId="price" type="linear" dataKey="trade_avg_price_sell" name="成交均价" stroke={TRADE_PRICE_SELL_COLOR} strokeWidth={0} connectNulls={false} dot={executionPriceDot} activeDot={false} legendType="none" /></>}
-                                                    {executionPriceVisibility.market_monthly_price && <Line yAxisId="price" type="monotone" dataKey="market_monthly_price" name="市场均价" stroke={EXECUTION_PRICE_SERIES_META.market_monthly_price.color} strokeWidth={1.5} connectNulls dot={false} activeDot={false} />}
+                                                    {executionPriceVisibility.market_monthly_price && <Line yAxisId="price" type="monotone" dataKey="market_monthly_price" name="年度月度价格" stroke={EXECUTION_PRICE_SERIES_META.market_monthly_price.color} strokeWidth={1.5} connectNulls dot={false} activeDot={false} />}
                                                     {executionPriceVisibility.spot_price && <Line yAxisId="price" type="monotone" dataKey="spot_price" name="现货价格" stroke={EXECUTION_PRICE_SERIES_META.spot_price.color} strokeWidth={1.5} connectNulls dot={false} activeDot={false} />}
                                                 </ComposedChart>
                                             </ResponsiveContainer>
@@ -989,8 +1001,15 @@ export const TradeReviewPage: React.FC = () => {
                                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}><Box sx={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: OPERATION_SELL_COLORS[2] }} /><Typography variant="body2">卖出挂单价格</Typography></Box>
                                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}><Box sx={{ width: 12, height: 12, backgroundColor: OPERATION_BUY_COLORS[2] }} /><Typography variant="body2">买入挂单电量</Typography></Box>
                                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}><Box sx={{ width: 12, height: 12, backgroundColor: OPERATION_SELL_COLORS[2] }} /><Typography variant="body2">卖出挂单电量</Typography></Box>
-                                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}><Box sx={{ width: 16, borderTop: '2px dashed #1e88e5' }} /><Typography variant="body2">实时价格</Typography></Box>
                                                     <Typography variant="body2" color="text.secondary">同色系深浅代表不同价格档</Typography>
+                                                </Box>
+                                                <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, px: 0.5, pb: 1 }}>
+                                                    {(Object.keys(OPERATION_PRICE_SERIES_META) as OperationPriceSeriesKey[]).map((key) => (
+                                                        <Box key={key} onClick={() => handleOperationPriceLegendClick({ dataKey: key } as any)} sx={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}>
+                                                            <Checkbox checked={operationPriceVisibility[key]} size="small" sx={{ p: 0.5, color: OPERATION_PRICE_SERIES_META[key].color, '&.Mui-checked': { color: OPERATION_PRICE_SERIES_META[key].color } }} />
+                                                            <Typography variant="body2" sx={{ color: operationPriceVisibility[key] ? 'text.primary' : 'text.disabled', mr: 1 }}>{OPERATION_PRICE_SERIES_META[key].label}</Typography>
+                                                        </Box>
+                                                    ))}
                                                 </Box>
                                                 <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 1 }}>
                                                     <Box sx={{ height: '40%', minHeight: 0 }}>
@@ -1000,7 +1019,8 @@ export const TradeReviewPage: React.FC = () => {
                                                                 <XAxis {...operationXAxisProps} hide />
                                                                 <YAxis yAxisId="price" orientation="right" domain={operationPriceDomain} />
                                                                 <Tooltip content={<OperationChartTooltip />} />
-                                                                <Line yAxisId="price" type="monotone" dataKey="spot_price" name={'\u5b9e\u65f6\u4ef7\u683c'} stroke="#1e88e5" strokeDasharray="6 4" dot={false} />
+                                                                {operationPriceVisibility.spot_price && <Line yAxisId="price" type="monotone" dataKey="spot_price" name={'实时价格'} stroke={OPERATION_PRICE_SERIES_META.spot_price.color} strokeDasharray={OPERATION_PRICE_SERIES_META.spot_price.dash} dot={false} />}
+                                                                {operationPriceVisibility.market_monthly_price && <Line yAxisId="price" type="monotone" dataKey="market_monthly_price" name={'年度月度价格'} stroke={OPERATION_PRICE_SERIES_META.market_monthly_price.color} dot={false} />}
                                                                 {operationLevelConfig.map((level) => (
                                                                     <Scatter key={level.priceKey} yAxisId="price" dataKey={level.priceKey} fill={level.color} stroke="#ffffff" strokeWidth={1.2} />
                                                                 ))}

@@ -90,7 +90,7 @@ class ExecutionChartRow(BaseModel):
     trade_avg_price: Optional[float] = Field(None, description="成交均价")
     trade_count: int = Field(0, description="成交次数")
     trade_volume_mwh: float = Field(0.0, description="累计成交量")
-    market_monthly_price: Optional[float] = Field(None, description="市场月内均价")
+    market_monthly_price: Optional[float] = Field(None, description="市场化年度月度加权均价")
     spot_price: Optional[float] = Field(None, description="现货价格")
     period_profit_amount: Optional[float] = Field(None, description="该时段交易收益")
 
@@ -128,6 +128,7 @@ class OperationChartRow(BaseModel):
     period: int = Field(..., ge=1, le=48, description="时段")
     buy_order_levels: List[OrderLevelItem] = Field(default_factory=list, description="买入挂单档位")
     sell_order_levels: List[OrderLevelItem] = Field(default_factory=list, description="卖出挂单档位")
+    market_monthly_price: Optional[float] = Field(None, description="年度月度价格")
     spot_price: Optional[float] = Field(None, description="实时价格")
     actual_or_forecast_load_mwh: Optional[float] = Field(None, description="实际或预测电量")
     load_source: Optional[str] = Field(None, description="actual / forecast")

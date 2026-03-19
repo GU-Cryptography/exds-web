@@ -112,6 +112,7 @@ export interface OperationChartRow {
     period: number;
     buy_order_levels: OrderLevelItem[];
     sell_order_levels: OrderLevelItem[];
+    market_monthly_price: number | null;
     spot_price: number | null;
     actual_or_forecast_load_mwh: number | null;
     load_source: string | null;
