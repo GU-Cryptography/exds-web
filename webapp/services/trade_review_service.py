@@ -153,6 +153,8 @@ class TradeReviewService:
         da_map = {point.period: point.price for point in da_curve.points}
         da_econ_map = {point.period: point.price for point in da_econ_curve.points}
         declared_map = self._load_day_ahead_declared_volume_map(target_date)
+        actual_load_map = self._load_aggregate_actual_curve(target_date)
+        forecast_gap_min_map = self._load_forecast_curve_from_service(target_date)
         tou_timeline_48 = get_tou_timeline_by_date(target_dt, points=48)
 
         chart_rows: List[DayAheadReviewChartRow] = []
@@ -166,6 +168,8 @@ class TradeReviewService:
             time_str = f"{hour:02d}:{minute:02d}"
             period_type = tou_timeline_48[period - 1] if len(tou_timeline_48) == 48 else "平段"
             declared_mwh = round(float(declared_map.get(period, 0.0) or 0.0), 6)
+            actual_load_mwh = actual_load_map.get(period)
+            forecast_gap_min_mwh = forecast_gap_min_map.get(period)
             rt_price = rt_map.get(period)
             da_price = da_map.get(period)
             da_econ_price = da_econ_map.get(period)
@@ -183,6 +187,8 @@ class TradeReviewService:
                     time=time_str,
                     period_type=period_type,
                     declared_mwh=declared_mwh,
+                    actual_load_mwh=round(actual_load_mwh, 3) if actual_load_mwh is not None else None,
+                    forecast_gap_min_mwh=round(forecast_gap_min_mwh, 3) if forecast_gap_min_mwh is not None else None,
                     price_rt=round(rt_price, 3) if rt_price is not None else None,
                     price_da=round(da_price, 3) if da_price is not None else None,
                     price_da_econ=round(da_econ_price, 3) if da_econ_price is not None else None,

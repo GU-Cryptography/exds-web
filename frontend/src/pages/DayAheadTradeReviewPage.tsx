@@ -15,6 +15,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { zhCN } from 'date-fns/locale';
 import { addDays, format } from 'date-fns';
 import {
+    Area,
     Bar,
     CartesianGrid,
     ComposedChart,
@@ -34,6 +35,7 @@ import { useSelectableSeries } from '../hooks/useSelectableSeries';
 import { useTouPeriodBackground } from '../hooks/useTouPeriodBackground';
 
 type PriceSeriesKey = 'price_rt' | 'price_da' | 'price_da_econ' | 'price_da_forecast';
+type VolumeSeriesKey = 'declared_mwh' | 'actual_load_mwh' | 'forecast_gap_min_mwh';
 
 const PRICE_SERIES_META: Record<PriceSeriesKey, { label: string; color: string }> = {
     price_rt: { label: '实时价格', color: '#f44336' },
@@ -43,6 +45,13 @@ const PRICE_SERIES_META: Record<PriceSeriesKey, { label: string; color: string }
 };
 
 const DECLARED_VOLUME_COLOR = '#26a69a';
+const ACTUAL_LOAD_BG_COLOR = '#90caf9';
+const FORECAST_LOAD_BG_COLOR = '#ffcc80';
+const VOLUME_SERIES_META: Record<VolumeSeriesKey, { label: string; color: string }> = {
+    declared_mwh: { label: '申报电量', color: DECLARED_VOLUME_COLOR },
+    actual_load_mwh: { label: '实际电量', color: ACTUAL_LOAD_BG_COLOR },
+    forecast_gap_min_mwh: { label: '预测电量', color: FORECAST_LOAD_BG_COLOR },
+};
 
 interface PriceForecastVersion {
     forecast_id: string;
@@ -120,6 +129,12 @@ const DayAheadExecutionTooltip: React.FC<any> = ({ active, payload, label }) => 
             <Typography variant="body2" sx={{ color: DECLARED_VOLUME_COLOR }}>
                 申报电量：<Box component="span" sx={{ fontWeight: 700 }}>{formatNumber(row.declared_mwh, 3)} MWh</Box>
             </Typography>
+            <Typography variant="body2" sx={{ color: ACTUAL_LOAD_BG_COLOR }}>
+                实际电量：<Box component="span" sx={{ fontWeight: 700 }}>{formatNumber(row.actual_load_mwh, 3)} MWh</Box>
+            </Typography>
+            <Typography variant="body2" sx={{ color: FORECAST_LOAD_BG_COLOR }}>
+                预测电量：<Box component="span" sx={{ fontWeight: 700 }}>{formatNumber(row.forecast_gap_min_mwh, 3)} MWh</Box>
+            </Typography>
         </Paper>
     );
 };
@@ -139,6 +154,11 @@ export const DayAheadTradeReviewPage: React.FC = () => {
         price_da: true,
         price_da_econ: true,
         price_da_forecast: true,
+    });
+    const { seriesVisibility: volumeSeriesVisibility, handleLegendClick: handleVolumeLegendClick } = useSelectableSeries<VolumeSeriesKey>({
+        declared_mwh: true,
+        actual_load_mwh: true,
+        forecast_gap_min_mwh: true,
     });
 
     const { isFullscreen, FullscreenEnterButton, FullscreenExitButton, FullscreenTitle, NavigationButtons } = useChartFullscreen({
@@ -363,9 +383,57 @@ export const DayAheadTradeReviewPage: React.FC = () => {
                                                 <YAxis label={{ value: '申报电量(MWh)', angle: -90, position: 'insideLeft' }} />
                                                 <Tooltip content={() => null} cursor={false} wrapperStyle={{ display: 'none' }} />
                                                 <ReferenceLine y={0} stroke="#94a3b8" />
-                                                <Bar dataKey="declared_mwh" name="申报电量" fill={DECLARED_VOLUME_COLOR} />
+                                                <Area
+                                                    type="monotone"
+                                                    dataKey="actual_load_mwh"
+                                                    name="实际电量"
+                                                    stroke="none"
+                                                    fill={ACTUAL_LOAD_BG_COLOR}
+                                                    fillOpacity={0.28}
+                                                    hide={!volumeSeriesVisibility.actual_load_mwh}
+                                                    isAnimationActive={false}
+                                                />
+                                                <Line
+                                                    type="monotone"
+                                                    dataKey="forecast_gap_min_mwh"
+                                                    name="预测电量"
+                                                    stroke={FORECAST_LOAD_BG_COLOR}
+                                                    strokeWidth={2}
+                                                    strokeDasharray="6 4"
+                                                    dot={false}
+                                                    hide={!volumeSeriesVisibility.forecast_gap_min_mwh}
+                                                    isAnimationActive={false}
+                                                />
+                                                <Bar
+                                                    dataKey="declared_mwh"
+                                                    name="申报电量"
+                                                    fill={DECLARED_VOLUME_COLOR}
+                                                    hide={!volumeSeriesVisibility.declared_mwh}
+                                                />
                                             </ComposedChart>
                                         </ResponsiveContainer>
+                                    </Box>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, pt: 0.25 }}>
+                                        {(Object.keys(VOLUME_SERIES_META) as VolumeSeriesKey[]).map((key) => (
+                                            <Box
+                                                key={key}
+                                                onClick={() => handleVolumeLegendClick({ dataKey: key } as any)}
+                                                sx={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
+                                            >
+                                                <Checkbox
+                                                    checked={volumeSeriesVisibility[key]}
+                                                    size="small"
+                                                    sx={{
+                                                        p: 0.5,
+                                                        color: VOLUME_SERIES_META[key].color,
+                                                        '&.Mui-checked': { color: VOLUME_SERIES_META[key].color },
+                                                    }}
+                                                />
+                                                <Typography variant="body2" sx={{ color: volumeSeriesVisibility[key] ? 'text.primary' : 'text.disabled', mr: 1 }}>
+                                                    {VOLUME_SERIES_META[key].label}
+                                                </Typography>
+                                            </Box>
+                                        ))}
                                     </Box>
                                 </Box>
                             </Box>

@@ -83,7 +83,7 @@ const menuItems: MenuItem[] = [
         ],
     },
     {
-        text: '市场预测',
+        text: '交易预测',
         icon: <QueryStatsOutlined />,
         subItems: [
             { text: '天气预测数据', path: '/basic-data/weather-data', icon: <AnalyticsOutlined /> },
@@ -108,7 +108,7 @@ const menuItems: MenuItem[] = [
         icon: <ShieldIcon />,
         subItems: [
             { text: '月内交易复盘', path: '/trade-review/monthly-trading-review', icon: <FunctionsOutlined /> },
-            { text: '现货交易复盘', path: '/trade-review/spot-review', icon: <BarChartOutlined /> },
+            { text: '日前交易复盘', path: '/trade-review/spot-review', icon: <BarChartOutlined /> },
         ],
     },
     {

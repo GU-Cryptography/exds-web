@@ -75,7 +75,7 @@ export const routeConfigs: RouteConfig[] = [
 
     // 交易复盘
     { path: '/trade-review/monthly-trading-review', title: '月内交易复盘', component: TradeReviewPage },
-    { path: '/trade-review/spot-review', title: '现货交易复盘', component: DayAheadTradeReviewPage },
+    { path: '/trade-review/spot-review', title: '日前交易复盘', component: DayAheadTradeReviewPage },
 
     // 结算管理
     { path: '/settlement/monthly-overview', title: '月度结算总览', component: MonthlySettlementOverviewPage },

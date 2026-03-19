@@ -56,6 +56,8 @@ export interface DayAheadReviewChartRow {
     time: string;
     period_type: string;
     declared_mwh: number;
+    actual_load_mwh?: number | null;
+    forecast_gap_min_mwh?: number | null;
     price_rt: number | null;
     price_da: number | null;
     price_da_econ: number | null;
