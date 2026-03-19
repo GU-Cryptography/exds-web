@@ -177,12 +177,12 @@ export const FixedLinkedFeeForm: React.FC<FixedLinkedFeeFormProps> = ({ control,
                       return '请输入有效的数字';
                     }
                     if (isTimeBased) {
-                      if (numValue < 10 || numValue > 20) {
-                        return '分时套餐联动电量比例应在10%-20%之间';
+                      if (numValue < 10) {
+                        return '分时套餐联动电量比例不得低于10%';
                       }
                     } else {
-                      if (numValue < 0 || numValue > 20) {
-                        return '不分时套餐联动电量比例应在0%-20%之间';
+                      if (numValue < 0) {
+                        return '不分时套餐联动电量比例不得低于0%';
                       }
                     }
                     return true;
@@ -195,7 +195,7 @@ export const FixedLinkedFeeForm: React.FC<FixedLinkedFeeFormProps> = ({ control,
                     type="number"
                     fullWidth
                     error={!!fieldState.error}
-                    helperText={fieldState.error?.message || (isTimeBased ? '10%-20%' : '不高于20%')}
+                    helperText={fieldState.error?.message || (isTimeBased ? '不低于10%' : '不低于0%')}
                     inputProps={{ step: 0.1 }}
                   />
                 )}

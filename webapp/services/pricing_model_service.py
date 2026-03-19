@@ -190,11 +190,11 @@ class PricingModelService:
             return ["联动电量比例必须是一个有效的数字"]
 
         if is_time_based:
-            if ratio_float < 10 or ratio_float > 20:
-                errors.append("分时套餐联动电量比例应在10%-20%之间")
+            if ratio_float < 10:
+                errors.append("分时套餐联动电量比例不得低于10%")
         else:
-            if ratio_float > 20:
-                errors.append("不分时套餐联动电量比例不得超过20%")
+            if ratio_float < 0:
+                errors.append("不分时套餐联动电量比例不得低于0%")
 
         return errors
 
