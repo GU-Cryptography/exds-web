@@ -2,12 +2,13 @@
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from webapp.models.settlement import SettlementVersion
 from webapp.services.retail_monthly_settlement_service import RetailMonthlySettlementService
 from webapp.services.retail_settlement_service import RetailSettlementService
+from webapp.api.dependencies.authz import require_permission
 
 router = APIRouter(prefix="/retail-settlement", tags=["Retail Settlement"])
 
@@ -36,7 +37,11 @@ class ResponseModel(BaseModel):
 
 
 @router.post("/calculate", response_model=ResponseModel)
-def calculate_retail_settlement(req: RetailCalculationRequest):
+def calculate_retail_settlement(
+    req: RetailCalculationRequest,
+    _ctx = Depends(require_permission("module:settlement_daily_overview:edit")),
+    _recalc_ctx = Depends(require_permission("settlement:recalc:execute")),
+):
     try:
         datetime.strptime(req.date, "%Y-%m-%d")
         result = service.calculate_all_customers_daily(
@@ -84,7 +89,12 @@ def get_retail_daily_settlement(
 
 
 @router.post("/monthly-calc", response_model=ResponseModel)
-def trigger_monthly_calc(req: MonthlyCalcRequest, background_tasks: BackgroundTasks):
+def trigger_monthly_calc(
+    req: MonthlyCalcRequest,
+    background_tasks: BackgroundTasks,
+    _ctx = Depends(require_permission("module:settlement_daily_overview:edit")),
+    _recalc_ctx = Depends(require_permission("settlement:recalc:execute")),
+):
     try:
         datetime.strptime(req.month, "%Y-%m")
     except ValueError:

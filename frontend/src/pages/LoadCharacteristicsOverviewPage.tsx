@@ -32,6 +32,7 @@ import {
     EnhancedTagDistribution, TagChangesResponse, ScatterDataItem, ScatterDataResponse
 } from '../api/loadCharacteristics';
 import { useTabContext } from '../contexts/TabContext';
+import { useAuth } from '../contexts/AuthContext';
 import LoadCharacteristicsDetailPage from './LoadCharacteristicsDetailPage';
 import { useDebounce } from '../hooks/useDebounce';
 
@@ -142,6 +143,8 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
     const { addTab } = useTabContext();
+    const { hasPermission } = useAuth();
+    const canManualAnalyze = hasPermission('module:analysis_load_characteristics:edit');
 
     const [analysisLoading, setAnalysisLoading] = useState(false);
 
@@ -196,6 +199,10 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
 
     // 手动特征分析
     const handleManualAnalyze = async () => {
+        if (!canManualAnalyze) {
+            alert('当前角色无修改权限（需要 module:analysis_load_characteristics:edit）');
+            return;
+        }
         if (!window.confirm('确定要手动触发全量客户特征分析吗？这可能需要一些时间。')) {
             return;
         }
@@ -731,25 +738,29 @@ const LoadCharacteristicsOverviewPage: React.FC = () => {
 
                     {/* 右侧：操作按钮 */}
                     <Box display="flex" gap={1} alignItems="center" sx={{ width: { xs: '100%', sm: 'auto' }, justifyContent: 'flex-end' }}>
-                        <Button
-                            variant="outlined"
-                            size="small"
-                            startIcon={analysisLoading ? <CircularProgress size={16} /> : <TrendingUpIcon />}
-                            onClick={handleManualAnalyze}
-                            disabled={loading || analysisLoading}
-                            sx={{
-                                height: 40,
-                                whiteSpace: 'nowrap',
-                                borderColor: 'divider',
-                                color: 'text.primary',
-                                '&:hover': {
-                                    borderColor: 'primary.main',
-                                    bgcolor: 'action.hover'
-                                }
-                            }}
-                        >
-                            {analysisLoading ? '执行中...' : '手动执行'}
-                        </Button>
+                        <Tooltip title={canManualAnalyze ? '' : '当前角色无修改权限（需要 module:analysis_load_characteristics:edit）'}>
+                            <span>
+                                <Button
+                                    variant="outlined"
+                                    size="small"
+                                    startIcon={analysisLoading ? <CircularProgress size={16} /> : <TrendingUpIcon />}
+                                    onClick={handleManualAnalyze}
+                                    disabled={loading || analysisLoading || !canManualAnalyze}
+                                    sx={{
+                                        height: 40,
+                                        whiteSpace: 'nowrap',
+                                        borderColor: 'divider',
+                                        color: 'text.primary',
+                                        '&:hover': {
+                                            borderColor: 'primary.main',
+                                            bgcolor: 'action.hover'
+                                        }
+                                    }}
+                                >
+                                    {analysisLoading ? '执行中...' : '手动执行'}
+                                </Button>
+                            </span>
+                        </Tooltip>
 
                         <Button
                             variant="outlined"

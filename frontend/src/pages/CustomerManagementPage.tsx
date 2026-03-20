@@ -47,8 +47,12 @@ import { CustomerDetailsDialog } from '../components/CustomerDetailsDialog';
 import { TagFilter, DeleteConfirmDialog } from '../components/customer';
 import { SyncConfirmDialog } from '../components/SyncConfirmDialog';
 import customerApi from '../api/customer';
+import { useAuth } from '../contexts/AuthContext';
 
 export const CustomerManagementPage: React.FC = () => {
+    const { hasPermission } = useAuth();
+    const canEdit = hasPermission('module:customer_profiles:edit');
+    const canDelete = canEdit && hasPermission('data:critical:delete');
     // 路由参数和导航
     const params = useParams<{ customerId?: string }>();
     const navigate = useNavigate();
@@ -216,6 +220,7 @@ export const CustomerManagementPage: React.FC = () => {
 
     // 操作处理
     const handleCreate = () => {
+        if (!canEdit) return;
         if (isMobile) {
             navigate('/customer/profiles/create');
         } else {
@@ -235,6 +240,7 @@ export const CustomerManagementPage: React.FC = () => {
     };
 
     const handleEdit = async (customer: CustomerListItem) => {
+        if (!canEdit) return;
         if (isMobile) {
             navigate(`/customer/profiles/edit/${customer.id}`);
         } else {
@@ -251,6 +257,7 @@ export const CustomerManagementPage: React.FC = () => {
     };
 
     const handleDeleteClick = (customer: CustomerListItem) => {
+        if (!canDelete) return;
         setCustomerToDelete(customer);
         setDeleteDialogOpen(true);
     };
@@ -287,6 +294,7 @@ export const CustomerManagementPage: React.FC = () => {
 
     // 从详情对话框处理编辑
     const handleEditFromDetails = (customerId: string) => {
+        if (!canEdit) return;
         if (isMobile) {
             navigate(`/customer/profiles/edit/${customerId}`);
         } else {
@@ -362,6 +370,7 @@ export const CustomerManagementPage: React.FC = () => {
 
     // 同步处理
     const handleOpenSync = async () => {
+        if (!canEdit) return;
         setLoading(true);
         try {
             const response = await getSyncPreview();
@@ -467,14 +476,16 @@ export const CustomerManagementPage: React.FC = () => {
                             </IconButton>
                         </Tooltip>
                         <Tooltip title="编辑">
-                            <IconButton size="small" onClick={() => handleEdit(customer)}>
+                            <IconButton size="small" onClick={() => handleEdit(customer)} disabled={!canEdit}>
                                 <EditIcon fontSize="small" />
                             </IconButton>
                         </Tooltip>
-                        <Tooltip title="删除">
-                            <IconButton size="small" onClick={() => handleDeleteClick(customer)} color="error">
+                        <Tooltip title={canDelete ? '删除' : '无权限（需要 data:critical:delete）'}>
+                            <span>
+                            <IconButton size="small" onClick={() => handleDeleteClick(customer)} color="error" disabled={!canDelete}>
                                 <DeleteIcon fontSize="small" />
                             </IconButton>
+                            </span>
                         </Tooltip>
                     </Box>
                 </Paper>
@@ -491,14 +502,16 @@ export const CustomerManagementPage: React.FC = () => {
                 </IconButton>
             </Tooltip>
             <Tooltip title="编辑">
-                <IconButton size="small" onClick={() => handleEdit(customer)}>
+                <IconButton size="small" onClick={() => handleEdit(customer)} disabled={!canEdit}>
                     <EditIcon fontSize="small" />
                 </IconButton>
             </Tooltip>
-            <Tooltip title="删除">
-                <IconButton size="small" onClick={() => handleDeleteClick(customer)}>
+            <Tooltip title={canDelete ? '删除' : '无权限（需要 data:critical:delete）'}>
+                <span>
+                <IconButton size="small" onClick={() => handleDeleteClick(customer)} disabled={!canDelete}>
                     <DeleteIcon fontSize="small" color="error" />
                 </IconButton>
+                </span>
             </Tooltip>
         </Box>
     );
@@ -764,15 +777,16 @@ export const CustomerManagementPage: React.FC = () => {
                         variant="contained"
                         color="primary"
                         onClick={handleCreate}
+                        disabled={!canEdit}
                     >
                         + 新增
                     </Button>
-                    <Tooltip title="同步交易平台48点测量点数据里的客户档案信息">
+                    <Tooltip title={canEdit ? '同步交易平台48点测量点数据里的客户档案信息' : '无权限（需要 module:customer_profiles:edit）'}>
                         <Button
                             variant="outlined"
                             startIcon={<SyncIcon />}
                             onClick={handleOpenSync}
-                            disabled={loading}
+                            disabled={loading || !canEdit}
                         >
                             同步数据
                         </Button>
@@ -956,7 +970,7 @@ export const CustomerManagementPage: React.FC = () => {
                 open={isDetailsDialogOpen}
                 customerId={selectedCustomerId}
                 onClose={handleCloseDetailsDialog}
-                onEdit={handleEditFromDetails}
+                onEdit={canEdit ? handleEditFromDetails : undefined}
             />
 
             <DeleteConfirmDialog

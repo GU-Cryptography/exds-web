@@ -39,6 +39,8 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
+    "auth:check": "..\\.venv\\Scripts\\python ..\\scripts\\check_auth_all.py",
+    "auth:check:frontend": "..\\.venv\\Scripts\\python ..\\scripts\\check_auth_frontend.py",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {

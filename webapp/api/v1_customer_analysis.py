@@ -11,6 +11,7 @@ from webapp.services.load_query_service import LoadQueryService, FusionStrategy
 from webapp.services.tou_service import get_tou_rule_by_date
 from webapp.models.load_models import TouUsage
 from webapp.tools.mongo import DATABASE
+from webapp.api.dependencies.authz import require_permission
 
 router = APIRouter()
 customer_service = CustomerService(DATABASE)
@@ -411,7 +412,8 @@ async def get_history_trend(
 async def trigger_ai_diagnose(
     customer_id: str = Path(..., description="Customer ID"),
     date: str = Query(..., description="Analysis Date"),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:analysis_customer_load:edit")),
 ):
     # Fetch recent load data (last 7 days to analyze weekly pattern and volatility)
     analysis_date = datetime.strptime(date, "%Y-%m-%d")
@@ -517,7 +519,8 @@ async def trigger_ai_diagnose(
 async def add_customer_tag(
     customer_id: str = Path(...),
     tag: TagOperationRequest = Body(...),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:analysis_customer_load:edit")),
 ):
     return customer_service.add_tag(customer_id, tag.dict(), current_user.username)
 
@@ -525,7 +528,8 @@ async def add_customer_tag(
 async def remove_customer_tag(
     customer_id: str = Path(...),
     tag_name: str = Path(...),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:analysis_customer_load:edit")),
 ):
     return customer_service.remove_tag(customer_id, tag_name, current_user.username)
 

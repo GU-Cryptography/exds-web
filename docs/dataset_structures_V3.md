@@ -1,4 +1,4 @@
-# 意向客户诊断模块数据集结构（V3）
+﻿# 意向客户诊断模块数据集结构（V3）
 
 ---
 
@@ -428,3 +428,128 @@
 
 - 该集合是“日前交易复盘”页面申报电量曲线与红点标注的核心数据源。
 - 盈亏计算中使用的申报电量即来自该集合重采样后的 48 时段序列。
+
+---
+
+## 9. 用户权限与认证数据集（1.1）
+
+本章节补充用户权限管理 1.1 相关的数据集合结构，依据当前实现：
+- `webapp/scripts/init_auth_data.py`
+- `webapp/api/v1_auth.py`
+- `webapp/models/auth.py`
+
+### 9.1 `auth_modules` - 模块字典
+
+用途：定义菜单模块、模块编码与路由归属，是 `module:{module_code}:{view/edit}` 的源头。
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `module_code` | `String` | 模块唯一编码（唯一索引），如 `customer_profiles` |
+| `module_name` | `String` | 模块显示名称 |
+| `menu_group` | `String` | 上级菜单分组 |
+| `route_paths` | `Array[String]` | 模块关联路由列表 |
+| `sort_order` | `Number` | 排序值 |
+| `is_active` | `Boolean` | 是否启用 |
+| `is_system` | `Boolean` | 是否系统内置 |
+| `seed_version` | `String` | 初始化版本标识（当前 `1.1`） |
+| `created_at` | `String(DateTime ISO)` | 创建时间 |
+| `updated_at` | `String(DateTime ISO)` | 更新时间 |
+
+索引：
+- `module_code`（唯一）
+- `(menu_group, sort_order)`
+
+### 9.2 `auth_permissions` - 权限点字典
+
+用途：存放模块两档权限、例外权限、以及为兼容后端保留的 legacy 动作级权限。
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `code` | `String` | 权限码（唯一索引），如 `module:customer_profiles:edit` |
+| `name` | `String` | 权限名称 |
+| `module` | `String` | 逻辑模块（模块码或 `exception`/legacy 域） |
+| `module_code` | `String \| null` | 模块权限时为模块码，例外/legacy 可为空 |
+| `action` | `String` | 动作（`view/edit/manage/create/...`） |
+| `permission_type` | `String` | `module_view/module_edit/exception/legacy_action` |
+| `is_exception` | `Boolean` | 是否例外权限 |
+| `is_system` | `Boolean` | 是否系统内置 |
+| `is_active` | `Boolean` | 是否启用 |
+| `description` | `String` | 说明 |
+| `seed_version` | `String` | 初始化版本标识 |
+| `created_at` | `String(DateTime ISO)` | 创建时间 |
+| `updated_at` | `String(DateTime ISO)` | 更新时间 |
+
+索引：
+- `code`（唯一）
+- `(module_code, permission_type)`
+- `(is_exception, is_active)`
+
+### 9.3 `auth_roles` - 角色定义
+
+用途：定义角色及其权限集合，当前内置 `super_admin/system_admin/business_admin/analyst/viewer`。
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `code` | `String` | 角色编码（唯一），如 `viewer` |
+| `name` | `String` | 角色名称 |
+| `description` | `String` | 角色描述 |
+| `permissions` | `Array[String]` | 权限码列表（内嵌） |
+| `is_system` | `Boolean` | 是否系统内置角色 |
+| `is_active` | `Boolean` | 是否启用 |
+| `seed_version` | `String` | 初始化版本标识 |
+| `created_at` | `String(DateTime ISO)` | 创建时间 |
+| `updated_at` | `String(DateTime ISO)` | 更新时间 |
+
+索引：
+- `code`（唯一）
+- `is_active`
+
+### 9.4 `users` - 用户与角色绑定（权限相关字段）
+
+用途：保存用户账号，同时通过 `roles` 与 `auth_roles` 关联，运行时汇总得到最终权限。
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `username` | `String` | 用户名（唯一索引） |
+| `hashed_password` | `String` | 加密密码 |
+| `display_name` | `String` | 显示名 |
+| `email` | `String` | 邮箱 |
+| `roles` | `Array[String]` | 角色编码列表 |
+| `is_active` | `Boolean` | 是否启用 |
+| `must_change_password` | `Boolean` | 是否首次登录强制改密 |
+| `password_changed_at` | `String(DateTime ISO)` | 密码最近修改时间 |
+| `created_at` | `String(DateTime ISO)` | 创建时间 |
+| `updated_at` | `String(DateTime ISO)` | 更新时间 |
+| `last_active_at` | `String(DateTime ISO)` | 最后活跃时间 |
+
+索引（权限体系直接依赖）：
+- `username`（唯一）
+- `roles`
+- `last_active_at`
+
+### 9.5 `auth_audit_logs` - 权限审计日志
+
+用途：记录角色、用户、权限管理操作（由 `/api/v1/auth/*` 管理接口写入）。
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `event` | `String` | 审计事件类型（如 `ROLE_CREATED`） |
+| `operator` | `String` | 操作人用户名 |
+| `target` | `String` | 被操作对象（角色码/用户名等） |
+| `detail` | `Object` | 变更详情 |
+| `created_at` | `String(DateTime ISO)` | 记录时间 |
+
+建议索引（当前代码未统一创建，建议补齐）：
+- `(created_at)`
+- `(operator, created_at)`
+- `(event, created_at)`
+
+### 9.6 关系与读取路径说明
+
+1. 登录后前端调用 `/api/v1/auth/me`，后端按 `users.roles -> auth_roles.permissions` 聚合权限码。  
+2. 前端路由、菜单与按钮按权限码做 `view/edit` 前置控制。  
+3. 后端写接口使用 `require_permission(...)` 做最终兜底。  
+4. 角色权限变更后，用户下次请求 `auth/me` 即可获取最新权限快照。
+
+
+

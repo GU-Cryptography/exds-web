@@ -5,10 +5,11 @@
 import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
-from fastapi import APIRouter, Query, HTTPException, Body
+from fastapi import APIRouter, Query, HTTPException, Body, Depends
 from pydantic import BaseModel
 from webapp.tools.mongo import DATABASE
 from webapp.services.weather_service import WeatherService
+from webapp.api.dependencies.authz import require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,10 @@ def get_weather_locations():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/locations", summary="创建站点")
-def create_weather_location(location: WeatherLocationCreate):
+def create_weather_location(
+    location: WeatherLocationCreate,
+    _ctx = Depends(require_permission("module:forecast_weather_data:edit")),
+):
     """创建新的天气站点"""
     try:
         # Check existence
@@ -64,7 +68,11 @@ def create_weather_location(location: WeatherLocationCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/locations/{location_id}", summary="更新站点")
-def update_weather_location(location_id: str, update: WeatherLocationUpdate):
+def update_weather_location(
+    location_id: str,
+    update: WeatherLocationUpdate,
+    _ctx = Depends(require_permission("module:forecast_weather_data:edit")),
+):
     """更新天气站点信息"""
     try:
         update_data = {k: v for k, v in update.model_dump().items() if v is not None}
@@ -87,7 +95,10 @@ def update_weather_location(location_id: str, update: WeatherLocationUpdate):
 
 
 @router.delete("/locations/{location_id}", summary="删除站点")
-def delete_weather_location(location_id: str):
+def delete_weather_location(
+    location_id: str,
+    _ctx = Depends(require_permission("module:forecast_weather_data:edit")),
+):
     """删除天气站点"""
     try:
         result = WEATHER_LOCATIONS.delete_one({"location_id": location_id})
@@ -316,7 +327,7 @@ def get_available_forecast_dates(
 import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
-from fastapi import APIRouter, Query, HTTPException, Body
+from fastapi import APIRouter, Query, HTTPException, Body, Depends
 from pydantic import BaseModel
 from webapp.tools.mongo import DATABASE
 
@@ -384,7 +395,10 @@ def get_weather_locations():
 
 
 @router.post("/locations", summary="创建站点")
-def create_weather_location(location: WeatherLocationCreate):
+def create_weather_location(
+    location: WeatherLocationCreate,
+    _ctx = Depends(require_permission("module:forecast_weather_data:edit")),
+):
     """创建新的天气站点"""
     try:
         # 检查是否已存在
@@ -401,7 +415,11 @@ def create_weather_location(location: WeatherLocationCreate):
 
 
 @router.put("/locations/{location_id}", summary="更新站点")
-def update_weather_location(location_id: str, update: WeatherLocationUpdate):
+def update_weather_location(
+    location_id: str,
+    update: WeatherLocationUpdate,
+    _ctx = Depends(require_permission("module:forecast_weather_data:edit")),
+):
     """更新天气站点信息"""
     try:
         update_data = {k: v for k, v in update.model_dump().items() if v is not None}
@@ -424,7 +442,10 @@ def update_weather_location(location_id: str, update: WeatherLocationUpdate):
 
 
 @router.delete("/locations/{location_id}", summary="删除站点")
-def delete_weather_location(location_id: str):
+def delete_weather_location(
+    location_id: str,
+    _ctx = Depends(require_permission("module:forecast_weather_data:edit")),
+):
     """删除天气站点"""
     try:
         result = WEATHER_LOCATIONS.delete_one({"location_id": location_id})

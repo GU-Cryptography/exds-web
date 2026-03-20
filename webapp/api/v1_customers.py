@@ -287,7 +287,8 @@ async def add_metering_point(
     customer_id: str,
     account_id: str,
     metering_point_data: dict = Body(...),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:update"))
 ):
     """为户号添加计量点"""
     service = CustomerService(DATABASE)
@@ -324,7 +325,8 @@ async def update_metering_point(
     account_id: str,
     metering_point_id: str,
     metering_point_data: dict = Body(...),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:update"))
 ):
     """更新计量点信息"""
     service = CustomerService(DATABASE)
@@ -356,7 +358,8 @@ async def delete_metering_point(
     customer_id: str,
     account_id: str,
     metering_point_id: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:update"))
 ):
     """删除计量点"""
     service = CustomerService(DATABASE)
@@ -396,7 +399,8 @@ async def get_meter_info(
 async def sync_update_meter(
     meter_id: str,
     update_data: SyncUpdateRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:update"))
 ):
     """同步更新电表信息"""
     service = CustomerService(DATABASE)
@@ -493,7 +497,8 @@ async def cancel_contract(
 @router.post("/{customer_id}/activate", response_model=dict)
 async def activate(
     customer_id: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:update"))
 ):
     """
     生效操作：将待生效客户转换为执行中状态
@@ -525,7 +530,8 @@ async def activate(
 async def suspend(
     customer_id: str,
     reason: Optional[str] = Body(None, description="暂停原因"),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:update"))
 ):
     """
     暂停操作：将执行中客户转换为已暂停状态
@@ -557,7 +563,8 @@ async def suspend(
 @router.post("/{customer_id}/resume", response_model=dict)
 async def resume(
     customer_id: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:update"))
 ):
     """
     恢复操作：将已暂停客户转换为执行中状态
@@ -589,7 +596,8 @@ async def resume(
 async def terminate(
     customer_id: str,
     reason: Optional[str] = Body(None, description="终止原因"),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:update"))
 ):
     """
     终止操作：将执行中或已暂停客户转换为已终止状态
@@ -647,7 +655,8 @@ async def get_customer_tags(
 @router.post("/customer-tags", response_model=dict)
 async def create_customer_tag(
     tag_data: dict = Body(...),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:update"))
 ):
     """创建新的客户标签"""
     from webapp.tools.mongo import DATABASE
@@ -686,7 +695,8 @@ async def create_customer_tag(
 async def update_customer_tag(
     tag_id: str,
     tag_data: dict = Body(...),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:update"))
 ):
     """更新客户标签"""
     from webapp.tools.mongo import DATABASE
@@ -759,7 +769,8 @@ async def update_customer_tag(
 @router.delete("/customer-tags/{tag_id}", response_model=dict)
 async def delete_customer_tag(
     tag_id: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:update"))
 ):
     """删除客户标签"""
     from webapp.tools.mongo import DATABASE

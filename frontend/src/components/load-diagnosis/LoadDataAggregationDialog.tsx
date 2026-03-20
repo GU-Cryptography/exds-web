@@ -30,13 +30,15 @@ interface LoadDataAggregationDialogProps {
     open: boolean;
     onClose: () => void;
     onSuccess: () => void;
+    canEdit?: boolean;
 }
 
 export const LoadDataAggregationDialog: React.FC<LoadDataAggregationDialogProps> = ({
     customerId,
     open,
     onClose,
-    onSuccess
+    onSuccess,
+    canEdit = true
 }) => {
     // Stage
     const [stage, setStage] = useState<'config' | 'processing' | 'finished'>('config');
@@ -101,6 +103,7 @@ export const LoadDataAggregationDialog: React.FC<LoadDataAggregationDialogProps>
     };
 
     const handleStart = async () => {
+        if (!canEdit) return;
         setStage('processing');
         setError(null);
         setProcessedCount(0);
@@ -394,6 +397,7 @@ export const LoadDataAggregationDialog: React.FC<LoadDataAggregationDialogProps>
                         <Button
                             variant="contained"
                             onClick={handleStart}
+                            disabled={!canEdit}
                             startIcon={<PlayArrowIcon />}
                         >
                             开始执行

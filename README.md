@@ -55,3 +55,17 @@
     应用启动后，将在 `http://localhost:3000` 上可用。
 
     *注意: 前端已配置代理，所有对 `/api` 的请求都会被转发到 `http://127.0.0.1:8005`。*
+## 鉴权自动检查（必须通过）
+
+1. 统一规则文件：`AI_RULES.md`
+2. 本地检查命令：
+
+```bash
+.venv/Scripts/python scripts/check_auth_all.py
+```
+
+3. 可选启用 Git Hook（提交前自动检查）：
+
+```bash
+git config core.hooksPath .githooks
+```

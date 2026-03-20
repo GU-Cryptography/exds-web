@@ -1,21 +1,22 @@
-
 import axios from 'axios';
+import {
+    AUTH_STORAGE_KEYS,
+    getRequiredPermissionsForMutation,
+    hasAllPermissions,
+    normalizeRequestPath,
+} from '../auth/permissionPrecheck';
 
-// 创建一个axios实例，用于与我们的FastAPI后端通信
 const apiClient = axios.create({
-    // 从环境变量读取API的基础URL，如果不存在，则使用相对路径
-    // 这样可以利用webpack dev server的代理功能
     baseURL: process.env.REACT_APP_API_BASE_URL || '',
     headers: {
         'Content-Type': 'application/json',
     },
-    // 自定义参数序列化，支持 tags=a&tags=b 格式
     paramsSerializer: (params) => {
         const searchParams = new URLSearchParams();
         for (const key in params) {
             const value = params[key];
             if (Array.isArray(value)) {
-                value.forEach(v => searchParams.append(key, v));
+                value.forEach((v) => searchParams.append(key, v));
             } else if (value !== undefined && value !== null) {
                 searchParams.append(key, value.toString());
             }
@@ -24,43 +25,53 @@ const apiClient = axios.create({
     },
 });
 
-// --- 请求拦截器 ---
-// 在每个请求发送前，检查localStorage中是否有token，并将其添加到Authorization头
 apiClient.interceptors.request.use(
     (config) => {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem(AUTH_STORAGE_KEYS.token);
         if (token) {
-            config.headers['Authorization'] = `Bearer ${token}`;
+            config.headers = config.headers || {};
+            config.headers.Authorization = `Bearer ${token}`;
         }
+
+        const requestPath = normalizeRequestPath(config.url);
+        const requestMethod = (config.method || 'get').toLowerCase();
+        const requiredPermissions = getRequiredPermissionsForMutation(requestMethod, requestPath);
+
+        if (requiredPermissions.length > 0 && !hasAllPermissions(requiredPermissions)) {
+            const message = `无权限执行该操作，缺少权限：${requiredPermissions.join(', ')}`;
+            const precheckError = {
+                __permission_precheck: true,
+                message,
+                response: {
+                    status: 403,
+                    data: { detail: message },
+                },
+                config,
+            };
+            alert(message);
+            return Promise.reject(precheckError);
+        }
+
         return config;
     },
-    (error) => {
-        return Promise.reject(error);
-    }
+    (error) => Promise.reject(error)
 );
 
-// --- 响应拦截器 ---
-// 捕获所有API响应，如果遇到401错误，则认为token已过期，自动退出登录
-// 此拦截器作为"安全网"，处理以下边缘情况：
-// 1. 网络延迟导致请求在前端定时器触发后才到达服务器
-// 2. 客户端与服务器时钟不同步
-// 3. 服务器端主动吊销令牌
 apiClient.interceptors.response.use(
-    (response) => {
-        // 状态码在 2xx 范围内的任何响应都会触发此函数
-        return response;
-    },
+    (response) => response,
     (error) => {
-        // 任何超出 2xx 范围的状态码都会触发此函数
+        if (error?.__permission_precheck) {
+            return Promise.reject(error);
+        }
+
         if (error.response) {
             if (error.response.status === 401) {
-                // 如果是401错误，则清除token并重定向到登录页
                 console.warn('收到 401 响应，会话已失效');
-                localStorage.removeItem('token');
-                // 使用 window.location.href 来强制刷新页面，清除所有旧的状态
+                localStorage.removeItem(AUTH_STORAGE_KEYS.token);
+                localStorage.removeItem(AUTH_STORAGE_KEYS.permissions);
+                localStorage.removeItem(AUTH_STORAGE_KEYS.isSuperAdmin);
                 window.location.href = '/login?reason=session_expired';
             } else if (error.response.status === 403) {
-                // 如果是 403 无权限，只做提示，不清理 token 也不跳转
                 console.warn('访问被拒绝，无相应权限：', error.response.data);
                 alert(error.response.data?.detail || '您没有权限执行此操作');
             }
@@ -69,13 +80,7 @@ apiClient.interceptors.response.use(
     }
 );
 
-/**
- * 用户登录函数
- * @param username 用户名
- * @param password 密码
- */
 export const login = (username: string, password: string) => {
-    // FastAPI的OAuth2PasswordRequestForm需要x-www-form-urlencoded格式的数据
     const params = new URLSearchParams();
     params.append('username', username);
     params.append('password', password);
@@ -87,20 +92,10 @@ export const login = (username: string, password: string) => {
     });
 };
 
-
-/**
- * 获取指定数据类型的统计信息。
- * @param dataType - 数据类型的API短名称 (e.g., 'rt-price')
- */
 export const getStats = (dataType: string) => {
     return apiClient.get(`/api/stats/${dataType}`);
 };
 
-/**
- * 上传文件以进行数据导入。
- * @param dataType - 数据类型的API短名称
- * @param file - 用户选择的文件对象
- */
 export const uploadFile = (dataType: string, file: File) => {
     const formData = new FormData();
     formData.append('data_type', dataType);
@@ -112,6 +107,5 @@ export const uploadFile = (dataType: string, file: File) => {
         },
     });
 };
-
 
 export default apiClient;

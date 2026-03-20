@@ -118,9 +118,11 @@ const getErrorMessage = (error: any, fallback: string): string => {
 
 interface Props {
     selectedCustomer: IntentCustomerSummary | null;
+    canEdit: boolean;
+    canDelete: boolean;
 }
 
-const IntentRetailSimulationTab: React.FC<Props> = ({ selectedCustomer }) => {
+const IntentRetailSimulationTab: React.FC<Props> = ({ selectedCustomer, canEdit, canDelete }) => {
     const [packages, setPackages] = useState<IntentRetailCalculatedPackageItem[]>([]);
     const [packagesLoading, setPackagesLoading] = useState(false);
     const [activePackageId, setActivePackageId] = useState<string | null>(null);
@@ -265,6 +267,9 @@ const IntentRetailSimulationTab: React.FC<Props> = ({ selectedCustomer }) => {
     };
 
     const handleSubmit = async () => {
+        if (!canEdit) {
+            return;
+        }
         if (!selectedCustomer || !selectedPackageOption) {
             return;
         }
@@ -290,6 +295,9 @@ const IntentRetailSimulationTab: React.FC<Props> = ({ selectedCustomer }) => {
     };
 
     const handleDelete = async () => {
+        if (!canDelete) {
+            return;
+        }
         if (!selectedCustomer || !deleteTarget) {
             return;
         }
@@ -337,7 +345,7 @@ const IntentRetailSimulationTab: React.FC<Props> = ({ selectedCustomer }) => {
                             {TEXT.calculatedPackagesHint}
                         </Typography>
                     </Box>
-                    <Button variant="contained" startIcon={<AddIcon />} onClick={() => void loadDialogData()}>
+                    <Button variant="contained" startIcon={<AddIcon />} onClick={() => void loadDialogData()} disabled={!canEdit}>
                         {TEXT.addPackageCalc}
                     </Button>
                 </Stack>
@@ -357,8 +365,8 @@ const IntentRetailSimulationTab: React.FC<Props> = ({ selectedCustomer }) => {
                                     color={item.package_id === activePackageId ? 'primary' : 'default'}
                                     variant={item.package_id === activePackageId ? 'filled' : 'outlined'}
                                     onClick={() => setActivePackageId(item.package_id)}
-                                    onDelete={() => setDeleteTarget(item)}
-                                    deleteIcon={<CloseIcon />}
+                                    onDelete={canDelete ? () => setDeleteTarget(item) : undefined}
+                                    deleteIcon={canDelete ? <CloseIcon /> : undefined}
                                 />
                             ))}
                         </Stack>
@@ -470,7 +478,7 @@ const IntentRetailSimulationTab: React.FC<Props> = ({ selectedCustomer }) => {
                     <Button
                         variant="contained"
                         onClick={() => void handleSubmit()}
-                        disabled={submitLoading || !selectedPackageOption}
+                        disabled={submitLoading || !selectedPackageOption || !canEdit}
                     >
                         {submitLoading ? TEXT.calculating : TEXT.submit}
                     </Button>
@@ -494,7 +502,7 @@ const IntentRetailSimulationTab: React.FC<Props> = ({ selectedCustomer }) => {
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={() => setDeleteTarget(null)} disabled={deleteLoading}>{TEXT.cancel}</Button>
-                    <Button variant="contained" color="error" onClick={() => void handleDelete()} disabled={deleteLoading}>
+                    <Button variant="contained" color="error" onClick={() => void handleDelete()} disabled={deleteLoading || !canDelete}>
                         {deleteLoading ? TEXT.deleting : TEXT.confirmDelete}
                     </Button>
                 </DialogActions>

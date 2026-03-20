@@ -39,6 +39,7 @@ import { ContractDetailsDialog } from '../components/ContractDetailsDialog';
 import { ContractImportDialog } from '../components/ContractImportDialog';
 import { ContractExportDialog } from '../components/ContractExportDialog';
 import { getContract } from '../api/retail-contracts';
+import { useAuth } from '../contexts/AuthContext';
 
 // 状态中文映射
 const statusMap: { [key: string]: string } = {
@@ -61,6 +62,9 @@ const getStatusChipColor = (status: string): 'default' | 'success' | 'warning' =
 };
 
 const RetailContractPage: React.FC = () => {
+  const { hasPermission } = useAuth();
+  const canEdit = hasPermission('module:customer_retail_contracts:edit');
+  const canDelete = canEdit && hasPermission('data:critical:delete');
   // 路由参数和导航
   const params = useParams<{ contractId?: string }>();
   const navigate = useNavigate();
@@ -247,6 +251,7 @@ const RetailContractPage: React.FC = () => {
 
   // 操作处理
   const handleCreate = () => {
+    if (!canEdit) return;
     if (isMobile) {
       // 移动端使用路由导航
       navigate('/customer/retail-contracts/create');
@@ -270,6 +275,7 @@ const RetailContractPage: React.FC = () => {
   };
 
   const handleEdit = async (contract: Contract) => {
+    if (!canEdit) return;
     if (isMobile) {
       // 移动端使用路由导航
       navigate(`/customer/retail-contracts/edit/${contract.id}`);
@@ -292,11 +298,13 @@ const RetailContractPage: React.FC = () => {
   };
 
   const handleDeleteClick = (contract: Contract) => {
+    if (!canDelete) return;
     setContractToDelete(contract);
     setDeleteDialogOpen(true);
   };
 
   const handleDeleteConfirm = async () => {
+    if (!canDelete) return;
     if (!contractToDelete) return;
 
     try {
@@ -319,6 +327,7 @@ const RetailContractPage: React.FC = () => {
 
   // 导入导出处理函数
   const handleImport = () => {
+    if (!canEdit) return;
     setIsImportDialogOpen(true);
   };
 
@@ -461,6 +470,7 @@ const RetailContractPage: React.FC = () => {
 
   // 从详情对话框处理编辑
   const handleEditFromDetails = (contractId: string) => {
+    if (!canEdit) return;
     if (isMobile) {
       // 移动端使用路由导航
       navigate(`/customer/retail-contracts/edit/${contractId}`);
@@ -485,6 +495,7 @@ const RetailContractPage: React.FC = () => {
 
   // 从详情对话框处理复制
   const handleCopyFromDetails = (contractId: string) => {
+    if (!canEdit) return;
     if (isMobile) {
       // 移动端使用路由导航
       navigate(`/customer/retail-contracts/create?copyFrom=${contractId}`);
@@ -532,7 +543,7 @@ const RetailContractPage: React.FC = () => {
   };
 
   // 移动端：渲染新增页面
-  if (isMobile && isCreateView) {
+  if (isMobile && isCreateView && canEdit) {
     return (
       <Box sx={{ width: '100%' }}>
         {/* 返回按钮和标题 */}
@@ -584,6 +595,8 @@ const RetailContractPage: React.FC = () => {
             open={true}
             contractId={currentContractId || null}
             onClose={handleBackToList}
+            onEdit={canEdit ? handleEditFromDetails : undefined}
+            canEdit={canEdit}
           />
         ) : currentContractId ? (
           <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -602,7 +615,7 @@ const RetailContractPage: React.FC = () => {
   }
 
   // 移动端：渲染编辑页面
-  if (isMobile && isEditView) {
+  if (isMobile && isEditView && canEdit) {
     return (
       <Box sx={{ width: '100%' }}>
         {/* 返回按钮和标题 */}
@@ -837,6 +850,7 @@ const RetailContractPage: React.FC = () => {
               variant="outlined"
               onClick={handleImport}
               startIcon={<DownloadIcon />}
+              disabled={!canEdit}
             >
               导入
             </Button>
@@ -1047,6 +1061,8 @@ const RetailContractPage: React.FC = () => {
           open={isDetailsDialogOpen}
           contractId={selectedContractId}
           onClose={handleCloseDetailsDialog}
+          onEdit={canEdit ? handleEditFromDetails : undefined}
+          canEdit={canEdit}
         />
 
         {/* 编辑对话框 */}
@@ -1089,7 +1105,7 @@ const RetailContractPage: React.FC = () => {
           </DialogContent>
           <DialogActions>
             <Button onClick={handleDeleteCancel}>取消</Button>
-            <Button onClick={handleDeleteConfirm} color="error" variant="contained">
+            <Button onClick={handleDeleteConfirm} color="error" variant="contained" disabled={!canDelete}>
               删除
             </Button>
           </DialogActions>
@@ -1100,6 +1116,7 @@ const RetailContractPage: React.FC = () => {
           open={isImportDialogOpen}
           onClose={() => setIsImportDialogOpen(false)}
           onSuccess={handleImportSuccess}
+          canEdit={canEdit}
         />
 
         {/* 导出对话框 */}

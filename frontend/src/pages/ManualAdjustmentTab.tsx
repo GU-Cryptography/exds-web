@@ -11,6 +11,7 @@ import { manualAdjustmentApi } from '../api/manualAdjustment';
 import { customerAnalysisApi } from '../api/customerAnalysis';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
 import { useTouPeriodBackground } from '../hooks/useTouPeriodBackground';
+import { useAuth } from '../contexts/AuthContext';
 
 interface ManualAdjustmentTabProps {
     targetDate: string;
@@ -29,6 +30,8 @@ export const ManualAdjustmentTab: React.FC<ManualAdjustmentTabProps> = ({
     onSaveSuccess,
     onDateShift
 }) => {
+    const { hasPermission } = useAuth();
+    const canEdit = hasPermission('module:forecast_short_term_load:edit');
     // --- State ---
     const [values, setValues] = useState<number[]>(new Array(48).fill(0));
     const [originalValues, setOriginalValues] = useState<number[]>(new Array(48).fill(0));
@@ -169,6 +172,7 @@ export const ManualAdjustmentTab: React.FC<ManualAdjustmentTabProps> = ({
     };
 
     const handleSave = async () => {
+        if (!canEdit) return;
         setSaving(true);
         try {
             await manualAdjustmentApi.save(targetDate, forecastDate, customerId, values);
@@ -182,6 +186,7 @@ export const ManualAdjustmentTab: React.FC<ManualAdjustmentTabProps> = ({
     };
 
     const handleReset = async () => {
+        if (!canEdit) return;
         if (!window.confirm('确定重置为算法原始值吗？')) return;
 
         // Check if server actually has modifications
@@ -402,10 +407,10 @@ export const ManualAdjustmentTab: React.FC<ManualAdjustmentTabProps> = ({
                             placeholder="数值"
                             value={bulkValue}
                             onChange={(e) => setBulkValue(e.target.value)}
-                            disabled={!selection}
+                            disabled={!selection || !canEdit}
                             fullWidth
                         />
-                        <ButtonGroup size="small" disabled={!selection || !bulkValue} variant="contained" disableElevation>
+                        <ButtonGroup size="small" disabled={!selection || !bulkValue || !canEdit} variant="contained" disableElevation>
                             <Button onClick={() => applyBulk('percent')}>%</Button>
                             <Button onClick={() => applyBulk('set')}>=</Button>
                             <Button onClick={() => applyBulk('add')}>+</Button>
@@ -422,6 +427,7 @@ export const ManualAdjustmentTab: React.FC<ManualAdjustmentTabProps> = ({
                         hideFooter
                         density="compact"
                         processRowUpdate={(newRow, oldRow) => {
+                            if (!canEdit) return oldRow;
                             const val = Number(newRow.current);
                             if (!isNaN(val)) {
                                 handleUpdateValue(newRow.index, val);
@@ -440,7 +446,7 @@ export const ManualAdjustmentTab: React.FC<ManualAdjustmentTabProps> = ({
                         sx={{ flex: 1 }}
                         startIcon={<SaveIcon />}
                         onClick={handleSave}
-                        disabled={!isModified || saving}
+                        disabled={!isModified || saving || !canEdit}
                     >
                         保存调整
                     </Button>
@@ -451,7 +457,7 @@ export const ManualAdjustmentTab: React.FC<ManualAdjustmentTabProps> = ({
                         color="error"
                         startIcon={<RestoreIcon />}
                         onClick={handleReset}
-                        disabled={saving || !isModified}
+                        disabled={saving || !isModified || !canEdit}
                     >
                         重置
                     </Button>

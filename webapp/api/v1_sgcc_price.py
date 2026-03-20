@@ -7,6 +7,7 @@ from fastapi import APIRouter, File, UploadFile, Depends, HTTPException, Respons
 from webapp.tools.mongo import DATABASE
 from webapp.tools.security import get_current_active_user, User
 from webapp.services.sgcc_price_service import sgcc_price_service
+from webapp.api.dependencies.authz import require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,11 @@ def get_sgcc_prices(page: int = 1, pageSize: int = 10):
         raise HTTPException(status_code=500, detail=f"获取国网代购电价数据时出错: {str(e)}")
 
 @router.post("/prices/sgcc/import", summary="导入国网代购电PDF公告")
-async def import_sgcc_price(file: UploadFile = File(...), current_user: User = Depends(get_current_active_user)):
+async def import_sgcc_price(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:basic_sgcc_price:edit")),
+):
     """
     上传并解析国网代购电PDF公告，解析结果存入数据库。
     """

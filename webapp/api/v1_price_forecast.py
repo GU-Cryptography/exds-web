@@ -4,11 +4,12 @@
 提供日前价格预测结果的 RESTful API 接口。
 """
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Query, HTTPException, status
+from fastapi import APIRouter, Depends, Query, HTTPException, status
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from webapp.tools.mongo import DATABASE
 from webapp.services.price_forecast_service import PriceForecastService
+from webapp.api.dependencies.authz import require_permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -187,7 +188,10 @@ async def check_data_availability(
     summary="触发预测任务",
     description="向 task_commands 集合插入预测命令，触发后台预测任务执行。"
 )
-async def trigger_forecast(request: TriggerRequest) -> Dict[str, Any]:
+async def trigger_forecast(
+    request: TriggerRequest,
+    _ctx = Depends(require_permission("module:forecast_dayahead_price:edit")),
+) -> Dict[str, Any]:
     """触发预测任务"""
     try:
         target_date = request.target_date

@@ -41,6 +41,7 @@ import ReplayIcon from '@mui/icons-material/Replay';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import { format, addDays } from 'date-fns';
 import apiClient from '../api/client';
+import { useAuth } from '../contexts/AuthContext';
 
 
 // ========== 类型定义 ==========
@@ -307,6 +308,8 @@ const MobileTaskRow: React.FC<{
 // ========== 主组件 ==========
 
 export const RpaMonitorPage: React.FC = () => {
+    const { hasPermission } = useAuth();
+    const canRetryTask = hasPermission('system:data_access:manage');
     const theme = useTheme();
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
     const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
@@ -389,6 +392,7 @@ export const RpaMonitorPage: React.FC = () => {
 
     // 重试所有失败任务
     const handleRetryAll = async () => {
+        if (!canRetryTask) return;
         // 筛选可重试的告警
         const retryableAlerts = alerts.filter(a => a.can_retry);
         if (retryableAlerts.length === 0) {
@@ -608,7 +612,7 @@ export const RpaMonitorPage: React.FC = () => {
                                             variant="outlined"
                                             startIcon={isRetrying ? <CircularProgress size={12} sx={{ color: 'warning.dark' }} /> : <ReplayIcon sx={{ fontSize: 16 }} />}
                                             onClick={(e) => { e.stopPropagation(); handleRetryAll(); }}
-                                            disabled={!!isRetryDisabled}
+                                            disabled={!!isRetryDisabled || !canRetryTask}
                                             sx={{
                                                 py: 0.25,
                                                 px: 1,

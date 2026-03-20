@@ -18,6 +18,7 @@ from webapp.services.load_query_service import LoadQueryService
 
 # --- Security Dependency ---
 from webapp.tools.security import get_current_active_user
+from webapp.api.dependencies.authz import require_permission
 
 router = APIRouter(prefix="/load-characteristics", tags=["Load Characteristics"])
 
@@ -60,7 +61,11 @@ TAG_CATEGORIES = {
 
 
 @router.post("/analyze/{customer_id}", summary="手动触发客户特征分析")
-async def analyze_customer_manual(customer_id: str, date: Optional[str] = None):
+async def analyze_customer_manual(
+    customer_id: str,
+    date: Optional[str] = None,
+    _ctx = Depends(require_permission("module:analysis_load_characteristics:edit")),
+):
     """
     手动触发单个客户的特征分析
     """
@@ -75,7 +80,10 @@ async def analyze_customer_manual(customer_id: str, date: Optional[str] = None):
 
 
 @router.post("/analyze/batch/all", summary="手动触发全量分析")
-async def analyze_batch_manual(date: Optional[str] = None):
+async def analyze_batch_manual(
+    date: Optional[str] = None,
+    _ctx = Depends(require_permission("module:analysis_load_characteristics:edit")),
+):
     """
     手动触发全量客户特征分析
     """
@@ -558,7 +566,8 @@ async def get_customer_alerts(customer_id: str, limit: int = 50):
 async def acknowledge_alert(
     alert_id: str,
     request: AcknowledgeRequest,
-    current_user = Depends(get_current_active_user)
+    current_user = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:analysis_load_characteristics:edit")),
 ):
     """确认异动告警"""
     db = DATABASE

@@ -50,6 +50,7 @@ import customerApi, { CustomerListItem, Tag } from '../api/customer';
 import { useTouPeriodBackground } from '../hooks/useTouPeriodBackground';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
 import TagSelector from '../components/customer/TagSelector';
+import { useAuth } from '../contexts/AuthContext';
 
 // Props 接口：支持从总览页面 Tab 传入 customerId
 interface CustomerLoadAnalysisPageProps {
@@ -60,6 +61,8 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
+    const { hasPermission } = useAuth();
+    const canEdit = hasPermission('module:analysis_customer_load:edit');
 
     // State
     const [selectedDate, setSelectedDate] = useState<Date | null>(subDays(new Date(), 2));
@@ -209,6 +212,7 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
     };
 
     const handleAiDiagnose = async () => {
+        if (!canEdit) return;
         if (!selectedCustomer || !selectedDate) return;
         setAiAnalyzing(true);
         try {
@@ -242,6 +246,7 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
     };
 
     const handleManualTagChange = async (newTags: Tag[]) => {
+        if (!canEdit) return;
         if (!selectedCustomer) return;
 
         const currentNames = new Set(manualTags.map(t => t.name));
@@ -269,6 +274,7 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
     };
 
     const handleRemoveAutoTag = async (tagName: string) => {
+        if (!canEdit) return;
         if (!selectedCustomer) return;
         await customerAnalysisApi.removeTag(selectedCustomer.id, tagName);
 
@@ -727,7 +733,7 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
                                     color="secondary"
                                     startIcon={aiAnalyzing ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
                                     onClick={handleAiDiagnose}
-                                    disabled={aiAnalyzing}
+                                    disabled={aiAnalyzing || !canEdit}
                                     size="small"
                                 >
                                     AI 模式识别
@@ -742,7 +748,7 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
 
                             <Box sx={{ mb: 3 }}>
                                 <Typography variant="subtitle2" gutterBottom color="text.secondary">手工标签</Typography>
-                                <TagSelector tags={manualTags} onChange={handleManualTagChange} />
+                                <TagSelector tags={manualTags} onChange={handleManualTagChange} readonly={!canEdit} />
                             </Box>
 
                             <Box>
@@ -756,8 +762,8 @@ export const CustomerLoadAnalysisPage: React.FC<CustomerLoadAnalysisPageProps> =
                                             color="secondary"
                                             variant="outlined"
                                             size="small"
-                                            onDelete={() => handleRemoveAutoTag(tag.name)}
-                                            deleteIcon={<DeleteIcon />}
+                                            onDelete={canEdit ? () => handleRemoveAutoTag(tag.name) : undefined}
+                                            deleteIcon={canEdit ? <DeleteIcon /> : undefined}
                                         />
                                     ))}
                                 </Stack>

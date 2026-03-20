@@ -26,6 +26,7 @@ import {
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import CloseIcon from '@mui/icons-material/Close';
 import apiClient from '../api/client';
+import { useAuth } from '../contexts/AuthContext';
 
 interface YearRow {
     month: string;
@@ -143,6 +144,8 @@ const groupMeta = (() => {
 })();
 
 const WholesaleMonthlySettlementPage: React.FC = () => {
+    const { hasPermission } = useAuth();
+    const canEdit = hasPermission('module:settlement_monthly_detail:edit');
     const theme = useTheme();
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -280,6 +283,7 @@ const WholesaleMonthlySettlementPage: React.FC = () => {
     };
 
     const doImport = async (file: File, overwrite: boolean) => {
+        if (!canEdit) return;
         const formData = new FormData();
         formData.append('file', file);
         setImporting(true);
@@ -309,10 +313,12 @@ const WholesaleMonthlySettlementPage: React.FC = () => {
     };
 
     const handleChooseFile = () => {
+        if (!canEdit) return;
         fileInputRef.current?.click();
     };
 
     const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (!canEdit) return;
         const file = event.target.files?.[0];
         if (!file) return;
         await doImport(file, false);
@@ -347,7 +353,7 @@ const WholesaleMonthlySettlementPage: React.FC = () => {
                             style={{ display: 'none' }}
                             onChange={handleFileChange}
                         />
-                        <Button variant="contained" startIcon={<UploadFileIcon />} onClick={handleChooseFile} disabled={importing}>
+                        <Button variant="contained" startIcon={<UploadFileIcon />} onClick={handleChooseFile} disabled={importing || !canEdit}>
                             {importing ? '导入中...' : isMobile ? '导入' : '导入月度结算文件'}
                         </Button>
                     </Box>

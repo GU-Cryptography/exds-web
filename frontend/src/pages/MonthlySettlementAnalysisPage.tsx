@@ -55,6 +55,7 @@ import {
 } from 'recharts';
 import apiClient from '../api/client';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
+import { useAuth } from '../contexts/AuthContext';
 
 import { WholesaleMonthlyTab } from './WholesaleMonthlyTab';
 import { RetailMonthlyTab } from './RetailMonthlyTab';
@@ -457,7 +458,7 @@ const CustomerMobileCard: React.FC<{
     );
 };
 
-const EmptyState: React.FC<{ month: string; onExecute: () => void }> = ({ month, onExecute }) => (
+const EmptyState: React.FC<{ month: string; onExecute: () => void; disabled?: boolean }> = ({ month, onExecute, disabled = false }) => (
     <Paper
         variant="outlined"
         sx={{
@@ -488,6 +489,7 @@ const EmptyState: React.FC<{ month: string; onExecute: () => void }> = ({ month,
             size="large"
             startIcon={<CalculateIcon />}
             onClick={onExecute}
+            disabled={disabled}
             sx={{ borderRadius: 3, px: 4, py: 1.2, fontWeight: 700, boxShadow: 'none', textTransform: 'none' }}
         >
             立即执行月度零售结算
@@ -496,6 +498,9 @@ const EmptyState: React.FC<{ month: string; onExecute: () => void }> = ({ month,
 );
 
 const MonthlySettlementAnalysisPage: React.FC<{ initialMonth?: string }> = ({ initialMonth }) => {
+    const { hasPermission } = useAuth();
+    const canEdit = hasPermission('module:settlement_monthly_detail:edit');
+    const canExecuteSettlement = canEdit && hasPermission('settlement:recalc:execute');
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const isMd = useMediaQuery(theme.breakpoints.down('md'));
@@ -771,6 +776,7 @@ const MonthlySettlementAnalysisPage: React.FC<{ initialMonth?: string }> = ({ in
     };
 
     const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (!canEdit) return;
         const file = event.target.files?.[0];
         if (!file) return;
         const formData = new FormData();
@@ -816,13 +822,13 @@ const MonthlySettlementAnalysisPage: React.FC<{ initialMonth?: string }> = ({ in
     }, [fetchData, stopPolling]);
 
     const handleExecuteRetailSettlement = () => {
-        if (!monthStr) return;
+        if (!canExecuteSettlement || !monthStr) return;
         setJobInfo(null); // 清空旧任务，进入确认模式
         setProgressOpen(true);
     };
 
     const handleStartSettlement = async () => {
-        if (!monthStr) return;
+        if (!canExecuteSettlement || !monthStr) return;
         setJobInfo({ job_id: '', month: monthStr, status: 'pending', progress: 0, message: '正在启动月度结算任务...' });
         try {
             const res = await apiClient.post('/api/v1/retail-settlement/monthly-calc', { month: monthStr, force: true });
@@ -887,7 +893,7 @@ const MonthlySettlementAnalysisPage: React.FC<{ initialMonth?: string }> = ({ in
 
                 {/* 统一空状态提示 */}
                 {!loading && !hasSettledData && (
-                    <EmptyState month={monthStr} onExecute={handleExecuteRetailSettlement} />
+                    <EmptyState month={monthStr} onExecute={handleExecuteRetailSettlement} disabled={!canExecuteSettlement} />
                 )}
 
                 {/* 选项卡导航 */}
@@ -907,7 +913,7 @@ const MonthlySettlementAnalysisPage: React.FC<{ initialMonth?: string }> = ({ in
                         reconciliation={reconciliation}
                         loading={loading}
                         onImportWholesale={() => fileInputRef.current?.click()}
-                        importDisabled={loading}
+                        importDisabled={loading || !canEdit}
                     />
                 )}
 
@@ -925,6 +931,7 @@ const MonthlySettlementAnalysisPage: React.FC<{ initialMonth?: string }> = ({ in
                         jobInfo={jobInfo}
                         snackbarOpen={snackbarOpen}
                         onCloseSnackbar={() => setSnackbarOpen(false)}
+                        canExecuteSettlement={canExecuteSettlement}
                     />
                 )}
                     </>

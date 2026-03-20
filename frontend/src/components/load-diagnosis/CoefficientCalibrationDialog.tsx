@@ -43,6 +43,7 @@ interface CoefficientCalibrationDialogProps {
     startDate: Date;
     endDate: Date;
     onSuccess?: () => void;
+    canEdit?: boolean;
 }
 
 interface MeterInfo {
@@ -96,8 +97,9 @@ const Row = (props: {
     getStatusLabel: (status: string) => string;
     getStatusColor: (status: string) => any;
     renderMetersInfo: (meters?: MeterInfo[]) => React.ReactNode;
+    canEdit: boolean;
 }) => {
-    const { row, onCalibrate, getStatusLabel, getStatusColor, renderMetersInfo } = props;
+    const { row, onCalibrate, getStatusLabel, getStatusColor, renderMetersInfo, canEdit } = props;
     const [open, setOpen] = React.useState(false);
 
     return (
@@ -132,7 +134,7 @@ const Row = (props: {
                             size="small"
                             variant="outlined"
                             startIcon={<CalculateIcon />}
-                            disabled={row.status === 'balanced' || row.status === 'missing_config' || row.status === 'missing_data'}
+                            disabled={!canEdit || row.status === 'balanced' || row.status === 'missing_config' || row.status === 'missing_data'}
                             onClick={() => onCalibrate(row.account_no)}
                         >
                             校核
@@ -209,7 +211,8 @@ export const CoefficientCalibrationDialog: React.FC<CoefficientCalibrationDialog
     customerName,
     startDate,
     endDate,
-    onSuccess
+    onSuccess,
+    canEdit = true
 }) => {
     // Preview State
     const [previewLoading, setPreviewLoading] = useState(false);
@@ -277,6 +280,7 @@ export const CoefficientCalibrationDialog: React.FC<CoefficientCalibrationDialog
     };
 
     const handleOpenCalibrate = async (accountNo: string) => {
+        if (!canEdit) return;
         setSelectedAccount(accountNo);
         setCalibDialogOpen(true);
         setCalibResult(null);
@@ -306,6 +310,7 @@ export const CoefficientCalibrationDialog: React.FC<CoefficientCalibrationDialog
     };
 
     const handleApply = async (updateHistory: boolean) => {
+        if (!canEdit) return;
         if (!calibResult || !selectedAccount) return;
         setApplying(true);
         try {
@@ -460,6 +465,7 @@ export const CoefficientCalibrationDialog: React.FC<CoefficientCalibrationDialog
                                         getStatusLabel={getStatusLabel}
                                         getStatusColor={getStatusColor}
                                         renderMetersInfo={renderMetersInfo}
+                                        canEdit={canEdit}
                                     />
                                 ))}
                             </TableBody>
@@ -538,7 +544,7 @@ export const CoefficientCalibrationDialog: React.FC<CoefficientCalibrationDialog
                     <Button
                         onClick={() => handleApply(false)}
                         variant="contained"
-                        disabled={!calibResult || applying}
+                        disabled={!canEdit || !calibResult || applying}
                     >
                         仅更新档案
                     </Button>
@@ -546,7 +552,7 @@ export const CoefficientCalibrationDialog: React.FC<CoefficientCalibrationDialog
                         onClick={() => handleApply(true)}
                         variant="contained"
                         color="secondary"
-                        disabled={!calibResult || applying}
+                        disabled={!canEdit || !calibResult || applying}
                     >
                         更新并重算历史
                     </Button>

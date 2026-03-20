@@ -46,6 +46,7 @@ interface LoadDataImportDialogProps {
     open: boolean;
     onClose: () => void;
     onSuccess: () => void;
+    canEdit?: boolean;
 }
 
 interface FileItem {
@@ -68,7 +69,8 @@ const HISTORY_KEY = 'load_data_import_history';
 export const LoadDataImportDialog: React.FC<LoadDataImportDialogProps> = ({
     open,
     onClose,
-    onSuccess
+    onSuccess,
+    canEdit = true
 }) => {
     const [importType, setImportType] = useState<'meter' | 'mp'>('meter');
     const [overwrite, setOverwrite] = useState(false);
@@ -152,6 +154,7 @@ export const LoadDataImportDialog: React.FC<LoadDataImportDialogProps> = ({
     };
 
     const addFiles = (files: FileList | null) => {
+        if (!canEdit) return;
         if (!files) return;
 
         const validExtensions = ['.xlsx', '.xls'];
@@ -211,6 +214,7 @@ export const LoadDataImportDialog: React.FC<LoadDataImportDialogProps> = ({
     };
 
     const processQueue = async () => {
+        if (!canEdit) return;
         const pendingFiles = fileList.filter(f => f.status === 'pending');
         if (pendingFiles.length === 0) return;
 
@@ -320,8 +324,8 @@ export const LoadDataImportDialog: React.FC<LoadDataImportDialogProps> = ({
 
             <DialogContent>
                 <Tabs value={importType} onChange={handleTabChange} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
-                    <Tab label="导入电表数据 (Meter)" value="meter" disabled={loading} />
-                    <Tab label="导入计量点数据 (MP)" value="mp" disabled={loading} />
+                    <Tab label="导入电表数据 (Meter)" value="meter" disabled={loading || !canEdit} />
+                    <Tab label="导入计量点数据 (MP)" value="mp" disabled={loading || !canEdit} />
                 </Tabs>
 
                 {globalError && (
@@ -335,7 +339,7 @@ export const LoadDataImportDialog: React.FC<LoadDataImportDialogProps> = ({
                         variant="outlined"
                         startIcon={<FileIcon />}
                         onClick={() => fileInputRef.current?.click()}
-                        disabled={loading}
+                        disabled={loading || !canEdit}
                     >
                         选择文件
                     </Button>
@@ -343,7 +347,7 @@ export const LoadDataImportDialog: React.FC<LoadDataImportDialogProps> = ({
                         variant="outlined"
                         startIcon={<FolderIcon />}
                         onClick={() => folderInputRef.current?.click()}
-                        disabled={loading}
+                        disabled={loading || !canEdit}
                     >
                         选择文件夹
                     </Button>
@@ -380,7 +384,7 @@ export const LoadDataImportDialog: React.FC<LoadDataImportDialogProps> = ({
                                 checked={overwrite}
                                 onChange={(e) => setOverwrite(e.target.checked)}
                                 size="small"
-                                disabled={loading}
+                                disabled={loading || !canEdit}
                             />
                         }
                         label={<Typography variant="body2">覆盖已存在数据</Typography>}
@@ -389,7 +393,7 @@ export const LoadDataImportDialog: React.FC<LoadDataImportDialogProps> = ({
                     <Box sx={{ flex: 1 }} />
 
                     {fileList.length > 0 && (
-                        <Button color="error" onClick={handleClearAll} disabled={loading} size="small">
+                        <Button color="error" onClick={handleClearAll} disabled={loading || !canEdit} size="small">
                             清空列表
                         </Button>
                     )}
@@ -413,9 +417,18 @@ export const LoadDataImportDialog: React.FC<LoadDataImportDialogProps> = ({
                             transition: 'all 0.2s ease-in-out',
                             '&:hover': { borderColor: 'primary.main', backgroundColor: 'action.hover' }
                         }}
-                        onClick={() => fileInputRef.current?.click()}
-                        onDragOver={handleDragOver}
-                        onDrop={handleDrop}
+                        onClick={() => {
+                            if (!canEdit) return;
+                            fileInputRef.current?.click();
+                        }}
+                        onDragOver={(event) => {
+                            if (!canEdit) return;
+                            handleDragOver(event);
+                        }}
+                        onDrop={(event) => {
+                            if (!canEdit) return;
+                            handleDrop(event);
+                        }}
                     >
                         <DownloadIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
                         <Typography variant="body1" color="text.secondary">
@@ -493,14 +506,14 @@ export const LoadDataImportDialog: React.FC<LoadDataImportDialogProps> = ({
             </DialogContent>
 
             <DialogActions sx={{ p: 2 }}>
-                <Button onClick={handleClose} disabled={loading}>
+                    <Button onClick={handleClose} disabled={loading}>
                     {successCount > 0 ? '完成' : '关闭'}
                 </Button>
                 {pendingCount > 0 && (
                     <Button
                         onClick={processQueue}
                         variant="contained"
-                        disabled={loading}
+                        disabled={loading || !canEdit}
                         startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <PlayArrowIcon />}
                     >
                         {loading ? '处理中...' : `开始导入 (${pendingCount})`}

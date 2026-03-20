@@ -9,6 +9,7 @@ from webapp.services.wholesale_monthly_settlement_service import (
     WholesaleMonthlySettlementService,
 )
 from webapp.tools.security import User, get_current_active_user
+from webapp.api.dependencies.authz import require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ async def import_monthly_settlement(
     file: UploadFile = File(...),
     overwrite: bool = Query(False, description="是否覆盖同月已有数据"),
     current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:settlement_monthly_detail:edit")),
 ) -> ImportResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="文件名为空")

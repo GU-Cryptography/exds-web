@@ -30,6 +30,7 @@ import { useChartFullscreen } from '../hooks/useChartFullscreen';
 import { useSelectableSeries } from '../hooks/useSelectableSeries';
 import { useNavigate } from 'react-router-dom';
 import { useTabContext } from '../contexts/TabContext';
+import { useAuth } from '../contexts/AuthContext';
 import PreSettlementDetailPage from './PreSettlementDetailPage';
 import Link from '@mui/material/Link';
 import SettlementRecalculateDialog, {
@@ -173,6 +174,8 @@ const RevenueTooltip = ({ active, payload, label }: any) => {
 
 // ====== 主组件 ======
 const PreSettlementOverviewPage: React.FC = () => {
+    const { hasPermission } = useAuth();
+    const canRecalculate = hasPermission('module:settlement_daily_overview:edit') && hasPermission('settlement:recalc:execute');
     const isTablet = useMediaQuery((t: Theme) => t.breakpoints.down('md'));
     const isMobile = useMediaQuery((t: Theme) => t.breakpoints.down('sm'));
 
@@ -428,6 +431,7 @@ const PreSettlementOverviewPage: React.FC = () => {
     };
 
     const handleMonthlyReSettle = async () => {
+        if (!canRecalculate) return;
         if (!selectedMonth) return;
 
         const days = eachDayOfInterval({
@@ -973,9 +977,9 @@ const PreSettlementOverviewPage: React.FC = () => {
                         onClick={() => {
                             setReSettleStatus('');
                             setReSettleProgress({ current: 0, total: 0, currentDate: '' });
-                            setReSettleDialogOpen(true);
+                            if (canRecalculate) setReSettleDialogOpen(true);
                         }}
-                        disabled={loading || reSettling}
+                        disabled={loading || reSettling || !canRecalculate}
                         sx={{ ml: 1 }}
                     >
                         重新结算
@@ -1054,7 +1058,7 @@ const PreSettlementOverviewPage: React.FC = () => {
                     }}
                     onChange={setReSettleOptions}
                     onConfirm={handleMonthlyReSettle}
-                    disabled={reSettling}
+                    disabled={reSettling || !canRecalculate}
                     processing={reSettling}
                     progress={reSettleProgress}
                     statusText={reSettleStatus}

@@ -12,6 +12,7 @@ from fastapi import APIRouter, File, UploadFile, Depends, HTTPException
 
 from webapp.tools.mongo import DATABASE
 from webapp.tools.security import get_current_active_user, User
+from webapp.api.dependencies.authz import require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +184,8 @@ def get_customer_energy(month: str):
 @router.post("/customer-energy/import", summary="导入客户结算月度电量 Excel")
 async def import_customer_energy(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:basic_monthly_manual_import:edit"))
 ):
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="只支持 Excel 文件（.xlsx/.xls）")
@@ -214,7 +216,8 @@ async def import_customer_energy(
 @router.delete("/customer-energy/{month}", summary="删除指定月份客户电量")
 def delete_customer_energy(
     month: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:basic_monthly_manual_import:edit"))
 ):
     result = COLLECTION.delete_one({'_id': month})
     if result.deleted_count == 0:

@@ -14,6 +14,7 @@ from webapp.tools.security import get_current_active_user, User
 from webapp.services.meter_data_import_service import MeterDataImportService
 from webapp.services.mp_data_import_service import MpDataImportService
 from webapp.services.load_aggregation_service import LoadAggregationService
+from webapp.api.dependencies.authz import require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -599,7 +600,8 @@ async def trigger_reaggregate(
     end_date: Optional[str] = Query(None, description="结束日期（可选，默认自动检测）"),
     mode: str = Query("incremental", description="聚合模式: incremental(增量)/full(全量)"),
     delete_existing: bool = Query(False, description="是否删除原数据（仅全量模式有效）"),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:basic_monthly_manual_import:edit"))
 ):
     """
     触发重新聚合计算（真正的增量逻辑）
@@ -801,7 +803,8 @@ async def trigger_reaggregate(
 async def import_meter_data(
     file: UploadFile = File(..., description="Excel 文件"),
     overwrite: bool = Form(False, description="覆盖已存在数据"),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:basic_monthly_manual_import:edit"))
 ):
     """
     导入电表示度数据（Excel 文件）
@@ -832,7 +835,8 @@ async def import_meter_data(
 async def import_mp_data(
     file: UploadFile = File(..., description="Excel 文件"),
     overwrite: bool = Form(False, description="覆盖已存在数据"),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:basic_monthly_manual_import:edit"))
 ):
     """
     导入计量点负荷数据（Excel 文件）
@@ -873,7 +877,8 @@ async def preview_calibration(
     customer_id: str = Query(..., description="客户ID"),
     start_date: str = Query(..., description="开始日期 (YYYY-MM-DD)"),
     end_date: str = Query(..., description="结束日期 (YYYY-MM-DD)"),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:basic_monthly_manual_import:edit"))
 ):
     """
     预览各个户号的校验状态 (平衡/偏差/缺数)
@@ -892,7 +897,8 @@ async def calculate_calibration_coefficients(
     start_date: str = Query(..., description="开始日期 (YYYY-MM-DD)"),
     end_date: str = Query(..., description="结束日期 (YYYY-MM-DD)"),
     account_no: Optional[str] = Query(None, description="指定户号 (可选)"),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:basic_monthly_manual_import:edit"))
 ):
     """
     计算推荐的电表分配系数 (基于约束最小二乘法)
@@ -909,7 +915,8 @@ async def calculate_calibration_coefficients(
 @router.post("/calibration/apply", summary="应用推荐系数")
 async def apply_calibration_coefficients(
     request: dict, # {customer_id, coefficients, update_history, history_range}
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:basic_monthly_manual_import:edit"))
 ):
     """
     应用推荐系数，并可选触发历史重算
@@ -966,7 +973,8 @@ async def get_signed_customers(
 
 @router.post("/diagnose", summary="执行批量诊断")
 async def diagnose_all_customers(
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:basic_load_validation:edit"))
 ):
     """
     诊断所有签约客户的数据质量

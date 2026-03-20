@@ -35,6 +35,7 @@ import {
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
 import { MobileDataCard } from '../components/MobileDataCard';
 import { useSelectableSeries } from '../hooks/useSelectableSeries';
+import { useAuth } from '../contexts/AuthContext';
 
 // 对应后端 price_sgcc 集合的文档结构
 interface SGCCPriceData {
@@ -74,6 +75,8 @@ const StatCard: React.FC<{ title: string; value: string; icon: React.ReactElemen
 
 
 const GridAgencyPricePage: React.FC = () => {
+    const { hasPermission } = useAuth();
+    const canEdit = hasPermission('module:basic_sgcc_price:edit');
     // State for the grid
     const [gridData, setGridData] = useState<SGCCPriceData[]>([]);
     const [rowCount, setRowCount] = useState<number>(0);
@@ -171,10 +174,12 @@ const GridAgencyPricePage: React.FC = () => {
     };
 
     const handleImportClick = () => {
+        if (!canEdit) return;
         fileInputRef.current?.click();
     };
 
     const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (!canEdit) return;
         const file = event.target.files?.[0];
         if (!file) return;
 
@@ -382,7 +387,7 @@ const GridAgencyPricePage: React.FC = () => {
                                 variant="outlined"
                                 startIcon={importLoading ? <CircularProgress size={20} /> : <FileUploadIcon />}
                                 onClick={handleImportClick}
-                                disabled={importLoading}
+                                disabled={importLoading || !canEdit}
                                 size="small"
                             >
                                 {importLoading ? '导入中...' : '导入公告'}

@@ -540,7 +540,8 @@ from webapp.services.contract_pdf_service import ContractPdfService
 @router.post("/upload-pdfs", summary="批量上传合同PDF文件")
 async def upload_contract_pdfs(
     files: List[UploadFile] = File(..., description="PDF文件列表"),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:contract:update"))
 ):
     """
     批量上传PDF文件，自动匹配合同记录
@@ -642,7 +643,8 @@ import dateutil.parser
 @router.post("/parse-pdf", response_model=ParsePdfResponse, summary="解析合同PDF进行预览")
 async def parse_contract_pdf(
     file: UploadFile = File(..., description="合同原件PDF文件"),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:contract:create"))
 ):
     """
     解析PDF返回其中提取的数据，并检查与现有系统的重复情况。
@@ -734,7 +736,8 @@ async def parse_contract_pdf(
 @router.post("/import-create", summary="确认导入创建合同及相关数据")
 async def import_create_contract(
     req: ImportCreateRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:contract:create"))
 ):
     """
     根据前端确认的数据创建客户、套餐和合同
@@ -887,7 +890,8 @@ async def get_contract_pdf(
 async def upload_single_pdf(
     contract_id: str,
     file: UploadFile = File(..., description="PDF文件"),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:contract:update"))
 ):
     """
     为指定合同上传/替换PDF文件

@@ -38,6 +38,7 @@ interface ContractDetailsDialogProps {
     onClose: () => void;
     onEdit?: (id: string) => void;
     onCopy?: (id: string) => void;
+    canEdit?: boolean;
 }
 
 // 状态中文映射
@@ -76,7 +77,8 @@ export const ContractDetailsDialog: React.FC<ContractDetailsDialogProps> = ({
     contractId,
     onClose,
     onEdit,
-    onCopy
+    onCopy,
+    canEdit = true
 }) => {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -162,6 +164,7 @@ export const ContractDetailsDialog: React.FC<ContractDetailsDialogProps> = ({
 
     // 上传PDF
     const handleUploadPdf = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (!canEdit) return;
         const file = event.target.files?.[0];
         if (!file || !contractId) return;
 
@@ -199,6 +202,7 @@ export const ContractDetailsDialog: React.FC<ContractDetailsDialogProps> = ({
 
     // 处理编辑操作
     const handleEdit = () => {
+        if (!canEdit) return;
         if (contractId && onEdit) {
             onClose();
             onEdit(contractId);
@@ -378,7 +382,7 @@ export const ContractDetailsDialog: React.FC<ContractDetailsDialogProps> = ({
                     variant="outlined"
                     startIcon={pdfUploadLoading ? <CircularProgress size={16} /> : <UploadIcon />}
                     onClick={() => pdfInputRef.current?.click()}
-                    disabled={pdfUploadLoading}
+                    disabled={pdfUploadLoading || !canEdit}
                 >
                     {hasPdf ? '替换合同原件' : '上传合同原件'}
                 </Button>
@@ -451,7 +455,7 @@ export const ContractDetailsDialog: React.FC<ContractDetailsDialogProps> = ({
                 <Button
                     variant="contained"
                     onClick={handleEdit}
-                    disabled={!data || data?.status !== 'pending'}
+                    disabled={!data || data?.status !== 'pending' || !canEdit}
                     startIcon={<EditIcon />}
                 >
                     编辑

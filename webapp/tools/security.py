@@ -114,6 +114,14 @@ def authenticate_user(db_session, username: str, password: str):
         return False
     if not verify_password(password, user.hashed_password):
         return False
+    # 登录成功后立刻刷新活跃时间，避免“首个受保护请求”被空闲超时误判
+    try:
+        db_session.users.update_one(
+            {"username": username},
+            {"$set": {"last_active_at": datetime.now(timezone.utc).isoformat()}}
+        )
+    except Exception as e:
+        logger.warning(f"登录后更新 last_active_at 失败（非致命）: {e}")
     return user
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):

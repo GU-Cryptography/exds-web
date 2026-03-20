@@ -1,6 +1,11 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
 import { jwtDecode } from 'jwt-decode';
 import apiClient from '../api/client';
+import {
+    AUTH_STORAGE_KEYS,
+    clearPermissionSnapshot,
+    writePermissionSnapshot,
+} from '../auth/permissionPrecheck';
 
 // ===== 类型定义 =====
 interface JwtPayload {
@@ -33,7 +38,7 @@ interface AuthContextType {
 }
 
 // ===== 工具函数 =====
-const AUTH_TOKEN_KEY = 'token';
+const AUTH_TOKEN_KEY = AUTH_STORAGE_KEYS.token;
 
 function getToken(): string | null {
     return localStorage.getItem(AUTH_TOKEN_KEY);
@@ -84,6 +89,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // ===== 登出 =====
     const logout = useCallback((reason?: string) => {
         removeToken();
+        clearPermissionSnapshot();
         setIsAuthenticated(false);
         setUsername(null);
         setDisplayName(null);
@@ -108,8 +114,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setPermissions(info.permissions);
             setIsSuperAdmin(info.is_super_admin);
             setIdleTimeoutMinutes(info.idle_timeout_minutes || 30);
+            writePermissionSnapshot({
+                permissions: info.permissions || [],
+                isSuperAdmin: info.is_super_admin || false,
+            });
         } catch (e) {
             console.warn('权限加载失败，使用空权限集', e);
+            clearPermissionSnapshot();
         } finally {
             setIsPermissionLoaded(true);
         }
@@ -149,6 +160,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const decoded = decodeToken(token);
         if (!decoded) {
             removeToken();
+            clearPermissionSnapshot();
             return;
         }
         setUsername(decoded.sub);
@@ -163,6 +175,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const decoded = decodeToken(token);
         if (!decoded || decoded.exp * 1000 < Date.now()) {
             removeToken();
+            clearPermissionSnapshot();
             return;
         }
         setUsername(decoded.sub);

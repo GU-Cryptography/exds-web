@@ -106,6 +106,7 @@ interface RetailMonthlyTabProps {
     jobInfo: JobInfo | null;
     snackbarOpen: boolean;
     onCloseSnackbar: () => void;
+    canExecuteSettlement: boolean;
 }
 
 const formatNumber = (value?: number | null, digits = 2): string => {
@@ -234,6 +235,7 @@ export const RetailMonthlyTab: React.FC<RetailMonthlyTabProps> = ({
     jobInfo,
     snackbarOpen,
     onCloseSnackbar,
+    canExecuteSettlement,
 }) => {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -377,7 +379,7 @@ export const RetailMonthlyTab: React.FC<RetailMonthlyTabProps> = ({
                     variant="contained"
                     startIcon={<CalculateIcon />}
                     onClick={onExecuteRetailSettlement}
-                    disabled={loading}
+                    disabled={loading || !canExecuteSettlement}
                     sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 700, boxShadow: 'none' }}
                 >
                     测算所有客户
@@ -694,7 +696,7 @@ export const RetailMonthlyTab: React.FC<RetailMonthlyTabProps> = ({
                     {!jobInfo ? (
                         <>
                             <Button onClick={onCloseProgress} color="inherit" sx={{ borderRadius: 2, fontWeight: 600 }}>取消</Button>
-                            <Button variant="contained" onClick={onStartSettlement} startIcon={<CalculateIcon />} sx={{ borderRadius: 2, px: 3, fontWeight: 600, boxShadow: 'none' }}>
+                            <Button variant="contained" onClick={onStartSettlement} startIcon={<CalculateIcon />} disabled={!canExecuteSettlement} sx={{ borderRadius: 2, px: 3, fontWeight: 600, boxShadow: 'none' }}>
                                 开始结算
                             </Button>
                         </>

@@ -7,6 +7,7 @@ import {
 } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import apiClient from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface MonthMeta {
     _id: string;
@@ -15,6 +16,8 @@ interface MonthMeta {
 }
 
 const MechanismEnergyTab: React.FC = () => {
+    const { hasPermission } = useAuth();
+    const canEdit = hasPermission('module:basic_monthly_manual_import:edit');
     const [months, setMonths] = useState<MonthMeta[]>([]);
     const [loadingList, setLoadingList] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -45,6 +48,7 @@ const MechanismEnergyTab: React.FC = () => {
     useEffect(() => { fetchMonths(); }, [fetchMonths]);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!canEdit) return;
         const f = e.target.files?.[0] || null;
         setImportFile(f);
         if (f) {
@@ -53,6 +57,7 @@ const MechanismEnergyTab: React.FC = () => {
     };
 
     const handleImport = async () => {
+        if (!canEdit) return;
         if (!importFile) return;
         setImporting(true);
         const formData = new FormData();
@@ -97,7 +102,7 @@ const MechanismEnergyTab: React.FC = () => {
             <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
                 <Typography variant="subtitle1" fontWeight={600}>机制电量分配明细</Typography>
                 <Box sx={{ flexGrow: 1 }} />
-                <Button variant="contained" startIcon={<UploadFileIcon />} component="label">
+                <Button variant="contained" startIcon={<UploadFileIcon />} component="label" disabled={!canEdit}>
                     导入机制电量数据文件
                     <input id="mechanism-file-upload" type="file" hidden accept=".xlsx,.xls" onChange={handleFileChange} />
                 </Button>
@@ -153,7 +158,7 @@ const MechanismEnergyTab: React.FC = () => {
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={() => setImportDialogOpen(false)} disabled={importing}>取消</Button>
-                    <Button onClick={handleImport} variant="contained" disabled={importing} startIcon={importing ? <CircularProgress size={16} /> : undefined}>
+                    <Button onClick={handleImport} variant="contained" disabled={importing || !canEdit} startIcon={importing ? <CircularProgress size={16} /> : undefined}>
                         {importing ? '导入中...' : '确认导入'}
                     </Button>
                 </DialogActions>

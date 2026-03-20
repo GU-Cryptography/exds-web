@@ -1,10 +1,11 @@
 import logging
-from fastapi import APIRouter, Query, Body, HTTPException
+from fastapi import APIRouter, Query, Body, Depends, HTTPException
 
 from webapp.tools.mongo import DATABASE
 from webapp.services.pricing_model_service import pricing_model_service
 from webapp.services.package_service import PackageService
 from webapp.services.pricing_engine import PricingEngine
+from webapp.api.dependencies.authz import require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,11 @@ def get_pricing_model(model_code: str):
 
 
 @router.post("/pricing-models/{model_code}/validate", summary="验证定价配置")
-def validate_pricing_config(model_code: str, data: dict = Body(...)):
+def validate_pricing_config(
+    model_code: str,
+    data: dict = Body(...),
+    _ctx = Depends(require_permission("module:customer_retail_packages:edit")),
+):
     try:
         pricing_config = data.get("pricing_config", {})
 
@@ -58,7 +63,10 @@ def validate_pricing_config(model_code: str, data: dict = Body(...)):
         raise HTTPException(status_code=500, detail=f"验证定价配置时出错: {str(e)}")
 
 @router.post("/retail-packages/calculate-price", summary="计算套餐价格")
-async def calculate_package_price(data: dict = Body(...)):
+async def calculate_package_price(
+    data: dict = Body(...),
+    _ctx = Depends(require_permission("module:customer_retail_packages:edit")),
+):
     package_id = data.get("package_id")
     date = data.get("date")
     time_period = data.get("time_period")

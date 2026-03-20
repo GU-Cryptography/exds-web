@@ -23,6 +23,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import apiClient from '../api/client';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
 import { useTabContext } from '../contexts/TabContext';
+import { useAuth } from '../contexts/AuthContext';
 import SingleCustomerSettlementDetailPage from './SingleCustomerSettlementDetailPage';
 import SettlementRecalculateDialog, {
     SettlementRecalculateOptions,
@@ -114,6 +115,8 @@ const formatYuan = (val: number): string => val.toLocaleString('zh-CN', { minimu
 const profitColor = (val: number): string => val >= 0 ? '#4caf50' : '#f44336';
 
 const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?: string }> = ({ initialDate, initialVersion }) => {
+    const { hasPermission } = useAuth();
+    const canRecalculate = hasPermission('module:settlement_daily_detail:edit') && hasPermission('settlement:recalc:execute');
     const [searchParams, setSearchParams] = useSearchParams();
     const navigate = useNavigate();
     const isTablet = useMediaQuery((t: Theme) => t.breakpoints.down('md'));
@@ -237,6 +240,7 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
     };
 
     const executeReSettle = async () => {
+        if (!canRecalculate) return;
         if (!selectedDate) return;
         setProcessing(true);
         setReSettleDialogOpen(false);
@@ -1354,7 +1358,7 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                         variant="contained"
                         startIcon={<RefreshIcon />}
                         onClick={handleReSettle}
-                        disabled={loading}
+                        disabled={loading || !canRecalculate}
                         color="primary"
                     >
                         重新结算
@@ -1457,7 +1461,7 @@ const PreSettlementDetailPage: React.FC<{ initialDate?: string, initialVersion?:
                     onClose={() => setReSettleDialogOpen(false)}
                     onChange={setReSettleOptions}
                     onConfirm={executeReSettle}
-                    disabled={processing}
+                    disabled={processing || !canRecalculate}
                 />
             </Box>
         </LocalizationProvider >

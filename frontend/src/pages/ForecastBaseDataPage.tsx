@@ -38,6 +38,7 @@ import {
 } from 'recharts';
 import apiClient from '../api/client';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
+import { useAuth } from '../contexts/AuthContext';
 
 // ============ 类型定义 ============
 interface TimeSeriesDataPoint {
@@ -258,6 +259,8 @@ const ChartComponent = React.memo<ChartComponentProps>(({
 });
 
 export const ForecastBaseDataPage: React.FC = () => {
+    const { hasPermission } = useAuth();
+    const canEdit = hasPermission('module:forecast_price_baseline:edit');
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
@@ -355,6 +358,10 @@ export const ForecastBaseDataPage: React.FC = () => {
     };
 
     const fetchCurves = async (baseDate: Date | null) => {
+        if (!canEdit) {
+            setCurvesData([]);
+            return;
+        }
         if (!baseDate) return;
 
         const selectedKeys = Object.keys(selectedItems).filter((key) => selectedItems[key]);
@@ -404,6 +411,7 @@ export const ForecastBaseDataPage: React.FC = () => {
     };
 
     const handleCheckboxToggle = (dataItemId: number, offset: number) => {
+        if (!canEdit) return;
         const key = `${dataItemId}_${offset}`;
         setSelectedItems((prev) => ({
             ...prev,
@@ -730,18 +738,19 @@ export const ForecastBaseDataPage: React.FC = () => {
                                             padding="none"
                                             sx={{
                                                 backgroundColor: bgColor,
-                                                cursor: isAvailable ? 'pointer' : 'default',
+                                                cursor: isAvailable && canEdit ? 'pointer' : 'default',
                                                 '&:hover': {
-                                                    backgroundColor: isAvailable ? (isSelected ? 'primary.main' : 'action.selected') : undefined
+                                                    backgroundColor: isAvailable && canEdit ? (isSelected ? 'primary.main' : 'action.selected') : undefined
                                                 }
                                             }}
-                                            onClick={() => isAvailable && handleCheckboxToggle(item.id, offset)}
+                                            onClick={() => isAvailable && canEdit && handleCheckboxToggle(item.id, offset)}
                                         >
                                             {isAvailable ? (
                                                 <Checkbox
                                                     checked={isSelected}
                                                     size="small"
                                                     color="primary"
+                                                    disabled={!canEdit}
                                                     sx={{ p: 0 }}
                                                 />
                                             ) : (

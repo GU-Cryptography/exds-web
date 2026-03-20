@@ -1,5 +1,5 @@
-﻿import React, { useEffect, useState } from 'react';
-import { Box, Collapse, Divider, List, ListItemButton, ListItemIcon, ListItemText, Toolbar } from '@mui/material';
+import React, { useEffect, useState } from 'react';
+import { Box, Collapse, Divider, List, ListItemButton, ListItemIcon, ListItemText, Toolbar, Tooltip } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     AccountBoxOutlined,
@@ -33,10 +33,12 @@ import {
     TrendingUpOutlined,
     VerifiedUserOutlined,
     VpnKeyOutlined,
+    LockOutlined,
 } from '@mui/icons-material';
 import { useTabContext } from '../contexts/TabContext';
 import { getRouteConfig } from '../config/routes';
 import { useAuth } from '../contexts/AuthContext';
+import { getRequiredViewPermissionForRoute } from '../auth/permissionPrecheck';
 
 interface SubMenuItem {
     text: string;
@@ -138,8 +140,8 @@ const menuItems: MenuItem[] = [
         text: '系统管理',
         icon: <SettingsIcon />,
         subItems: [
-            { text: '用户与权限', path: '/system-settings/user-permissions', icon: <VpnKeyOutlined />, requiredPermission: 'system:auth:manage' },
-            { text: '数据下载监控', path: '/system-settings/data-access', icon: <SourceOutlined />, requiredPermission: 'system:data_access:manage' },
+            { text: '用户与权限', path: '/system-settings/user-permissions', icon: <VpnKeyOutlined /> },
+            { text: '数据下载监控', path: '/system-settings/data-access', icon: <SourceOutlined /> },
             { text: '告警与日志', path: '/system-settings/system-logs', icon: <NotificationsActiveOutlined /> },
         ],
     },
@@ -155,20 +157,15 @@ export const Sidebar: React.FC<{
     const tabContext = useTabContext();
     const { hasPermission } = useAuth();
 
-    // 过滤菜单项
-    const filteredMenuItems = React.useMemo(() => {
-        return menuItems.map(item => {
-            if (item.requiredPermission && !hasPermission(item.requiredPermission)) return null;
-            if (item.subItems) {
-                const subItems = item.subItems.filter(sub => {
-                    if (sub.requiredPermission && !hasPermission(sub.requiredPermission)) return false;
-                    return true;
-                });
-                if (subItems.length === 0) return null;
-                return { ...item, subItems };
-            }
-            return item;
-        }).filter(Boolean) as MenuItem[];
+    const getPathPermissionState = React.useCallback((path: string, requiredPermission?: string) => {
+        const viewPermission = getRequiredViewPermissionForRoute(path);
+        if (viewPermission && !hasPermission(viewPermission)) {
+            return { disabled: true, tooltip: `无权限（需要 ${viewPermission}）` };
+        }
+        if (requiredPermission && !hasPermission(requiredPermission)) {
+            return { disabled: true, tooltip: `无权限（需要 ${requiredPermission}）` };
+        }
+        return { disabled: false, tooltip: '' };
     }, [hasPermission]);
 
     const handleClick = (text: string) => {
@@ -205,14 +202,14 @@ export const Sidebar: React.FC<{
 
     useEffect(() => {
         if (!activePath) return;
-        filteredMenuItems.forEach((item) => {
+        menuItems.forEach((item) => {
             if (!item.subItems) return;
             const hasActiveSubItem = item.subItems.some((sub) => activePath.startsWith(sub.path));
             if (hasActiveSubItem) {
                 setOpen((prev) => ({ ...prev, [item.text]: true }));
             }
         });
-    }, [activePath, filteredMenuItems]);
+    }, [activePath]);
 
     const handleLogout = () => {
         localStorage.removeItem('token');
@@ -224,7 +221,7 @@ export const Sidebar: React.FC<{
             <Toolbar />
             <Divider />
             <List component="nav" sx={{ flexGrow: 1, p: 1 }}>
-                {filteredMenuItems.map((item) => {
+                {menuItems.map((item) => {
                     if (item.subItems) {
                         const isOpen = open[item.text] || item.subItems.some((sub) => activePath.startsWith(sub.path));
                         return (
@@ -237,15 +234,27 @@ export const Sidebar: React.FC<{
                                 <Collapse in={isOpen} timeout="auto" unmountOnExit>
                                     <List component="div" disablePadding>
                                         {item.subItems.map((subItem) => (
-                                            <ListItemButton
-                                                key={subItem.text}
-                                                onClick={() => handleMenuItemClick(subItem.path)}
-                                                selected={activePath === subItem.path}
-                                                sx={{ pl: 4, borderRadius: '8px' }}
-                                            >
-                                                <ListItemIcon sx={{ minWidth: 40 }}>{subItem.icon}</ListItemIcon>
-                                                <ListItemText primary={subItem.text} />
-                                            </ListItemButton>
+                                            (() => {
+                                                const state = getPathPermissionState(subItem.path, subItem.requiredPermission);
+                                                const content = (
+                                                    <ListItemButton
+                                                        key={subItem.text}
+                                                        onClick={() => !state.disabled && handleMenuItemClick(subItem.path)}
+                                                        selected={activePath === subItem.path}
+                                                        disabled={state.disabled}
+                                                        sx={{ pl: 4, borderRadius: '8px' }}
+                                                    >
+                                                        <ListItemIcon sx={{ minWidth: 40 }}>{subItem.icon}</ListItemIcon>
+                                                        <ListItemText primary={subItem.text} />
+                                                        {state.disabled && <LockOutlined fontSize="small" color="disabled" />}
+                                                    </ListItemButton>
+                                                );
+                                                return state.disabled ? (
+                                                    <Tooltip key={subItem.text} title={state.tooltip} placement="right">
+                                                        <span>{content}</span>
+                                                    </Tooltip>
+                                                ) : content;
+                                            })()
                                         ))}
                                     </List>
                                 </Collapse>
@@ -253,17 +262,25 @@ export const Sidebar: React.FC<{
                         );
                     }
 
-                    return (
+                    const state = getPathPermissionState(item.path || '#', item.requiredPermission);
+                    const content = (
                         <ListItemButton
                             key={item.text}
-                            onClick={() => handleMenuItemClick(item.path || '#')}
+                            onClick={() => !state.disabled && handleMenuItemClick(item.path || '#')}
                             selected={activePath === item.path}
+                            disabled={state.disabled}
                             sx={{ borderRadius: '8px' }}
                         >
                             <ListItemIcon sx={{ minWidth: 40 }}>{item.icon}</ListItemIcon>
                             <ListItemText primary={item.text} />
+                            {state.disabled && <LockOutlined fontSize="small" color="disabled" />}
                         </ListItemButton>
                     );
+                    return state.disabled ? (
+                        <Tooltip key={item.text} title={state.tooltip} placement="right">
+                            <span>{content}</span>
+                        </Tooltip>
+                    ) : content;
                 })}
             </List>
             <Divider />
@@ -278,3 +295,4 @@ export const Sidebar: React.FC<{
         </Box>
     );
 };
+

@@ -40,6 +40,7 @@ import { LoadDataImportDialog } from '../components/load-diagnosis/LoadDataImpor
 import { LoadDataAggregationDialog } from '../components/load-diagnosis/LoadDataAggregationDialog';
 import { useTabContext } from '../contexts/TabContext';
 import { LoadDataDiagnosisWorkbench } from './LoadDataDiagnosisWorkbench';
+import { useAuth } from '../contexts/AuthContext';
 
 // 诊断结果类型
 interface DiagnosisResult {
@@ -75,6 +76,9 @@ export const LoadDataDiagnosisPage: React.FC = () => {
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
     const { addTab } = useTabContext();
+    const { hasPermission } = useAuth();
+    const canValidationEdit = hasPermission('module:basic_load_validation:edit');
+    const canManualImportEdit = hasPermission('module:basic_monthly_manual_import:edit');
 
     // 状态
     const [loading, setLoading] = useState(false);
@@ -162,6 +166,7 @@ export const LoadDataDiagnosisPage: React.FC = () => {
 
     // 执行诊断
     const handleDiagnose = async () => {
+        if (!canValidationEdit) return;
         setDiagnosing(true);
         setDiagnosisProgress(0);
         try {
@@ -683,7 +688,7 @@ export const LoadDataDiagnosisPage: React.FC = () => {
                             variant="contained"
                             startIcon={diagnosing ? <CircularProgress size={16} color="inherit" /> : <PlayArrowIcon />}
                             onClick={handleDiagnose}
-                            disabled={diagnosing || loading}
+                            disabled={diagnosing || loading || !canValidationEdit}
                             sx={{ whiteSpace: 'nowrap' }}
                         >
                             {diagnosing ? '诊断中...' : '执行诊断'}
@@ -695,6 +700,7 @@ export const LoadDataDiagnosisPage: React.FC = () => {
                             variant="text"
                             startIcon={<UploadIcon />}
                             onClick={() => setImportDialogOpen(true)}
+                            disabled={!canManualImportEdit}
                         >
                             导入数据
                         </Button>
@@ -702,7 +708,7 @@ export const LoadDataDiagnosisPage: React.FC = () => {
                             variant="outlined"
                             startIcon={<SyncIcon />}
                             onClick={() => setAggregationDialogOpen(true)}
-                            disabled={diagnosing}
+                            disabled={diagnosing || !canManualImportEdit}
                         >
                             执行聚合
                         </Button>
@@ -757,6 +763,7 @@ export const LoadDataDiagnosisPage: React.FC = () => {
             <LoadDataImportDialog
                 open={importDialogOpen}
                 onClose={() => setImportDialogOpen(false)}
+                canEdit={canManualImportEdit}
                 onSuccess={() => {
                     clearDiagnosisCache();
                     fetchSignedCustomers();
@@ -767,6 +774,7 @@ export const LoadDataDiagnosisPage: React.FC = () => {
             <LoadDataAggregationDialog
                 open={aggregationDialogOpen}
                 onClose={() => setAggregationDialogOpen(false)}
+                canEdit={canManualImportEdit}
                 onSuccess={() => {
                     clearDiagnosisCache();
                     fetchSignedCustomers();

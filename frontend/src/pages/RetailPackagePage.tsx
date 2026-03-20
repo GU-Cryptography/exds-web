@@ -17,6 +17,7 @@ import { format } from 'date-fns';
 import { PackageEditorDialog } from '../components/PackageEditorDialog';
 import { PackageDetailsDialog } from '../components/PackageDetailsDialog';
 import usePricingModels from '../hooks/usePricingModels'; // 导入Hook
+import { useAuth } from '../contexts/AuthContext';
 
 interface Package {
   id?: string;
@@ -60,6 +61,9 @@ const getStatusChipColor = (status: string): 'success' | 'warning' | 'default' =
 };
 
 const RetailPackagePage: React.FC = () => {
+  const { hasPermission } = useAuth();
+  const canModuleEdit = hasPermission('module:customer_retail_packages:edit');
+  const canCriticalDelete = hasPermission('data:critical:delete');
   // 路由参数和导航
   const params = useParams<{ packageId?: string }>();
   const navigate = useNavigate();
@@ -178,11 +182,11 @@ const RetailPackagePage: React.FC = () => {
   const { models: pricingModels, getModelDisplayName } = usePricingModels();
 
   // 状态判断函数（根据状态机规则）
-  const canEdit = (status: string) => status === 'draft';
-  const canDelete = (status: string) => status === 'draft';
-  const canActivate = (status: string) => status === 'draft';
-  const canArchive = (status: string) => status === 'active';
-  const canCopy = (status: string) => true; // 所有状态都能复制
+  const canEdit = (status: string) => canModuleEdit && status === 'draft';
+  const canDelete = (status: string) => canModuleEdit && canCriticalDelete && status === 'draft';
+  const canActivate = (status: string) => canModuleEdit && status === 'draft';
+  const canArchive = (status: string) => canModuleEdit && status === 'active';
+  const canCopy = (_status: string) => canModuleEdit; // 所有状态都能复制（仍需编辑权限）
 
   // Snackbar辅助函数
   const showSnackbar = (message: string, severity: 'success' | 'error' | 'info' | 'warning' = 'success') => {
@@ -258,6 +262,7 @@ const RetailPackagePage: React.FC = () => {
   };
 
   const handleArchive = async (packageId: string) => {
+    if (!canModuleEdit) return;
     setPackageToArchive(packageId);
     setArchiveDialogOpen(true);
   };
@@ -284,6 +289,7 @@ const RetailPackagePage: React.FC = () => {
   };
 
   const handleActivate = async (packageId: string) => {
+    if (!canModuleEdit) return;
     setPackageToActivate(packageId);
     setActivateDialogOpen(true);
   };
@@ -327,6 +333,7 @@ const RetailPackagePage: React.FC = () => {
   };
 
   const handleEdit = (packageId: string) => {
+    if (!canModuleEdit) return;
     if (isMobile) {
       // 移动端使用路由导航
       navigate(`/customer/retail-packages/edit/${packageId}`);
@@ -339,6 +346,7 @@ const RetailPackagePage: React.FC = () => {
   };
 
   const handleCopy = (packageId: string) => {
+    if (!canModuleEdit) return;
     if (isMobile) {
       // 移动端使用路由导航
       navigate(`/customer/retail-packages/copy/${packageId}`);
@@ -351,6 +359,7 @@ const RetailPackagePage: React.FC = () => {
   };
 
   const handleCreate = () => {
+    if (!canModuleEdit) return;
     if (isMobile) {
       // 移动端使用路由导航
       navigate('/customer/retail-packages/create');
@@ -414,6 +423,7 @@ const RetailPackagePage: React.FC = () => {
 
   // 删除功能相关处理函数
   const handleDeleteClick = (packageId: string) => {
+    if (!canModuleEdit || !canCriticalDelete) return;
     setPackageToDelete(packageId);
     setDeleteDialogOpen(true);
     setDeleteError(null);
@@ -690,7 +700,7 @@ const RetailPackagePage: React.FC = () => {
       {/* List Card */}
       <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 } }}>
         <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Button variant="contained" color="primary" onClick={handleCreate}>+ 新增</Button>
+          <Button variant="contained" color="primary" onClick={handleCreate} disabled={!canModuleEdit}>+ 新增</Button>
         </Box>
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>

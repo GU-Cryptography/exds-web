@@ -52,12 +52,14 @@ interface ContractImportDialogProps {
   open: boolean;
   onClose: () => void;
   onSuccess: (result: ImportResult) => void;
+  canEdit?: boolean;
 }
 
 export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
   open,
   onClose,
-  onSuccess
+  onSuccess,
+  canEdit = true
 }) => {
 
   // 导入类型：excel 或 pdf 或 pdf_create
@@ -83,6 +85,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
 
   // Excel文件选择处理
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) return;
     const file = event.target.files?.[0];
     if (file) {
       const validTypes = [
@@ -109,6 +112,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
 
   // PDF文件选择处理
   const handlePdfFilesSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) return;
     const files = event.target.files;
     if (files) {
       const pdfFiles: File[] = [];
@@ -136,6 +140,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
 
   // Excel导入处理
   const handleImport = async () => {
+    if (!canEdit) return;
     if (!selectedFile) {
       setError('请先选择要导入的Excel文件');
       return;
@@ -159,6 +164,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
 
   // PDF上传处理
   const handlePdfUpload = async () => {
+    if (!canEdit) return;
     if (selectedPdfFiles.length === 0) {
       setError('请先选择要上传的PDF文件');
       return;
@@ -192,6 +198,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
 
   // 导入创建合同(PDF)选择处理
   const handleCreatePdfSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) return;
     const file = event.target.files?.[0];
     if (file) {
       if (!file.name.toLowerCase().endsWith('.pdf')) {
@@ -223,6 +230,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
 
   // 确认创建合同处理
   const handleConfirmCreateContract = async () => {
+    if (!canEdit) return;
     if (!parseResult || !createPdfFile) return;
 
     if (!parseResult.customer_name || !parseResult.package_name || !parseResult.period) {
@@ -506,7 +514,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
             transition: 'all 0.2s ease-in-out',
             '&:hover': { borderColor: 'primary.main', backgroundColor: 'action.hover' }
           }}
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => canEdit && fileInputRef.current?.click()}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         >
@@ -576,7 +584,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
             transition: 'all 0.2s ease-in-out',
             '&:hover': { borderColor: 'primary.main', backgroundColor: 'action.hover' }
           }}
-          onClick={() => pdfInputRef.current?.click()}
+          onClick={() => canEdit && pdfInputRef.current?.click()}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         >
@@ -627,7 +635,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
           <Button
             size="small"
             sx={{ mt: 1 }}
-            onClick={() => pdfInputRef.current?.click()}
+            onClick={() => canEdit && pdfInputRef.current?.click()}
           >
             继续添加文件
           </Button>
@@ -670,7 +678,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
             transition: 'all 0.2s ease-in-out',
             '&:hover': { borderColor: 'primary.main', backgroundColor: 'action.hover' }
           }}
-          onClick={() => createPdfRef.current?.click()}
+          onClick={() => canEdit && createPdfRef.current?.click()}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         >
@@ -797,9 +805,9 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
       <DialogContent>
         {/* Tab切换 */}
         <Tabs value={importType} onChange={handleTabChange} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
-          <Tab label="导入订单列表 (Excel)" value="excel" disabled={loading || createSuccess} />
-          <Tab label="批量上传合同 (PDF)" value="pdf" disabled={loading || createSuccess} />
-          <Tab label="导入创建合同 (PDF)" value="pdf_create" disabled={loading || createSuccess} />
+          <Tab label="导入订单列表 (Excel)" value="excel" disabled={loading || createSuccess || !canEdit} />
+          <Tab label="批量上传合同 (PDF)" value="pdf" disabled={loading || createSuccess || !canEdit} />
+          <Tab label="导入创建合同 (PDF)" value="pdf_create" disabled={loading || createSuccess || !canEdit} />
         </Tabs>
 
         <Box sx={{ minHeight: 300 }}>
@@ -837,7 +845,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
               <Button
                 onClick={handleImport}
                 variant="contained"
-                disabled={!selectedFile || loading}
+                disabled={!selectedFile || loading || !canEdit}
                 startIcon={loading ? <CircularProgress size={16} /> : <DownloadIcon />}
               >
                 {loading ? '导入中...' : '开始导入'}
@@ -848,7 +856,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
               <Button
                 onClick={handlePdfUpload}
                 variant="contained"
-                disabled={selectedPdfFiles.length === 0 || loading}
+                disabled={selectedPdfFiles.length === 0 || loading || !canEdit}
                 startIcon={loading ? <CircularProgress size={16} /> : <PdfIcon />}
               >
                 {loading ? '上传中...' : '开始上传'}
@@ -859,7 +867,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
               <Button
                 onClick={handleConfirmCreateContract}
                 variant="contained"
-                disabled={!createPdfFile || !parseResult || loading || parseResult.is_contract_duplicate}
+                disabled={!createPdfFile || !parseResult || loading || parseResult.is_contract_duplicate || !canEdit}
                 startIcon={loading ? <CircularProgress size={16} /> : <CheckCircleIcon />}
               >
                 {loading ? '创建中...' : '确认导入创建'}

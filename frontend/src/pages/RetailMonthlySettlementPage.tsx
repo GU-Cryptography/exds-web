@@ -29,6 +29,7 @@ import {
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import apiClient from '../api/client';
+import { useAuth } from '../contexts/AuthContext';
 
 interface MonthlyStatus {
     _id: string;
@@ -157,6 +158,8 @@ const normalizeCustomers = (raw: any): MonthlyCustomer[] => {
 };
 
 const RetailMonthlySettlementPage: React.FC = () => {
+    const { hasPermission } = useAuth();
+    const canExecuteSettlement = hasPermission('module:settlement_monthly_detail:edit') && hasPermission('settlement:recalc:execute');
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -373,6 +376,7 @@ const RetailMonthlySettlementPage: React.FC = () => {
     }, [jobInfo?.status]);
 
     const handleClickSettle = (month: string) => {
+        if (!canExecuteSettlement) return;
         setConfirmMonth(month);
         setCalcError(null);
         setProgressOpen(true);
@@ -391,6 +395,7 @@ const RetailMonthlySettlementPage: React.FC = () => {
 
     // 用户确认后，执行结算
     const handleConfirmCalc = async () => {
+        if (!canExecuteSettlement) return;
         const month = confirmMonth || jobInfo?.month || '';
         if (!month) return;
         setCalcError(null);
@@ -591,7 +596,7 @@ const RetailMonthlySettlementPage: React.FC = () => {
                                                 <Button
                                                     size="small"
                                                     variant={selectedMonth === row.month ? 'contained' : 'outlined'}
-                                                    disabled={jobRunning}
+                                                    disabled={jobRunning || !canExecuteSettlement}
                                                     onClick={(event) => {
                                                         event.stopPropagation();
                                                         handleClickSettle(row.month);
@@ -906,7 +911,7 @@ const RetailMonthlySettlementPage: React.FC = () => {
                     {awaitingConfirm ? (
                         <>
                             <Button onClick={closeProgressDialog}>取消</Button>
-                            <Button variant="contained" color="primary" onClick={handleConfirmCalc}>
+                            <Button variant="contained" color="primary" onClick={handleConfirmCalc} disabled={!canExecuteSettlement}>
                                 确认结算
                             </Button>
                         </>

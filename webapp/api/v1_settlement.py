@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from webapp.services.settlement_service import SettlementService
 from webapp.services.export_service import ExportService
 from webapp.models.settlement import SettlementDaily, SettlementVersion
+from webapp.api.dependencies.authz import require_permission
 
 router = APIRouter(prefix="/settlement", tags=["Settlement"])
 
@@ -44,7 +45,11 @@ async def get_settlement_metadata():
         return ResponseModel(code=500, message=str(e), data=None)
 
 @router.post("/calculate", response_model=ResponseModel)
-async def calculate_daily_settlement(req: CalculationRequest):
+async def calculate_daily_settlement(
+    req: CalculationRequest,
+    _ctx = Depends(require_permission("module:settlement_daily_overview:edit")),
+    _recalc_ctx = Depends(require_permission("settlement:recalc:execute")),
+):
     """
     触发指定日期的预结算计算
     """

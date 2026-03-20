@@ -28,6 +28,7 @@ import customerApi from '../api/customer';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
 import { getTouSummary, TouSummary } from '../api/tou';
 import { useTouPeriodBackground, TouPeriodData } from '../hooks/useTouPeriodBackground';
+import { useAuth } from '../contexts/AuthContext';
 
 // --- Shared Components ---
 
@@ -212,7 +213,7 @@ const TAG_DESCRIPTIONS: Record<string, { desc: string; criteria: string }> = {
 };
 
 // --- Block 2-Middle: 标签管理面板 (Auto/Manual Tabs) ---
-const TagManagementPanel: React.FC<{ data: CustomerCharacteristics; onRefresh: () => void }> = ({ data, onRefresh }) => {
+const TagManagementPanel: React.FC<{ data: CustomerCharacteristics; onRefresh: () => void; canEdit: boolean }> = ({ data, onRefresh, canEdit }) => {
     const [tab, setTab] = useState(0);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editingTag, setEditingTag] = useState<CustomerCharacteristics['tags'][0] | null>(null);
@@ -251,6 +252,7 @@ const TagManagementPanel: React.FC<{ data: CustomerCharacteristics; onRefresh: (
     };
 
     const handleSave = async () => {
+        if (!canEdit) return;
         if (!formData.name) return;
         setSaving(true);
         try {
@@ -292,6 +294,7 @@ const TagManagementPanel: React.FC<{ data: CustomerCharacteristics; onRefresh: (
     };
 
     const handleDelete = async (tagName: string) => {
+        if (!canEdit) return;
         if (!window.confirm(`确定删除标签 "${tagName}" 吗 ? `)) return;
         try {
             const newTags = data.tags.filter(t => !(t.name === tagName && t.source === 'MANUAL'));
@@ -416,8 +419,8 @@ const TagManagementPanel: React.FC<{ data: CustomerCharacteristics; onRefresh: (
                                             )}
                                         </Box>
                                         <Box display="flex" gap={0.5}>
-                                            <IconButton size="small" onClick={() => handleEditClick(tag)}><EditIcon fontSize="small" sx={{ fontSize: 16 }} /></IconButton>
-                                            <IconButton size="small" onClick={() => handleDelete(tag.name)}><DeleteIcon fontSize="small" sx={{ fontSize: 16 }} /></IconButton>
+                                            <IconButton size="small" onClick={() => handleEditClick(tag)} disabled={!canEdit}><EditIcon fontSize="small" sx={{ fontSize: 16 }} /></IconButton>
+                                            <IconButton size="small" onClick={() => handleDelete(tag.name)} disabled={!canEdit}><DeleteIcon fontSize="small" sx={{ fontSize: 16 }} /></IconButton>
                                         </Box>
                                     </Box>
                                 </Paper>
@@ -427,6 +430,7 @@ const TagManagementPanel: React.FC<{ data: CustomerCharacteristics; onRefresh: (
                                     color="primary"
                                     size="small"
                                     onClick={handleAddClick}
+                                    disabled={!canEdit}
                                     sx={{ boxShadow: 1, width: 26, height: 26, minHeight: 26 }}
                                 >
                                     <AddIcon sx={{ fontSize: 16 }} />
@@ -448,6 +452,7 @@ const TagManagementPanel: React.FC<{ data: CustomerCharacteristics; onRefresh: (
                             size="small"
                             value={formData.name}
                             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                            disabled={!canEdit}
                         />
                         <TextField
                             label="说明 / 备注"
@@ -457,12 +462,13 @@ const TagManagementPanel: React.FC<{ data: CustomerCharacteristics; onRefresh: (
                             size="small"
                             value={formData.reason}
                             onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
+                            disabled={!canEdit}
                         />
                     </Stack>
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={handleClose}>取消</Button>
-                    <Button onClick={handleSave} variant="contained" disabled={saving || !formData.name}>保存</Button>
+                    <Button onClick={handleSave} variant="contained" disabled={saving || !formData.name || !canEdit}>保存</Button>
                 </DialogActions>
             </Dialog>
         </Paper >
@@ -504,7 +510,7 @@ const getAlertSuggestion = (type: string, confidence: number) => {
 };
 
 // --- Block 2-Right: 风险管控面板 (Condensed) ---
-const RiskControlPanel: React.FC<{ customerId: string }> = ({ customerId }) => {
+const RiskControlPanel: React.FC<{ customerId: string; canEdit: boolean }> = ({ customerId, canEdit }) => {
     const [tab, setTab] = useState(0);
     const [alerts, setAlerts] = useState<AnomalyAlertItem[]>([]);
     const [history, setHistory] = useState<AnalysisHistoryItem[]>([]);
@@ -518,6 +524,7 @@ const RiskControlPanel: React.FC<{ customerId: string }> = ({ customerId }) => {
     }, [customerId]);
 
     const handleStatusChange = async (alertId: string, currentStatus: boolean, currentNotes: string | undefined) => {
+        if (!canEdit) return;
         const newStatus = !currentStatus;
         try {
             // Optimistic Update
@@ -531,6 +538,7 @@ const RiskControlPanel: React.FC<{ customerId: string }> = ({ customerId }) => {
     };
 
     const handleNoteSave = async (alertId: string, status: boolean, newNotes: string) => {
+        if (!canEdit) return;
         try {
             // Optimistic Update
             setAlerts(prev => prev.map(a => a.id === alertId ? { ...a, notes: newNotes } : a));
@@ -643,6 +651,7 @@ const RiskControlPanel: React.FC<{ customerId: string }> = ({ customerId }) => {
                                                                 size="small"
                                                                 checked={alert.acknowledged}
                                                                 onChange={() => handleStatusChange(alert.id, alert.acknowledged, alert.notes)}
+                                                                disabled={!canEdit}
                                                                 color="success"
                                                             />
                                                         }
@@ -665,6 +674,7 @@ const RiskControlPanel: React.FC<{ customerId: string }> = ({ customerId }) => {
                                                                 (e.target as HTMLElement).blur();
                                                             }
                                                         }}
+                                                        disabled={!canEdit}
                                                         InputProps={{ sx: { fontSize: '0.8rem' } }}
                                                     />
                                                 </Box>
@@ -1239,6 +1249,8 @@ const CharacteristicHistoryCalendar: React.FC<{ customerId: string }> = ({ custo
 
 // --- Page Wrapper ---
 const LoadCharacteristicsDetailPage: React.FC<{ customerId?: string }> = (props) => {
+    const { hasPermission } = useAuth();
+    const canEdit = hasPermission('module:analysis_load_characteristics:edit');
     const params = useParams<{ customerId: string }>();
     const customerId = props.customerId || params.customerId;
     const navigate = useNavigate();
@@ -1289,10 +1301,10 @@ const LoadCharacteristicsDetailPage: React.FC<{ customerId?: string }> = (props)
                         <CharacteristicsRadarPanel data={data} />
                     </Grid>
                     <Grid size={{ xs: 12, md: 4 }}>
-                        <TagManagementPanel data={data} onRefresh={fetchData} />
+                        <TagManagementPanel data={data} onRefresh={fetchData} canEdit={canEdit} />
                     </Grid>
                     <Grid size={{ xs: 12, md: 4 }}>
-                        <RiskControlPanel customerId={data.customer_id} />
+                        <RiskControlPanel customerId={data.customer_id} canEdit={canEdit} />
                     </Grid>
                 </Grid>
 

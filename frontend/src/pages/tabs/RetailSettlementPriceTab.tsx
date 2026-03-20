@@ -10,8 +10,9 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import apiClient from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
 
-// ─── 类型 ────────────────────────────────────────────────────────────
+// 鈹€鈹€鈹€ 绫诲瀷 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 interface RegularPrice {
     price_type: string;
     price_type_key: string;
@@ -54,15 +55,15 @@ interface PriceDocument {
     period_prices: PeriodPrice[];
 }
 
-// ─── 时段类型颜色 ─────────────────────────────────────────────────────
+// 鈹€鈹€鈹€ 鏃舵绫诲瀷棰滆壊 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 const PERIOD_TYPE_COLORS: Record<string, 'default' | 'error' | 'warning' | 'success' | 'info'> = {
-    '尖峰': 'error',
-    '峰段': 'warning',
-    '平段': 'info',
-    '谷段': 'success',
+    '灏栧嘲': 'error',
+    '宄版': 'warning',
+    '骞虫': 'info',
+    '璋锋': 'success',
 };
 
-// 分时价格列定义
+// 鍒嗘椂浠锋牸鍒楀畾涔?
 const PERIOD_PRICE_COLS: Array<{ key: keyof PeriodPrice; label: string }> = [
     { key: 'upper_limit_price', label: '上限价' },
     { key: 'market_monthly_avg', label: '中长期市场\n月度均价' },
@@ -78,12 +79,14 @@ const PERIOD_PRICE_COLS: Array<{ key: keyof PeriodPrice; label: string }> = [
     { key: 'grid_agency_price', label: '电网代理\n购电价格' },
 ];
 
-const fmt = (v: number | null, digits = 3) => (v == null ? '—' : v.toFixed(digits));
+const fmt = (v: number | null, digits = 3) => (v == null ? '-' : v.toFixed(digits));
 
-// ─── 主组件 ───────────────────────────────────────────────────────────
+// 鈹€鈹€鈹€ 涓荤粍浠?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 const RetailSettlementPriceTab: React.FC = () => {
     const theme = useTheme();
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
+    const { hasPermission } = useAuth();
+    const canEdit = hasPermission('module:basic_monthly_manual_import:edit');
 
     const [months, setMonths] = useState<MonthMeta[]>([]);
     const [selectedMonth, setSelectedMonth] = useState<string>('');
@@ -92,23 +95,23 @@ const RetailSettlementPriceTab: React.FC = () => {
     const [loadingDetail, setLoadingDetail] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // 导入对话框相关
+    // 瀵煎叆瀵硅瘽妗嗙浉鍏?
     const [importDialogOpen, setImportDialogOpen] = useState(false);
     const [importFile, setImportFile] = useState<File | null>(null);
     const [importDateType, setImportDateType] = useState<'regular' | 'holiday'>('regular');
     const [importing, setImporting] = useState(false);
     const [importExistsWarning, setImportExistsWarning] = useState(false);
 
-    // 删除确认
+    // 鍒犻櫎纭
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
 
-    // 反馈
+    // 鍙嶉
     const [snackbar, setSnackbar] = useState<{ open: boolean; msg: string; severity: 'success' | 'error' }>({
         open: false, msg: '', severity: 'success'
     });
 
-    // 加载月份列表
+    // 鍔犺浇鏈堜唤鍒楄〃
     const fetchMonths = useCallback(async () => {
         setLoadingList(true);
         try {
@@ -119,7 +122,7 @@ const RetailSettlementPriceTab: React.FC = () => {
                 setSelectedMonth(list[0]._id);
             }
         } catch (e: any) {
-            setError(e.response?.data?.detail || e.message || '加载失败');
+            setError(e.response?.data?.detail || e.message || '鍔犺浇澶辫触');
         } finally {
             setLoadingList(false);
         }
@@ -128,27 +131,28 @@ const RetailSettlementPriceTab: React.FC = () => {
 
     useEffect(() => { fetchMonths(); }, [fetchMonths]);
 
-    // 加载月份详情
+    // 鍔犺浇鏈堜唤璇︽儏
     useEffect(() => {
         if (!selectedMonth) return;
         setLoadingDetail(true);
         setError(null);
         apiClient.get(`/api/v1/prices/retail-settlement/${selectedMonth}`)
             .then(res => setPriceDoc(res.data))
-            .catch(e => setError(e.response?.data?.detail || e.message || '加载详情失败'))
+            .catch(e => setError(e.response?.data?.detail || e.message || '鍔犺浇璇︽儏澶辫触'))
             .finally(() => setLoadingDetail(false));
     }, [selectedMonth]);
 
-    // ── 导入 ──
+    // 鈹€鈹€ 瀵煎叆 鈹€鈹€
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!canEdit) return;
         const f = e.target.files?.[0] || null;
         setImportFile(f);
         if (f) {
-            // 尝试从文件名解析月份（如 2026-01）并初步检查
+            // 灏濊瘯浠庢枃浠跺悕瑙ｆ瀽鏈堜唤锛堝 2026-01锛夊苟鍒濇妫€鏌?
             const match = f.name.match(/(\d{4}-\d{2})/);
             if (match) {
                 const filledMonth = match[1];
-                // 默认根据文件名是否含“节假日”预设类型
+                // 榛樿鏍规嵁鏂囦欢鍚嶆槸鍚﹀惈鈥滆妭鍋囨棩鈥濋璁剧被鍨?
                 const isHolidayFile = f.name.includes('节假日') || f.name.includes('深谷');
                 const type = isHolidayFile ? 'holiday' : 'regular';
                 setImportDateType(type);
@@ -163,7 +167,7 @@ const RetailSettlementPriceTab: React.FC = () => {
         }
     };
 
-    // 监听导入类型变化，更新预警
+    // 鐩戝惉瀵煎叆绫诲瀷鍙樺寲锛屾洿鏂伴璀?
     useEffect(() => {
         if (!importFile) return;
         const match = importFile.name.match(/(\d{4}-\d{2})/);
@@ -175,6 +179,7 @@ const RetailSettlementPriceTab: React.FC = () => {
     }, [importDateType, importFile, months]);
 
     const handleImport = async () => {
+        if (!canEdit) return;
         if (!importFile) return;
         setImporting(true);
         const formData = new FormData();
@@ -185,20 +190,21 @@ const RetailSettlementPriceTab: React.FC = () => {
             });
             const { month } = res.data;
             const targetId = importDateType === 'regular' ? month : `${month}-holiday`;
-            setSnackbar({ open: true, msg: `${month} (${importDateType}) 价格数据导入成功`, severity: 'success' });
+            setSnackbar({ open: true, msg: `${month} (${importDateType}) 浠锋牸鏁版嵁瀵煎叆鎴愬姛`, severity: 'success' });
             setImportDialogOpen(false);
             setImportFile(null);
             await fetchMonths();
             setSelectedMonth(targetId);
         } catch (e: any) {
-            setSnackbar({ open: true, msg: e.response?.data?.detail || e.message || '导入失败', severity: 'error' });
+            setSnackbar({ open: true, msg: e.response?.data?.detail || e.message || '瀵煎叆澶辫触', severity: 'error' });
         } finally {
             setImporting(false);
         }
     };
 
-    // ── 删除 ──
+    // 鈹€鈹€ 鍒犻櫎 鈹€鈹€
     const handleDelete = async () => {
+        if (!canEdit) return;
         if (!selectedMonth) return;
         setDeleting(true);
         try {
@@ -210,7 +216,7 @@ const RetailSettlementPriceTab: React.FC = () => {
             setMonths(remaining);
             setSelectedMonth(remaining.length > 0 ? remaining[0]._id : '');
         } catch (e: any) {
-            setSnackbar({ open: true, msg: e.response?.data?.detail || '删除失败', severity: 'error' });
+            setSnackbar({ open: true, msg: e.response?.data?.detail || '鍒犻櫎澶辫触', severity: 'error' });
         } finally {
             setDeleting(false);
         }
@@ -218,25 +224,25 @@ const RetailSettlementPriceTab: React.FC = () => {
 
     return (
         <Box>
-            {/* 移动端面包屑标题 */}
+            {/* 绉诲姩绔潰鍖呭睉鏍囬 */}
             {isTablet && (
                 <Typography
                     variant="subtitle1"
                     sx={{ mb: 2, fontWeight: 'bold', color: 'text.primary' }}
                 >
-                    基础数据 / 零售套餐价格
+                    鍩虹鏁版嵁 / 闆跺敭濂楅浠锋牸
                 </Typography>
             )}
 
-            {/* ── 顶部工具栏 ── */}
+            {/* 鈹€鈹€ 椤堕儴宸ュ叿鏍?鈹€鈹€ */}
             <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-                {/* 月份选择 - 放最左端 */}
+                {/* 鏈堜唤閫夋嫨 - 鏀炬渶宸︾ */}
                 {months.length > 0 && (
                     <FormControl size="small" sx={{ minWidth: 140 }}>
-                        <InputLabel>选择月份</InputLabel>
+                        <InputLabel>閫夋嫨鏈堜唤</InputLabel>
                         <Select
                             value={selectedMonth}
-                            label="选择月份"
+                            label="閫夋嫨鏈堜唤"
                             onChange={(e: SelectChangeEvent) => setSelectedMonth(e.target.value)}
                         >
                             {months.map(m => (
@@ -250,46 +256,48 @@ const RetailSettlementPriceTab: React.FC = () => {
 
                 <Box sx={{ flexGrow: 1 }} />
 
-                {/* 导入按钮 */}
+                {/* 瀵煎叆鎸夐挳 */}
                 <Button
                     variant="contained"
                     startIcon={<UploadFileIcon />}
                     component="label"
+                    disabled={!canEdit}
                 >
-                    导入结算参考价格文件
+                    瀵煎叆缁撶畻鍙傝€冧环鏍兼枃浠?
                     <input type="file" hidden accept=".xlsx,.xls" onChange={handleFileChange} />
                 </Button>
 
-                {/* 删除按钮 */}
+                {/* 鍒犻櫎鎸夐挳 */}
                 {selectedMonth && (
                     <IconButton
                         color="error"
                         size="small"
                         onClick={() => setDeleteDialogOpen(true)}
-                        title={`删除 ${selectedMonth} 数据`}
+                        disabled={!canEdit}
+                        title="删除数据"
                     >
                         <DeleteOutlineIcon />
                     </IconButton>
                 )}
             </Paper>
 
-            {/* ── 加载 / 错误 / 空状态 ── */}
+            {/* 鈹€鈹€ 鍔犺浇 / 閿欒 / 绌虹姸鎬?鈹€鈹€ */}
             {loadingList && <Box display="flex" justifyContent="center" py={8}><CircularProgress /></Box>}
             {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
             {!loadingList && months.length === 0 && (
-                <Alert severity="info">暂无价格数据，请点击"导入价格数据"上传 Excel 文件。</Alert>
+                <Alert severity="info">暂无价格数据，请点击“导入结算参考价格文件”上传 Excel 文件。</Alert>
             )}
 
-            {/* ── 价格内容 ── */}
+            {/* 鈹€鈹€ 浠锋牸鍐呭 鈹€鈹€ */}
             {selectedMonth && !loadingList && (
                 loadingDetail
                     ? <Box display="flex" justifyContent="center" py={6}><CircularProgress /></Box>
                     : priceDoc && (
                         <>
-                            {/* ── 常规价格表 ── */}
+                            {/* 鈹€鈹€ 甯歌浠锋牸琛?鈹€鈹€ */}
                             <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 }, mb: 2 }}>
                                 <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-                                    常规价格（不分时）
+                                    甯歌浠锋牸锛堜笉鍒嗘椂锛?
                                 </Typography>
                                 <TableContainer sx={{ overflowX: 'auto' }}>
                                     <Table size="small" sx={{
@@ -300,9 +308,9 @@ const RetailSettlementPriceTab: React.FC = () => {
                                     }}>
                                         <TableHead>
                                             <TableRow sx={{ bgcolor: 'action.hover' }}>
-                                                <TableCell sx={{ width: { xs: '120px', sm: '320px' } }}>价格类型</TableCell>
-                                                <TableCell align="right" sx={{ width: '120px' }}>价格（元/MWh）</TableCell>
-                                                <TableCell>价格定义</TableCell>
+                                                <TableCell sx={{ width: { xs: '120px', sm: '320px' } }}>浠锋牸绫诲瀷</TableCell>
+                                                <TableCell align="right" sx={{ width: '120px' }}>价格(元/MWh)</TableCell>
+                                                <TableCell>浠锋牸瀹氫箟</TableCell>
                                             </TableRow>
                                         </TableHead>
                                         <TableBody>
@@ -319,7 +327,7 @@ const RetailSettlementPriceTab: React.FC = () => {
                                                     </TableCell>
                                                     <TableCell align="right">
                                                         <Typography variant="body2" fontWeight={600} color="primary.main">
-                                                            {p.value != null ? p.value.toFixed(3) : '—'}
+                                                            {p.value != null ? p.value.toFixed(3) : '-'}
                                                         </Typography>
                                                     </TableCell>
                                                     <TableCell>
@@ -330,7 +338,7 @@ const RetailSettlementPriceTab: React.FC = () => {
                                                                     {p.definition}
                                                                 </Typography>
                                                             </Box>
-                                                        ) : '—'}
+                                                        ) : '-'}
                                                     </TableCell>
                                                 </TableRow>
                                             ))}
@@ -339,10 +347,10 @@ const RetailSettlementPriceTab: React.FC = () => {
                                 </TableContainer>
                             </Paper>
 
-                            {/* ── 分时价格表 ── */}
+                            {/* 鈹€鈹€ 鍒嗘椂浠锋牸琛?鈹€鈹€ */}
                             <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 } }}>
                                 <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-                                    分时价格（48时段，元/MWh）
+                                    鍒嗘椂浠锋牸锛?8鏃舵锛屽厓/MWh锛?
                                 </Typography>
                                 <TableContainer sx={{ overflowX: 'auto' }}>
                                     <Table size="small" sx={{
@@ -355,9 +363,9 @@ const RetailSettlementPriceTab: React.FC = () => {
                                     }}>
                                         <TableHead>
                                             <TableRow sx={{ bgcolor: 'action.hover' }}>
-                                                <TableCell align="center">时段</TableCell>
-                                                <TableCell align="center">类型</TableCell>
-                                                <TableCell align="center">浮动比例</TableCell>
+                                                <TableCell align="center">鏃舵</TableCell>
+                                                <TableCell align="center">绫诲瀷</TableCell>
+                                                <TableCell align="center">娴姩姣斾緥</TableCell>
                                                 {PERIOD_PRICE_COLS.map(c => (
                                                     <TableCell key={c.key} align="right" sx={{ whiteSpace: 'pre-line !important' }}>
                                                         {c.label}
@@ -393,9 +401,9 @@ const RetailSettlementPriceTab: React.FC = () => {
                     )
             )}
 
-            {/* ── 导入确认对话框 ── */}
+            {/* 鈹€鈹€ 瀵煎叆纭瀵硅瘽妗?鈹€鈹€ */}
             <Dialog open={importDialogOpen} onClose={() => !importing && setImportDialogOpen(false)} maxWidth="sm" fullWidth>
-                <DialogTitle>确认导入价格数据</DialogTitle>
+                <DialogTitle>纭瀵煎叆浠锋牸鏁版嵁</DialogTitle>
                 <DialogContent>
                     <Box sx={{ mb: 2 }}>
                         <Typography variant="body2" gutterBottom>
@@ -404,14 +412,14 @@ const RetailSettlementPriceTab: React.FC = () => {
                     </Box>
 
                     <FormControl fullWidth size="small" sx={{ mt: 1, mb: 2 }}>
-                        <InputLabel>适用日期类型</InputLabel>
+                        <InputLabel>閫傜敤鏃ユ湡绫诲瀷</InputLabel>
                         <Select
                             value={importDateType}
-                            label="适用日期类型"
+                            label="閫傜敤鏃ユ湡绫诲瀷"
                             onChange={(e) => setImportDateType(e.target.value as any)}
                         >
-                            <MenuItem value="regular">常规/默认 (工作日及单文件月份)</MenuItem>
-                            <MenuItem value="holiday">节假日/深谷 (仅价格差异部分)</MenuItem>
+                            <MenuItem value="regular">甯歌/榛樿 (宸ヤ綔鏃ュ強鍗曟枃浠舵湀浠?</MenuItem>
+                            <MenuItem value="holiday">鑺傚亣鏃?娣辫胺 (浠呬环鏍煎樊寮傞儴鍒?</MenuItem>
                         </Select>
                     </FormControl>
 
@@ -422,32 +430,32 @@ const RetailSettlementPriceTab: React.FC = () => {
                     )}
                 </DialogContent>
                 <DialogActions>
-                    <Button onClick={() => setImportDialogOpen(false)} disabled={importing}>取消</Button>
-                    <Button onClick={handleImport} variant="contained" disabled={importing}
+                    <Button onClick={() => setImportDialogOpen(false)} disabled={importing}>鍙栨秷</Button>
+                    <Button onClick={handleImport} variant="contained" disabled={importing || !canEdit}
                         startIcon={importing ? <CircularProgress size={16} /> : undefined}>
-                        {importing ? '导入中...' : '确认导入'}
+                        {importing ? '瀵煎叆涓?..' : '纭瀵煎叆'}
                     </Button>
                 </DialogActions>
             </Dialog>
 
-            {/* ── 删除确认对话框 ── */}
+            {/* 鈹€鈹€ 鍒犻櫎纭瀵硅瘽妗?鈹€鈹€ */}
             <Dialog open={deleteDialogOpen} onClose={() => !deleting && setDeleteDialogOpen(false)}>
-                <DialogTitle>删除确认</DialogTitle>
+                <DialogTitle>鍒犻櫎纭</DialogTitle>
                 <DialogContent>
                     <DialogContentText>
-                        确定删除月份 <strong>{selectedMonth}</strong> 的价格数据？此操作不可撤销。
+                        纭畾鍒犻櫎鏈堜唤 <strong>{selectedMonth}</strong> 鐨勪环鏍兼暟鎹紵姝ゆ搷浣滀笉鍙挙閿€銆?
                     </DialogContentText>
                 </DialogContent>
                 <DialogActions>
-                    <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>取消</Button>
-                    <Button onClick={handleDelete} color="error" variant="contained" disabled={deleting}
+                    <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>鍙栨秷</Button>
+                    <Button onClick={handleDelete} color="error" variant="contained" disabled={deleting || !canEdit}
                         startIcon={deleting ? <CircularProgress size={16} /> : undefined}>
-                        {deleting ? '删除中...' : '确认删除'}
+                        {deleting ? '鍒犻櫎涓?..' : '纭鍒犻櫎'}
                     </Button>
                 </DialogActions>
             </Dialog>
 
-            {/* ── Snackbar 反馈 ── */}
+            {/* 鈹€鈹€ Snackbar 鍙嶉 鈹€鈹€ */}
             <Snackbar
                 open={snackbar.open}
                 autoHideDuration={4000}
@@ -463,3 +471,4 @@ const RetailSettlementPriceTab: React.FC = () => {
 };
 
 export default RetailSettlementPriceTab;
+

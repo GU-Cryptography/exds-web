@@ -11,6 +11,7 @@ from fastapi import APIRouter, File, UploadFile, Depends, HTTPException
 
 from webapp.tools.mongo import DATABASE
 from webapp.tools.security import get_current_active_user, User
+from webapp.api.dependencies.authz import require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +179,8 @@ def get_retail_settlement_price(month: str):
 async def import_retail_settlement_prices(
     price_date_type: str = "regular",
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:basic_monthly_manual_import:edit"))
 ):
     """
     上传并解析月度价格定义 Excel，存入 retail_settlement_prices 集合。
@@ -229,7 +231,8 @@ async def import_retail_settlement_prices(
 @router.delete("/prices/retail-settlement/{month}", summary="删除指定月份零售结算价格")
 def delete_retail_settlement_price(
     month: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:basic_monthly_manual_import:edit"))
 ):
     result = COLLECTION.delete_one({'_id': month})
     if result.deleted_count == 0:

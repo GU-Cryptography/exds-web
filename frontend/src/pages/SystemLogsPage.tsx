@@ -48,6 +48,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { zhCN } from 'date-fns/locale';
 import { format } from 'date-fns';
 import apiClient from '../api/client';
+import { useAuth } from '../contexts/AuthContext';
 
 
 // ========== 类型定义 ==========
@@ -158,6 +159,8 @@ const safeFormatDate = (dateStr: string | undefined | null) => {
 // ========== 主组件 ==========
 
 export const SystemLogsPage: React.FC = () => {
+    const { hasPermission } = useAuth();
+    const canResolveAlert = hasPermission('system:logs:resolve');
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
@@ -397,6 +400,7 @@ export const SystemLogsPage: React.FC = () => {
 
     // 解决告警
     const handleResolveAlert = async () => {
+        if (!canResolveAlert) return;
         try {
             await apiClient.post(`/api/v1/system/alerts/${resolveDialog.alertId}/resolve`, {
                 resolution_note: resolveDialog.note
@@ -488,7 +492,7 @@ export const SystemLogsPage: React.FC = () => {
                                     </Tooltip>
                                     {alert.status === 'ACTIVE' && (
                                         <Tooltip title="解决">
-                                            <IconButton size="small" onClick={() => setResolveDialog({ open: true, alertId: alert.alert_id, note: '' })}>
+                                            <IconButton size="small" onClick={() => setResolveDialog({ open: true, alertId: alert.alert_id, note: '' })} disabled={!canResolveAlert}>
                                                 <CheckIcon fontSize="small" />
                                             </IconButton>
                                         </Tooltip>
@@ -770,7 +774,7 @@ export const SystemLogsPage: React.FC = () => {
                         <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1, gap: 1 }}>
                             <Button size="small" startIcon={<VisibilityIcon />} onClick={() => handleViewDetail('告警详情', alert)}>查看</Button>
                             {alert.status === 'ACTIVE' && (
-                                <Button size="small" startIcon={<CheckIcon />} onClick={() => setResolveDialog({ open: true, alertId: alert.alert_id, note: '' })}>解决</Button>
+                                <Button size="small" startIcon={<CheckIcon />} onClick={() => setResolveDialog({ open: true, alertId: alert.alert_id, note: '' })} disabled={!canResolveAlert}>解决</Button>
                             )}
                         </Box>
                     </Paper>
@@ -1135,7 +1139,7 @@ export const SystemLogsPage: React.FC = () => {
                     </DialogContent>
                     <DialogActions>
                         <Button onClick={() => setResolveDialog({ open: false, alertId: '', note: '' })}>取消</Button>
-                        <Button onClick={handleResolveAlert} variant="contained">确认解决</Button>
+                        <Button onClick={handleResolveAlert} variant="contained" disabled={!canResolveAlert}>确认解决</Button>
                     </DialogActions>
                 </Dialog>
 

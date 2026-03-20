@@ -2,6 +2,7 @@ from datetime import datetime
 from fastapi import APIRouter, Body, Depends, HTTPException
 from webapp.tools.mongo import DATABASE
 from webapp.tools.security import get_current_active_user, User
+from webapp.api.dependencies.authz import require_permission
 
 router = APIRouter(tags=["v1-customer-tags"])
 
@@ -29,7 +30,8 @@ async def get_customer_tags(current_user: User = Depends(get_current_active_user
 @router.post("/customer-tags", summary="创建新的客户标签")
 async def create_customer_tag(
     tag_data: dict = Body(...),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("module:customer_profiles:edit")),
 ):
     """创建新的客户标签"""
     

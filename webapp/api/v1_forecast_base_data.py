@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from webapp.tools.mongo import DATABASE
 from webapp.services.forecast_base_data_service import ForecastBaseDataService
@@ -11,6 +11,7 @@ from webapp.models.forecast_base_data import (
     CurveDataRequest,
     MultipleCurvesResponse,
 )
+from webapp.api.dependencies.authz import require_permission
 
 router = APIRouter(tags=["预测基础数据"])
 logger = logging.getLogger(__name__)
@@ -53,7 +54,10 @@ def get_forecast_base_data_availability(
         '[{\"data_item_id\": 1, \"date\": \"2025-01-10\"}, {\"data_item_id\": 6, \"date\": \"2025-01-11\"}]'
     ),
 )
-def get_forecast_base_data_curves(requests: List[CurveDataRequest]):
+def get_forecast_base_data_curves(
+    requests: List[CurveDataRequest],
+    _ctx = Depends(require_permission("module:forecast_price_baseline:edit")),
+):
     service = ForecastBaseDataService(DATABASE)
     try:
         req_list = [{"data_item_id": r.data_item_id, "date": r.date} for r in requests]

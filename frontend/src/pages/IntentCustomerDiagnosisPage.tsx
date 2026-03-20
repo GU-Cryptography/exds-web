@@ -83,6 +83,7 @@ import {
 } from '../api/intentCustomerDiagnosis';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
 import IntentRetailSimulationTab from '../components/intent-customer-diagnosis/IntentRetailSimulationTab';
+import { useAuth } from '../contexts/AuthContext';
 
 type DiagnosisTabKey = 'load' | 'wholesale' | 'retail';
 
@@ -482,7 +483,8 @@ type WholesaleDetailMode = 'chart' | 'table';
 
 const WholesaleSimulationTab: React.FC<{
     selectedCustomer: IntentCustomerSummary | null;
-}> = ({ selectedCustomer }) => {
+    canEdit: boolean;
+}> = ({ selectedCustomer, canEdit }) => {
     const detailPanelHeight = { xs: 350, sm: 400 };
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -590,6 +592,9 @@ const WholesaleSimulationTab: React.FC<{
     });
 
     const handleCalculate = async () => {
+        if (!canEdit) {
+            return;
+        }
         if (!selectedCustomer) {
             return;
         }
@@ -822,7 +827,7 @@ const WholesaleSimulationTab: React.FC<{
                             自动识别该客户已覆盖且已完成批发月结的月份，一次性计算全部月份。
                         </Typography>
                     </Box>
-                    <Button variant="contained" onClick={() => void handleCalculate()} disabled={loading}>
+                    <Button variant="contained" onClick={() => void handleCalculate()} disabled={loading || !canEdit}>
                         {loading ? '计算中...' : '计算批发侧结算'}
                     </Button>
                 </Stack>
@@ -970,6 +975,9 @@ const WholesaleSimulationTab: React.FC<{
 export const IntentCustomerDiagnosisPage: React.FC = () => {
     const theme = useTheme();
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
+    const { hasPermission } = useAuth();
+    const canEdit = hasPermission('module:analysis_intent_customer_diagnosis:edit');
+    const canDelete = canEdit && hasPermission('data:critical:delete');
 
     const [customers, setCustomers] = useState<IntentCustomerSummary[]>([]);
     const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
@@ -1177,6 +1185,9 @@ export const IntentCustomerDiagnosisPage: React.FC = () => {
     };
 
     const handleDeleteConfirm = async (password: string) => {
+        if (!canDelete) {
+            return;
+        }
         if (!selectedCustomer) {
             return;
         }
@@ -1213,7 +1224,7 @@ export const IntentCustomerDiagnosisPage: React.FC = () => {
                         </Grid>
                         <Grid size={{ xs: 12, md: 4 }}>
                             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                                <Button variant="contained" startIcon={<AddIcon />} onClick={() => setImportDialogOpen(true)}>
+                                <Button variant="contained" startIcon={<AddIcon />} onClick={() => setImportDialogOpen(true)} disabled={!canEdit}>
                                     新增/导入
                                 </Button>
                                 <Button
@@ -1221,7 +1232,7 @@ export const IntentCustomerDiagnosisPage: React.FC = () => {
                                     color="error"
                                     startIcon={<DeleteOutlineIcon />}
                                     onClick={() => setDeleteDialogOpen(true)}
-                                    disabled={!selectedCustomer}
+                                    disabled={!selectedCustomer || !canDelete}
                                 >
                                     删除客户
                                 </Button>
@@ -1500,11 +1511,11 @@ export const IntentCustomerDiagnosisPage: React.FC = () => {
                 </TabPanel>
 
                 <TabPanel value={activeTab} index="wholesale">
-                    <WholesaleSimulationTab selectedCustomer={selectedCustomer} />
+                    <WholesaleSimulationTab selectedCustomer={selectedCustomer} canEdit={canEdit} />
                 </TabPanel>
 
                 <TabPanel value={activeTab} index="retail">
-                    <IntentRetailSimulationTab selectedCustomer={selectedCustomer} />
+                    <IntentRetailSimulationTab selectedCustomer={selectedCustomer} canEdit={canEdit} canDelete={canDelete} />
                 </TabPanel>
 
                 <ImportDialog

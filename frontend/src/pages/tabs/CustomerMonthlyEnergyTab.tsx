@@ -9,6 +9,7 @@ import {
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import apiClient from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface CustomerEnergyRecord {
     customer_no: string;
@@ -36,6 +37,8 @@ const formatMpNo = (value?: string): string => {
 };
 
 const CustomerMonthlyEnergyTab: React.FC = () => {
+    const { hasPermission } = useAuth();
+    const canEdit = hasPermission('module:basic_monthly_manual_import:edit');
     const [months, setMonths] = useState<MonthMeta[]>([]);
     const [selectedMonth, setSelectedMonth] = useState<string>('');
     const [monthData, setMonthData] = useState<MonthData | null>(null);
@@ -84,6 +87,7 @@ const CustomerMonthlyEnergyTab: React.FC = () => {
     }, [selectedMonth]);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!canEdit) return;
         const f = e.target.files?.[0] || null;
         setImportFile(f);
         if (f) {
@@ -92,6 +96,7 @@ const CustomerMonthlyEnergyTab: React.FC = () => {
     };
 
     const handleImport = async () => {
+        if (!canEdit) return;
         if (!importFile) return;
         setImporting(true);
         const formData = new FormData();
@@ -114,6 +119,7 @@ const CustomerMonthlyEnergyTab: React.FC = () => {
     };
 
     const handleDelete = async () => {
+        if (!canEdit) return;
         if (!selectedMonth) return;
         setDeleting(true);
         try {
@@ -151,13 +157,13 @@ const CustomerMonthlyEnergyTab: React.FC = () => {
 
                 <Box sx={{ flexGrow: 1 }} />
 
-                <Button variant="contained" startIcon={<UploadFileIcon />} component="label">
+                <Button variant="contained" startIcon={<UploadFileIcon />} component="label" disabled={!canEdit}>
                     导入月度结算电量
                     <input type="file" hidden accept=".xlsx,.xls" onChange={handleFileChange} />
                 </Button>
 
                 {selectedMonth && (
-                    <IconButton color="error" size="small" onClick={() => setDeleteDialogOpen(true)} title={`删除 ${selectedMonth} 数据`}>
+                    <IconButton color="error" size="small" onClick={() => setDeleteDialogOpen(true)} title={`删除 ${selectedMonth} 数据`} disabled={!canEdit}>
                         <DeleteOutlineIcon />
                     </IconButton>
                 )}
@@ -220,7 +226,7 @@ const CustomerMonthlyEnergyTab: React.FC = () => {
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={() => setImportDialogOpen(false)} disabled={importing}>取消</Button>
-                    <Button onClick={handleImport} variant="contained" disabled={importing} startIcon={importing ? <CircularProgress size={16} /> : undefined}>
+                    <Button onClick={handleImport} variant="contained" disabled={importing || !canEdit} startIcon={importing ? <CircularProgress size={16} /> : undefined}>
                         {importing ? '导入中...' : '确认导入'}
                     </Button>
                 </DialogActions>
@@ -233,7 +239,7 @@ const CustomerMonthlyEnergyTab: React.FC = () => {
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>取消</Button>
-                    <Button onClick={handleDelete} color="error" variant="contained" disabled={deleting} startIcon={deleting ? <CircularProgress size={16} /> : undefined}>
+                    <Button onClick={handleDelete} color="error" variant="contained" disabled={deleting || !canEdit} startIcon={deleting ? <CircularProgress size={16} /> : undefined}>
                         {deleting ? '删除中...' : '确认删除'}
                     </Button>
                 </DialogActions>
