@@ -30,6 +30,7 @@ class CurrentUserContext(BaseModel):
     """当前登录用户的权限上下文，每次鉴权时由服务端组装"""
     username: str
     display_name: Optional[str] = None
+    email: Optional[str] = None
     role_codes: List[str] = []
     permission_codes: List[str] = []
     is_super_admin: bool = False       # 是否超管，超管跳过所有权限检查
@@ -50,7 +51,7 @@ class UserInfo(BaseModel):
 
 class CreateUserRequest(BaseModel):
     username: str
-    password: str
+    password: Optional[str] = None
     display_name: Optional[str] = None
     email: Optional[str] = None
     roles: List[str] = []
@@ -62,6 +63,14 @@ class UpdateUserStatusRequest(BaseModel):
     is_active: bool
 
 class ResetPasswordRequest(BaseModel):
+    new_password: Optional[str] = None
+
+class UpdateMyProfileRequest(BaseModel):
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+
+class ChangeMyPasswordRequest(BaseModel):
+    old_password: str
     new_password: str
 
 class CreateRoleRequest(BaseModel):

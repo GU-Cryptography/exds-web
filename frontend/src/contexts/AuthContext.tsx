@@ -28,6 +28,7 @@ interface AuthContextType {
     isAuthenticated: boolean;
     username: string | null;
     displayName: string | null;
+    email: string | null;
     roles: string[];
     permissions: string[];
     isSuperAdmin: boolean;
@@ -35,6 +36,7 @@ interface AuthContextType {
     isPermissionLoaded: boolean;
     login: (token: string) => void;
     logout: (reason?: string) => void;
+    reloadUserInfo: () => Promise<void>;
 }
 
 // ===== 工具函数 =====
@@ -61,6 +63,7 @@ const AuthContext = createContext<AuthContextType>({
     isAuthenticated: false,
     username: null,
     displayName: null,
+    email: null,
     roles: [],
     permissions: [],
     isSuperAdmin: false,
@@ -68,12 +71,14 @@ const AuthContext = createContext<AuthContextType>({
     isPermissionLoaded: false,
     login: () => { },
     logout: () => { },
+    reloadUserInfo: async () => { },
 });
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
     const [username, setUsername] = useState<string | null>(null);
     const [displayName, setDisplayName] = useState<string | null>(null);
+    const [email, setEmail] = useState<string | null>(null);
     const [roles, setRoles] = useState<string[]>([]);
     const [permissions, setPermissions] = useState<string[]>([]);
     const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
@@ -93,6 +98,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setIsAuthenticated(false);
         setUsername(null);
         setDisplayName(null);
+        setEmail(null);
         setRoles([]);
         setPermissions([]);
         setIsSuperAdmin(false);
@@ -110,6 +116,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const res = await apiClient.get<UserInfo>('/api/v1/auth/me');
             const info = res.data;
             setDisplayName(info.display_name || info.username);
+            setEmail(info.email || null);
             setRoles(info.roles);
             setPermissions(info.permissions);
             setIsSuperAdmin(info.is_super_admin);
@@ -255,6 +262,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 isAuthenticated,
                 username,
                 displayName,
+                email,
                 roles,
                 permissions,
                 isSuperAdmin,
@@ -262,6 +270,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 isPermissionLoaded,
                 login,
                 logout,
+                reloadUserInfo: loadUserPermissions,
             }}
         >
             {children}

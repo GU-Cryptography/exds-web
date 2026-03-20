@@ -47,6 +47,7 @@ def _build_user_context(user: User) -> CurrentUserContext:
     return CurrentUserContext(
         username=user.username,
         display_name=user.display_name,
+        email=user.email,
         role_codes=role_codes,
         permission_codes=permission_codes,
         is_super_admin=is_super_admin,

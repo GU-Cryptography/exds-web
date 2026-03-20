@@ -104,7 +104,7 @@ export async function listUsers(page: number, pageSize: number): Promise<PagedRe
 
 export async function createUser(payload: {
     username: string;
-    password: string;
+    password?: string;
     display_name?: string;
     email?: string;
     roles: string[];
@@ -124,7 +124,7 @@ export async function deleteUser(username: string): Promise<void> {
     await apiClient.delete(`/api/v1/auth/users/${username}`);
 }
 
-export async function resetUserPassword(username: string, newPassword: string): Promise<void> {
+export async function resetUserPassword(username: string, newPassword?: string): Promise<void> {
     await apiClient.put(`/api/v1/auth/users/${username}/password/reset`, { new_password: newPassword });
 }
 
@@ -147,4 +147,18 @@ export async function listAuditLogs(params: {
         },
     });
     return { total: res.data.total || 0, items: res.data.logs || [] };
+}
+
+export async function updateMyProfile(payload: {
+    display_name?: string;
+    email?: string;
+}): Promise<void> {
+    await apiClient.put('/api/v1/auth/me/profile', payload);
+}
+
+export async function changeMyPassword(payload: {
+    old_password: string;
+    new_password: string;
+}): Promise<void> {
+    await apiClient.put('/api/v1/auth/me/password', payload);
 }

@@ -68,6 +68,8 @@ const ROUTE_PERMISSION_RULES: RoutePermissionRule[] = [
 
 const MUTATION_PERMISSION_RULES: MutationPermissionRule[] = [
     { methods: ['post', 'put', 'patch', 'delete'], pattern: /^\/api\/v1\/auth\/(roles|users)(\/.*)?$/, allPermissions: ['system:auth:manage'] },
+    { methods: ['put'], pattern: /^\/api\/v1\/auth\/me\/profile$/, allPermissions: [modulePermission('dashboard_overview', 'view')] },
+    { methods: ['put'], pattern: /^\/api\/v1\/auth\/me\/password$/, allPermissions: [modulePermission('dashboard_overview', 'view')] },
 
     { methods: ['post'], pattern: /^\/api\/v1\/customers$/, allPermissions: [modulePermission('customer_profiles', 'edit')] },
     { methods: ['post'], pattern: /^\/api\/v1\/customers\/sync$/, allPermissions: [modulePermission('customer_profiles', 'edit')] },

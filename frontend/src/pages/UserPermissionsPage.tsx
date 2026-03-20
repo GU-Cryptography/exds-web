@@ -246,13 +246,19 @@ const UserPermissionsPage: React.FC = () => {
   };
 
   const onCreateUser = async () => {
-    if (!userDraft.username || !userDraft.password) {
-      setError('用户名和密码不能为空');
+    if (!userDraft.username) {
+      setError('用户名不能为空');
       return;
     }
     setSaving(true);
     try {
-      await createUser({ ...userDraft, username: userDraft.username.trim(), email: userDraft.email.trim() || undefined, display_name: userDraft.display_name.trim() || undefined });
+      await createUser({
+        ...userDraft,
+        username: userDraft.username.trim(),
+        password: userDraft.password.trim() || undefined,
+        email: userDraft.email.trim() || undefined,
+        display_name: userDraft.display_name.trim() || undefined
+      });
       setMessage('用户创建成功');
       setCreateUserOpen(false);
       setUserDraft({ username: '', password: '', display_name: '', email: '', roles: [] });
@@ -323,13 +329,9 @@ const UserPermissionsPage: React.FC = () => {
 
   const onResetPassword = async () => {
     if (!targetUser) return;
-    if (!newPassword.trim()) {
-      setError('新密码不能为空');
-      return;
-    }
     setSaving(true);
     try {
-      await resetUserPassword(targetUser.username, newPassword.trim());
+      await resetUserPassword(targetUser.username, newPassword.trim() || undefined);
       setMessage(`用户 ${targetUser.username} 密码已重置`);
       setResetPasswordOpen(false);
       setTargetUser(null);
@@ -578,8 +580,19 @@ const UserPermissionsPage: React.FC = () => {
         <DialogTitle>新建用户</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
-            <TextField label="用户名" value={userDraft.username} onChange={(e) => setUserDraft((s) => ({ ...s, username: e.target.value }))} />
-            <TextField label="密码" type="password" value={userDraft.password} onChange={(e) => setUserDraft((s) => ({ ...s, password: e.target.value }))} />
+            <TextField
+              label="用户名"
+              value={userDraft.username}
+              onChange={(e) => setUserDraft((s) => ({ ...s, username: e.target.value }))}
+              autoComplete="new-username"
+            />
+            <TextField
+              label="密码（留空使用系统默认密码）"
+              type="password"
+              value={userDraft.password}
+              onChange={(e) => setUserDraft((s) => ({ ...s, password: e.target.value }))}
+              autoComplete="new-password"
+            />
             <TextField label="显示名" value={userDraft.display_name} onChange={(e) => setUserDraft((s) => ({ ...s, display_name: e.target.value }))} />
             <TextField label="邮箱" value={userDraft.email} onChange={(e) => setUserDraft((s) => ({ ...s, email: e.target.value }))} />
             <FormControl fullWidth>
@@ -612,10 +625,11 @@ const UserPermissionsPage: React.FC = () => {
           <Stack spacing={1.5} sx={{ mt: 1 }}>
             <Typography variant="body2">用户：{targetUser?.username}</Typography>
             <TextField
-              label="新密码"
+              label="新密码（留空使用系统默认密码）"
               type="password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
+              autoComplete="new-password"
               fullWidth
             />
           </Stack>

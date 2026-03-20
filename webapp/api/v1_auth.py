@@ -10,24 +10,28 @@ from typing import List, Optional
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from webapp.tools.mongo import DATABASE as db
+from webapp.tools.mongo import DATABASE as db, get_config
 from webapp.tools.security import (
-    get_current_active_user, get_password_hash, validate_password_strength,
+    get_current_active_user, get_password_hash, validate_password_strength, verify_password,
     IDLE_TIMEOUT_MINUTES, User
 )
 from webapp.models.auth import (
     CurrentUserContext, UserInfo, Permission, Role,
     CreateUserRequest, UpdateUserRolesRequest, UpdateUserStatusRequest,
     ResetPasswordRequest, CreateRoleRequest, UpdateRoleRequest,
-    UpdateRolePermissionsRequest,
+    UpdateRolePermissionsRequest, UpdateMyProfileRequest, ChangeMyPasswordRequest,
 )
 from webapp.api.dependencies.authz import (
-    get_current_user_context, require_permission
+    get_current_user_context, require_permission, require_any_permission
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["认证与授权"])
+
+
+def _get_default_user_password() -> str:
+    return get_config("AUTH", "default_password", "0000aaaa....")
 
 
 # ==================== 工具函数 ====================
@@ -65,11 +69,56 @@ async def get_me(
     return UserInfo(
         username=ctx.username,
         display_name=ctx.display_name,
+        email=ctx.email,
         roles=ctx.role_codes,
         permissions=ctx.permission_codes,
         is_super_admin=ctx.is_super_admin,
         idle_timeout_minutes=IDLE_TIMEOUT_MINUTES,
     )
+
+
+@router.put("/me/profile", summary="更新当前用户资料")
+async def update_my_profile(
+    body: UpdateMyProfileRequest,
+    current_user: User = Depends(get_current_active_user),
+    _: CurrentUserContext = Depends(require_any_permission(["module:dashboard_overview:view", "system:auth:manage"])),
+):
+    update_fields = {
+        "display_name": (body.display_name or "").strip() or None,
+        "email": (body.email or "").strip() or None,
+    }
+    db.users.update_one(
+        {"username": current_user.username},
+        {"$set": update_fields}
+    )
+    _write_audit_log("SELF_PROFILE_UPDATED", current_user.username, current_user.username, update_fields)
+    return {"message": "个人资料更新成功"}
+
+
+@router.put("/me/password", summary="修改当前用户密码")
+async def change_my_password(
+    body: ChangeMyPasswordRequest,
+    current_user: User = Depends(get_current_active_user),
+    _: CurrentUserContext = Depends(require_any_permission(["module:dashboard_overview:view", "system:auth:manage"])),
+):
+    user_doc = db.users.find_one({"username": current_user.username})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if not verify_password(body.old_password, user_doc.get("hashed_password", "")):
+        raise HTTPException(status_code=400, detail="旧密码错误")
+    is_valid, msg = validate_password_strength(body.new_password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=msg)
+    db.users.update_one(
+        {"username": current_user.username},
+        {"$set": {
+            "hashed_password": get_password_hash(body.new_password),
+            "must_change_password": False,
+            "password_changed_at": datetime.now(timezone.utc).isoformat(),
+        }}
+    )
+    _write_audit_log("SELF_PASSWORD_CHANGED", current_user.username, current_user.username)
+    return {"message": "密码修改成功"}
 
 
 # ==================== 权限点管理 ====================
@@ -209,12 +258,13 @@ async def create_user(
 ):
     if db.users.find_one({"username": body.username}):
         raise HTTPException(status_code=400, detail=f"用户名 {body.username} 已存在")
-    is_valid, msg = validate_password_strength(body.password)
+    password = (body.password or "").strip() or _get_default_user_password()
+    is_valid, msg = validate_password_strength(password)
     if not is_valid:
         raise HTTPException(status_code=400, detail=msg)
     doc = {
         "username": body.username,
-        "hashed_password": get_password_hash(body.password),
+        "hashed_password": get_password_hash(password),
         "display_name": body.display_name,
         "email": body.email,
         "roles": body.roles,
@@ -223,7 +273,10 @@ async def create_user(
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     db.users.insert_one(doc)
-    _write_audit_log("USER_CREATED", ctx.username, body.username, {"roles": body.roles})
+    _write_audit_log("USER_CREATED", ctx.username, body.username, {
+        "roles": body.roles,
+        "used_default_password": not bool((body.password or "").strip()),
+    })
     return {"message": "用户创建成功", "username": body.username}
 
 
@@ -270,15 +323,18 @@ async def reset_user_password(
     user = db.users.find_one({"username": username})
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    is_valid, msg = validate_password_strength(body.new_password)
+    new_password = (body.new_password or "").strip() or _get_default_user_password()
+    is_valid, msg = validate_password_strength(new_password)
     if not is_valid:
         raise HTTPException(status_code=400, detail=msg)
     db.users.update_one({"username": username}, {"$set": {
-        "hashed_password": get_password_hash(body.new_password),
+        "hashed_password": get_password_hash(new_password),
         "must_change_password": True,
         "password_changed_at": datetime.now(timezone.utc).isoformat(),
     }})
-    _write_audit_log("USER_PASSWORD_RESET", ctx.username, username)
+    _write_audit_log("USER_PASSWORD_RESET", ctx.username, username, {
+        "used_default_password": not bool((body.new_password or "").strip()),
+    })
     return {"message": "密码重置成功，用户下次登录需修改密码"}
 
 

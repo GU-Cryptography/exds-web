@@ -6,16 +6,30 @@ import {
     Typography,
     Drawer,
     IconButton,
-    Chip,
+    Menu,
+    MenuItem,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogActions,
+    TextField,
+    Alert,
+    Button,
 } from '@mui/material';
 import InsightsIcon from '@mui/icons-material/Insights';
 import MenuIcon from '@mui/icons-material/Menu';
 import CloseIcon from '@mui/icons-material/Close';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import AccountCircleIcon from '@mui/icons-material/AccountCircle';
+import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
+import LockResetIcon from '@mui/icons-material/LockReset';
+import LogoutIcon from '@mui/icons-material/Logout';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar } from '../components/Sidebar';
 import { useTabContext } from '../contexts/TabContext';
 import { routeConfigs } from '../config/routes';
+import { useAuth } from '../contexts/AuthContext';
+import { changeMyPassword, updateMyProfile } from '../api/authManagement';
 
 const drawerWidth = 260;
 
@@ -28,6 +42,15 @@ export const MobileSimpleLayout: React.FC = () => {
     const { openTabs, activeTabKey, removeTab } = useTabContext();
     const location = useLocation();
     const navigate = useNavigate();
+    const { displayName, email, logout, reloadUserInfo } = useAuth();
+    const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+    const [profileOpen, setProfileOpen] = useState(false);
+    const [passwordOpen, setPasswordOpen] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [message, setMessage] = useState<string | null>(null);
+    const [profileDraft, setProfileDraft] = useState({ display_name: '', email: '' });
+    const [passwordDraft, setPasswordDraft] = useState({ old_password: '', new_password: '', confirm_password: '' });
 
     const handleDrawerToggle = () => {
         setMobileOpen(!mobileOpen);
@@ -61,6 +84,79 @@ export const MobileSimpleLayout: React.FC = () => {
 
     const isRoot = location.pathname === '/' || location.pathname === '';
     const showBackButton = activeTab || !isRoot;
+
+    const handleAccountMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+        setAnchorEl(event.currentTarget);
+    };
+
+    const handleAccountMenuClose = () => {
+        setAnchorEl(null);
+    };
+
+    const openProfileDialog = () => {
+        setProfileDraft({
+            display_name: displayName || '',
+            email: email || '',
+        });
+        setError(null);
+        setMessage(null);
+        setProfileOpen(true);
+        handleAccountMenuClose();
+    };
+
+    const openPasswordDialog = () => {
+        setPasswordDraft({ old_password: '', new_password: '', confirm_password: '' });
+        setError(null);
+        setMessage(null);
+        setPasswordOpen(true);
+        handleAccountMenuClose();
+    };
+
+    const onSaveProfile = async () => {
+        setSaving(true);
+        setError(null);
+        setMessage(null);
+        try {
+            await updateMyProfile({
+                display_name: profileDraft.display_name.trim() || undefined,
+                email: profileDraft.email.trim() || undefined,
+            });
+            await reloadUserInfo();
+            setMessage('个人信息已更新');
+            setProfileOpen(false);
+        } catch (e: any) {
+            setError(e?.response?.data?.detail || e?.message || '更新个人信息失败');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const onChangePassword = async () => {
+        if (!passwordDraft.old_password || !passwordDraft.new_password) {
+            setError('请输入完整密码信息');
+            return;
+        }
+        if (passwordDraft.new_password !== passwordDraft.confirm_password) {
+            setError('两次输入的新密码不一致');
+            return;
+        }
+        setSaving(true);
+        setError(null);
+        setMessage(null);
+        try {
+            await changeMyPassword({
+                old_password: passwordDraft.old_password,
+                new_password: passwordDraft.new_password,
+            });
+            setMessage('密码修改成功，请重新登录。');
+            setPasswordOpen(false);
+            logout();
+        } catch (e: any) {
+            setError(e?.response?.data?.detail || e?.message || '修改密码失败');
+        } finally {
+            setSaving(false);
+        }
+    };
 
     return (
         <Box sx={{ display: 'flex', bgcolor: 'background.default', minHeight: '100vh' }}>
@@ -102,12 +198,35 @@ export const MobileSimpleLayout: React.FC = () => {
                         {getPageTitle()}
                     </Typography>
                     {activeTab && (
-                        <IconButton color="inherit" onClick={handleBack}>
+                        <IconButton color="inherit" onClick={handleBack} sx={{ mr: 0.5 }}>
                             <CloseIcon />
                         </IconButton>
                     )}
+                    <IconButton color="inherit" onClick={handleAccountMenuOpen}>
+                        <AccountCircleIcon />
+                    </IconButton>
                 </Toolbar>
             </AppBar>
+            <Menu
+                anchorEl={anchorEl}
+                open={Boolean(anchorEl)}
+                onClose={handleAccountMenuClose}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+            >
+                <MenuItem onClick={openProfileDialog}>
+                    <PersonOutlineIcon sx={{ mr: 1, fontSize: 20 }} />
+                    编辑个人信息
+                </MenuItem>
+                <MenuItem onClick={openPasswordDialog}>
+                    <LockResetIcon sx={{ mr: 1, fontSize: 20 }} />
+                    修改密码
+                </MenuItem>
+                <MenuItem onClick={() => { handleAccountMenuClose(); logout(); }}>
+                    <LogoutIcon sx={{ mr: 1, fontSize: 20 }} />
+                    退出系统
+                </MenuItem>
+            </Menu>
 
             {/* 侧边栏 */}
             <Box
@@ -166,7 +285,75 @@ export const MobileSimpleLayout: React.FC = () => {
                 ) : (
                     <Outlet />
                 )}
+                {error && (
+                    <Alert severity="error" sx={{ mt: 1 }} onClose={() => setError(null)}>
+                        {error}
+                    </Alert>
+                )}
+                {message && (
+                    <Alert severity="success" sx={{ mt: 1 }} onClose={() => setMessage(null)}>
+                        {message}
+                    </Alert>
+                )}
             </Box>
+
+            <Dialog open={profileOpen} onClose={() => setProfileOpen(false)} fullWidth maxWidth="xs">
+                <DialogTitle>编辑个人信息</DialogTitle>
+                <DialogContent>
+                    <TextField
+                        fullWidth
+                        margin="dense"
+                        label="显示名称"
+                        value={profileDraft.display_name}
+                        onChange={(e) => setProfileDraft((s) => ({ ...s, display_name: e.target.value }))}
+                    />
+                    <TextField
+                        fullWidth
+                        margin="dense"
+                        label="邮箱"
+                        value={profileDraft.email}
+                        onChange={(e) => setProfileDraft((s) => ({ ...s, email: e.target.value }))}
+                    />
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setProfileOpen(false)}>取消</Button>
+                    <Button onClick={onSaveProfile} disabled={saving} variant="contained">保存</Button>
+                </DialogActions>
+            </Dialog>
+
+            <Dialog open={passwordOpen} onClose={() => setPasswordOpen(false)} fullWidth maxWidth="xs">
+                <DialogTitle>修改密码</DialogTitle>
+                <DialogContent>
+                    <TextField
+                        fullWidth
+                        margin="dense"
+                        label="旧密码"
+                        type="password"
+                        value={passwordDraft.old_password}
+                        onChange={(e) => setPasswordDraft((s) => ({ ...s, old_password: e.target.value }))}
+                    />
+                    <TextField
+                        fullWidth
+                        margin="dense"
+                        label="新密码"
+                        type="password"
+                        value={passwordDraft.new_password}
+                        onChange={(e) => setPasswordDraft((s) => ({ ...s, new_password: e.target.value }))}
+                    />
+                    <TextField
+                        fullWidth
+                        margin="dense"
+                        label="确认新密码"
+                        type="password"
+                        value={passwordDraft.confirm_password}
+                        onChange={(e) => setPasswordDraft((s) => ({ ...s, confirm_password: e.target.value }))}
+                    />
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setPasswordOpen(false)}>取消</Button>
+                    <Button onClick={onChangePassword} disabled={saving} variant="contained">确认修改</Button>
+                </DialogActions>
+            </Dialog>
         </Box>
     );
 };

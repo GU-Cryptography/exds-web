@@ -32,21 +32,21 @@ def validate_password_strength(password: str) -> (bool, str): # type: ignore
     Returns a tuple (is_valid, message).
     """
     if len(password) < 8:
-        return False, "Password must be at least 8 characters long."
+        return False, "密码长度至少 8 位。"
     
     checks = {
         "uppercase": re.search(r"[A-Z]", password),
         "lowercase": re.search(r"[a-z]", password),
         "digit": re.search(r"\d", password),
-        "special": re.search(r"[!@#$%^&*]", password),
+        "special": re.search(r"[!@#$%^&*.]", password),
     }
     
     met_criteria_count = sum(1 for check in checks.values() if check)
     
     if met_criteria_count < 3:
-        return False, "Password must contain at least three of the following: uppercase letter, lowercase letter, digit, special character."
+        return False, "密码需至少满足以下四类中的三类：大写字母、小写字母、数字、特殊字符（!@#$%^&*.）。"
         
-    return True, "Password is valid."
+    return True, "密码格式有效。"
 
 # --- Security & Config Constants ---
 # SECRET_KEY 从 .exds/config.ini [JWT] 段读取。若未配置则使用不安全的默认值并打印警告。
