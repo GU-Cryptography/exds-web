@@ -52,7 +52,7 @@ import { useAuth } from '../contexts/AuthContext';
 export const CustomerManagementPage: React.FC = () => {
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('module:customer_profiles:edit');
-    const canDelete = canEdit && hasPermission('data:critical:delete');
+    const canDelete = canEdit && hasPermission('customer:profile:delete');
     // 路由参数和导航
     const params = useParams<{ customerId?: string }>();
     const navigate = useNavigate();
@@ -480,7 +480,7 @@ export const CustomerManagementPage: React.FC = () => {
                                 <EditIcon fontSize="small" />
                             </IconButton>
                         </Tooltip>
-                        <Tooltip title={canDelete ? '删除' : '无权限（需要 data:critical:delete）'}>
+                        <Tooltip title={canDelete ? '删除' : '无权限（需要 customer:profile:delete）'}>
                             <span>
                             <IconButton size="small" onClick={() => handleDeleteClick(customer)} color="error" disabled={!canDelete}>
                                 <DeleteIcon fontSize="small" />
@@ -506,7 +506,7 @@ export const CustomerManagementPage: React.FC = () => {
                     <EditIcon fontSize="small" />
                 </IconButton>
             </Tooltip>
-            <Tooltip title={canDelete ? '删除' : '无权限（需要 data:critical:delete）'}>
+            <Tooltip title={canDelete ? '删除' : '无权限（需要 customer:profile:delete）'}>
                 <span>
                 <IconButton size="small" onClick={() => handleDeleteClick(customer)} disabled={!canDelete}>
                     <DeleteIcon fontSize="small" color="error" />

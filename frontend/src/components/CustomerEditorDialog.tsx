@@ -56,6 +56,7 @@ import {
 } from '../api/customer';
 import customerApi from '../api/customer';
 import TagSelector from './customer/TagSelector';
+import { useAuth } from '../contexts/AuthContext';
 
 interface CustomerEditorDialogProps {
     open: boolean;
@@ -83,6 +84,8 @@ export const CustomerEditorDialog: React.FC<CustomerEditorDialogProps> = ({
     onClose,
     onSave
 }) => {
+    const { hasPermission } = useAuth();
+    const canEdit = hasPermission('module:customer_profiles:edit');
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const isCreate = mode === 'create';
@@ -473,6 +476,7 @@ export const CustomerEditorDialog: React.FC<CustomerEditorDialogProps> = ({
                             size="small"
                             startIcon={<AddIcon />}
                             onClick={handleAddAccount}
+                            disabled={!canEdit || saving}
                         >
                             添加户号
                         </Button>
@@ -489,8 +493,8 @@ export const CustomerEditorDialog: React.FC<CustomerEditorDialogProps> = ({
                                     onChange={(e) => setEditingAccountId(e.target.value)}
                                     sx={{ flex: 1 }}
                                 />
-                                <Button size="small" onClick={handleSaveAccount}>保存</Button>
-                                <Button size="small" onClick={() => setEditingAccountIndex(null)}>取消</Button>
+                                <Button size="small" onClick={handleSaveAccount} disabled={!canEdit || saving}>保存</Button>
+                                <Button size="small" onClick={() => setEditingAccountIndex(null)} disabled={saving}>取消</Button>
                             </Box>
                         </Paper>
                     )}
@@ -507,6 +511,7 @@ export const CustomerEditorDialog: React.FC<CustomerEditorDialogProps> = ({
                                         <IconButton
                                             size="small"
                                             onClick={(e) => { e.stopPropagation(); handleEditAccount(accountIndex); }}
+                                            disabled={!canEdit || saving}
                                         >
                                             <EditIcon fontSize="small" />
                                         </IconButton>
@@ -514,6 +519,7 @@ export const CustomerEditorDialog: React.FC<CustomerEditorDialogProps> = ({
                                             size="small"
                                             color="error"
                                             onClick={(e) => { e.stopPropagation(); handleDeleteAccount(accountIndex); }}
+                                            disabled={!canEdit || saving}
                                         >
                                             <DeleteIcon fontSize="small" />
                                         </IconButton>
@@ -527,7 +533,7 @@ export const CustomerEditorDialog: React.FC<CustomerEditorDialogProps> = ({
                                         <Typography variant="body2" color="text.secondary">
                                             电表 ({account.meters?.length || 0})
                                         </Typography>
-                                        <Button size="small" startIcon={<AddIcon />} onClick={() => handleAddMeter(accountIndex)}>
+                                        <Button size="small" startIcon={<AddIcon />} onClick={() => handleAddMeter(accountIndex)} disabled={!canEdit || saving}>
                                             添加电表
                                         </Button>
                                     </Box>
@@ -570,8 +576,8 @@ export const CustomerEditorDialog: React.FC<CustomerEditorDialogProps> = ({
                                                     />
                                                 </Grid>
                                                 <Grid size={{ xs: 2 }}>
-                                                    <Button size="small" onClick={handleSaveMeter}>保存</Button>
-                                                    <Button size="small" onClick={() => setEditingMeter(null)}>取消</Button>
+                                                    <Button size="small" onClick={handleSaveMeter} disabled={!canEdit || saving}>保存</Button>
+                                                    <Button size="small" onClick={() => setEditingMeter(null)} disabled={saving}>取消</Button>
                                                 </Grid>
                                             </Grid>
                                         </Paper>
@@ -599,10 +605,10 @@ export const CustomerEditorDialog: React.FC<CustomerEditorDialogProps> = ({
                                                                 {meter.allocation_ratio != null ? `${(meter.allocation_ratio * 100).toFixed(0)}%` : '-'}
                                                             </TableCell>
                                                             <TableCell align="right" sx={{ px: 0 }}>
-                                                                <IconButton size="small" onClick={() => handleEditMeter(accountIndex, meterIndex)}>
+                                                                <IconButton size="small" onClick={() => handleEditMeter(accountIndex, meterIndex)} disabled={!canEdit || saving}>
                                                                     <EditIcon fontSize="small" />
                                                                 </IconButton>
-                                                                <IconButton size="small" color="error" onClick={() => handleDeleteMeter(accountIndex, meterIndex)}>
+                                                                <IconButton size="small" color="error" onClick={() => handleDeleteMeter(accountIndex, meterIndex)} disabled={!canEdit || saving}>
                                                                     <DeleteIcon fontSize="small" />
                                                                 </IconButton>
                                                             </TableCell>
@@ -622,7 +628,7 @@ export const CustomerEditorDialog: React.FC<CustomerEditorDialogProps> = ({
                                         <Typography variant="body2" color="text.secondary">
                                             计量点 ({account.metering_points?.length || 0})
                                         </Typography>
-                                        <Button size="small" startIcon={<AddIcon />} onClick={() => handleAddMP(accountIndex)}>
+                                        <Button size="small" startIcon={<AddIcon />} onClick={() => handleAddMP(accountIndex)} disabled={!canEdit || saving}>
                                             添加计量点
                                         </Button>
                                     </Box>
@@ -650,8 +656,8 @@ export const CustomerEditorDialog: React.FC<CustomerEditorDialogProps> = ({
                                                     />
                                                 </Grid>
                                                 <Grid size={{ xs: 2 }}>
-                                                    <Button size="small" onClick={handleSaveMP}>保存</Button>
-                                                    <Button size="small" onClick={() => setEditingMP(null)}>取消</Button>
+                                                    <Button size="small" onClick={handleSaveMP} disabled={!canEdit || saving}>保存</Button>
+                                                    <Button size="small" onClick={() => setEditingMP(null)} disabled={saving}>取消</Button>
                                                 </Grid>
                                             </Grid>
                                         </Paper>
@@ -673,10 +679,10 @@ export const CustomerEditorDialog: React.FC<CustomerEditorDialogProps> = ({
                                                             <TableCell>{mp.mp_no}</TableCell>
                                                             <TableCell>{mp.mp_name || '-'}</TableCell>
                                                             <TableCell align="right">
-                                                                <IconButton size="small" onClick={() => handleEditMP(accountIndex, mpIndex)}>
+                                                                <IconButton size="small" onClick={() => handleEditMP(accountIndex, mpIndex)} disabled={!canEdit || saving}>
                                                                     <EditIcon fontSize="small" />
                                                                 </IconButton>
-                                                                <IconButton size="small" color="error" onClick={() => handleDeleteMP(accountIndex, mpIndex)}>
+                                                                <IconButton size="small" color="error" onClick={() => handleDeleteMP(accountIndex, mpIndex)} disabled={!canEdit || saving}>
                                                                     <DeleteIcon fontSize="small" />
                                                                 </IconButton>
                                                             </TableCell>
@@ -704,7 +710,7 @@ export const CustomerEditorDialog: React.FC<CustomerEditorDialogProps> = ({
                 <Button
                     variant="contained"
                     onClick={handleSaveCustomer}
-                    disabled={saving}
+                    disabled={saving || !canEdit}
                     startIcon={saving ? <CircularProgress size={16} /> : null}
                 >
                     {saving ? '保存中...' : '保存'}

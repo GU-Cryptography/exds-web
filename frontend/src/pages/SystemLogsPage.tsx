@@ -160,7 +160,7 @@ const safeFormatDate = (dateStr: string | undefined | null) => {
 
 export const SystemLogsPage: React.FC = () => {
     const { hasPermission } = useAuth();
-    const canResolveAlert = hasPermission('system:logs:resolve');
+    const canResolveAlert = hasPermission('module:system_logs:edit');
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));

@@ -30,6 +30,7 @@ import { LoadForecastWorkbench } from '../pages/LoadForecastWorkbench';
 import TradeReviewPage from '../pages/TradeReviewPage';
 import DayAheadTradeReviewPage from '../pages/DayAheadTradeReviewPage';
 import { IntentCustomerDiagnosisPage } from '../pages/IntentCustomerDiagnosisPage';
+import UserPermissionsPage from '../pages/UserPermissionsPage';
 
 export interface RouteConfig {
     path: string;
@@ -95,7 +96,7 @@ export const routeConfigs: RouteConfig[] = [
     { path: '/basic-data/monthly-manual-data', title: '基础数据导入', component: MonthlyManualDataPage },
 
     // 系统管理
-    { path: '/system-settings/user-permissions', title: '用户与权限', component: PlaceholderPage },
+    { path: '/system-settings/user-permissions', title: '用户与权限', component: UserPermissionsPage },
     { path: '/system-settings/data-access', title: '数据下载监控', component: RpaMonitorPage },
     { path: '/system-settings/system-logs', title: '告警与日志', component: SystemLogsPage },
     { path: '/system-settings/model-parameters', title: '预测模型参数', component: PlaceholderPage },

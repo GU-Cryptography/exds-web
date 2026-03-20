@@ -472,7 +472,7 @@ export const LoadDataImportDialog: React.FC<LoadDataImportDialogProps> = ({
                                         <TableCell>
                                             <IconButton
                                                 size="small"
-                                                disabled={loading || item.status === 'uploading'}
+                                                disabled={loading || !canEdit || item.status === 'uploading'}
                                                 onClick={() => handleRemoveFile(item.id)}
                                             >
                                                 <DeleteIcon fontSize="small" />

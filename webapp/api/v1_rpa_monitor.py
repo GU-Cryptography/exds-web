@@ -121,7 +121,7 @@ async def create_retry_request(
     pipeline_name: str,
     task_key: str,
     current_user: dict = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("system:data_access:manage"))
+    _ctx = Depends(require_permission("module:system_data_access:edit"))
 ):
     """创建重试请求"""
     service = get_rpa_monitor_service()

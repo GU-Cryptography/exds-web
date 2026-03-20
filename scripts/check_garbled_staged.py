@@ -16,6 +16,28 @@ SUSPICIOUS_TOKENS = (
     "\u00ef\u00bf\u00bd",
     "\ufffd",
 )
+GBK_SUSPICIOUS_TOKENS = (
+    "\u9239",
+    "\u9369\u8679",
+    "\u95c6\u8dfa",
+    "\u7035\u714e\u53c6",
+    "\u752f\u6b4c\ue749",
+    "\u7ead\ue1bf\ue17b",
+    "\u9352\u72bb\u6ace",
+    "\u93c3\u8235\ue18c",
+    "\u6d60\u950b\u7278",
+    "\u7eeb\u8bf2\u7037",
+    "\u5a34\ue1bc\u59e9",
+    "\u95ab\u590b\u5ae8",
+    "\u93c8\u581c\u5524",
+    "\u7487\ufe3d\u510f",
+    "\u6fb6\u8fab\u89e6",
+    "\u93b4\u612c\u59db",
+    "\u704f\u6827\u5632",
+    "\u5b84\u7248\ue18c",
+    "\u9a9e\u866b\ue18c",
+    "\u748b\u950b\ue18c",
+)
 SUSPICIOUS_CHARS = set(
     "ÃÂÄÅÆÇÐÑÕÖØÜÝÞß"
     "àáâãäåæçèéêëìíîï"
@@ -89,6 +111,22 @@ def _repair_candidate(text: str) -> str | None:
     return None
 
 
+def _repair_candidate_from_gbk(text: str) -> str | None:
+    if not any(token in text for token in GBK_SUSPICIOUS_TOKENS):
+        return None
+    try:
+        repaired = text.replace("€", "").encode("gb18030").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return None
+    if repaired == text:
+        return None
+    if any(token in repaired for token in GBK_SUSPICIOUS_TOKENS):
+        return None
+    if _count_cjk(repaired) == 0:
+        return None
+    return repaired
+
+
 def _format_excerpt(text: str, limit: int = 80) -> str:
     normalized = text.strip().replace("\t", " ")
     if len(normalized) <= limit:
@@ -111,6 +149,16 @@ def _scan_text(path: str, text: str) -> list[str]:
             issues.append(
                 f"{path}:{line_no} 疑似乱码：`{_format_excerpt(line)}` -> `{_format_excerpt(repaired)}`"
             )
+            continue
+        gbk_repaired = _repair_candidate_from_gbk(line)
+        if gbk_repaired is not None:
+            issues.append(
+                f"{path}:{line_no} 疑似 GBK/UTF-8 乱码：`{_format_excerpt(line)}` -> `{_format_excerpt(gbk_repaired)}`"
+            )
+            continue
+        gbk_token = next((token for token in GBK_SUSPICIOUS_TOKENS if token in line), None)
+        if gbk_token is not None:
+            issues.append(f"{path}:{line_no} 包含高风险 GBK 乱码片段 `{gbk_token}`")
     return issues
 
 

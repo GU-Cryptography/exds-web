@@ -319,7 +319,7 @@ async def resolve_alert(
     alert_id: str,
     request: ResolveAlertRequest,
     current_user: dict = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("system:logs:resolve"))
+    _ctx = Depends(require_permission("module:system_logs:edit"))
 ):
     """解决告警"""
     try:

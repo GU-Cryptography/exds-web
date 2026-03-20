@@ -56,10 +56,11 @@ MODULE_DEFINITIONS: List[Dict[str, Any]] = [
 
 
 EXCEPTION_PERMISSIONS: List[Dict[str, str]] = [
-    {"code": "system:logs:resolve", "name": "告警处理", "description": "处理系统告警"},
-    {"code": "system:data_access:manage", "name": "数据下载任务管理", "description": "重试/管理数据下载任务"},
+    {"code": "customer:profile:delete", "name": "客户删除", "description": "删除客户档案数据"},
+    {"code": "customer:contract:delete", "name": "合同删除", "description": "删除零售合同数据"},
+    {"code": "customer:package:delete", "name": "套餐删除", "description": "删除零售套餐数据"},
+    {"code": "load:data:reaggregate", "name": "负荷数据重新聚合", "description": "执行负荷数据重新聚合任务"},
     {"code": "settlement:recalc:execute", "name": "结算重算执行", "description": "执行大规模结算重算"},
-    {"code": "data:critical:delete", "name": "关键数据删除", "description": "删除关键业务数据"},
     {"code": "system:auth:manage", "name": "用户与权限管理", "description": "管理用户、角色、权限"},
 ]
 
@@ -85,8 +86,6 @@ LEGACY_BY_MODULE_EDIT: Dict[str, List[str]] = {
     "customer_retail_contracts": ["customer:contract:create", "customer:contract:update", "customer:contract:delete", "customer:contract:export"],
     "customer_retail_packages": ["customer:package:create", "customer:package:update", "customer:package:delete"],
     "forecast_short_term_load": ["forecast:adjust:update"],
-    "system_data_access": ["system:data_access:manage"],
-    "system_logs": ["system:logs:resolve"],
     "system_user_auth": ["system:auth:manage"],
 }
 
@@ -211,8 +210,11 @@ def _build_roles(now: str) -> List[Dict[str, Any]]:
     business_permissions = module_perms(business_modules, ["view", "edit"])
     for mc in business_modules:
         business_permissions.extend(LEGACY_BY_MODULE_EDIT.get(mc, []))
+    business_permissions.append("customer:profile:delete")
+    business_permissions.append("customer:contract:delete")
+    business_permissions.append("customer:package:delete")
+    business_permissions.append("load:data:reaggregate")
     business_permissions.append("settlement:recalc:execute")
-    business_permissions.append("data:critical:delete")
 
     system_admin_permissions = module_perms(all_modules, ["view", "edit"])
     for mc in all_modules:

@@ -64,7 +64,7 @@ const getStatusChipColor = (status: string): 'default' | 'success' | 'warning' =
 const RetailContractPage: React.FC = () => {
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('module:customer_retail_contracts:edit');
-  const canDelete = canEdit && hasPermission('data:critical:delete');
+  const canDelete = canEdit && hasPermission('customer:contract:delete');
   // 路由参数和导航
   const params = useParams<{ contractId?: string }>();
   const navigate = useNavigate();
@@ -563,6 +563,7 @@ const RetailContractPage: React.FC = () => {
           contract={null}
           onClose={handleBackToList}
           onSuccess={handleSaveSuccess}
+          canEdit={canEdit}
         />
       </Box>
     );
@@ -642,6 +643,7 @@ const RetailContractPage: React.FC = () => {
             contract={mobileContractData}
             onClose={handleBackToList}
             onSuccess={handleSaveSuccess}
+            canEdit={canEdit}
           />
         ) : null}
       </Box>
@@ -1083,6 +1085,7 @@ const RetailContractPage: React.FC = () => {
               'success'
             );
           }}
+          canEdit={canEdit}
         />
 
         {/* 删除确认对话框 */}

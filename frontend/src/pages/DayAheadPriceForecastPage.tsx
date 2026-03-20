@@ -60,6 +60,7 @@ import {
     ResponsiveContainer,
 } from 'recharts';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
+import { useAuth } from '../contexts/AuthContext';
 import { priceForecastApi, ForecastVersion, ChartDataPoint, AccuracyData, CommandStatus } from '../api/priceForecast';
 
 
@@ -374,6 +375,8 @@ const DailyStatsCard: React.FC<DailyStatsProps> = ({ stats, chartData }) => {
 export const DayAheadPriceForecastPage: React.FC = () => {
     const theme = useTheme();
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
+    const { hasPermission } = useAuth();
+    const canEdit = hasPermission('module:forecast_dayahead_price:edit');
 
     // 状态管理
     const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
@@ -565,6 +568,7 @@ export const DayAheadPriceForecastPage: React.FC = () => {
 
     // 触发预测
     const handleTriggerForecast = async () => {
+        if (!canEdit) return;
         if (!selectedDate) return;
 
         const targetDate = format(selectedDate, 'yyyy-MM-dd');
@@ -614,6 +618,7 @@ export const DayAheadPriceForecastPage: React.FC = () => {
 
     // 处理预测按钮点击
     const handlePredictClick = () => {
+        if (!canEdit) return;
         if (versions.length > 0) {
             setConfirmDialogOpen(true);
         } else {
@@ -623,6 +628,7 @@ export const DayAheadPriceForecastPage: React.FC = () => {
 
     // 确认重新预测
     const handleConfirmPredict = () => {
+        if (!canEdit) return;
         setConfirmDialogOpen(false);
         handleTriggerForecast();
     };
@@ -746,6 +752,7 @@ export const DayAheadPriceForecastPage: React.FC = () => {
                         }
                         onClick={handlePredictClick}
                         disabled={
+                            !canEdit ||
                             loading ||
                             triggerLoading ||
                             commandStatus === 'pending' ||
@@ -772,7 +779,7 @@ export const DayAheadPriceForecastPage: React.FC = () => {
                     </DialogContent>
                     <DialogActions>
                         <Button onClick={() => setConfirmDialogOpen(false)}>取消</Button>
-                        <Button onClick={handleConfirmPredict} variant="contained" autoFocus>
+                        <Button onClick={handleConfirmPredict} variant="contained" autoFocus disabled={!canEdit}>
                             执行重新预测
                         </Button>
                     </DialogActions>

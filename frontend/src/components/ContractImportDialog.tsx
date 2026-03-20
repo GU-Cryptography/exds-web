@@ -307,6 +307,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
   };
 
   const removeFile = () => {
+    if (!canEdit) return;
     setSelectedFile(null);
     setError(null);
     setImportResult(null);
@@ -316,11 +317,13 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
   };
 
   const removePdfFile = (index: number) => {
+    if (!canEdit) return;
     setSelectedPdfFiles(prev => prev.filter((_, i) => i !== index));
     setPdfUploadResult(null);
   };
 
   const clearAllPdfFiles = () => {
+    if (!canEdit) return;
     setSelectedPdfFiles([]);
     setPdfUploadResult(null);
     if (pdfInputRef.current) {
@@ -329,6 +332,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
   };
 
   const removeCreatePdfFile = () => {
+    if (!canEdit) return;
     setCreatePdfFile(null);
     setParseResult(null);
     setCreateSuccess(false);
@@ -545,7 +549,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
                 {(selectedFile.size / 1024).toFixed(2)} KB
               </Typography>
             </Box>
-            <IconButton onClick={removeFile} size="small" color="error">
+            <IconButton onClick={removeFile} size="small" color="error" disabled={!canEdit}>
               <CloseIcon />
             </IconButton>
           </Paper>
@@ -610,7 +614,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
         <Box>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
             <Typography variant="subtitle2">已选择 {selectedPdfFiles.length} 个文件:</Typography>
-            <Button size="small" onClick={clearAllPdfFiles} color="error">清空</Button>
+            <Button size="small" onClick={clearAllPdfFiles} color="error" disabled={!canEdit}>清空</Button>
           </Box>
           <Paper variant="outlined" sx={{ maxHeight: 200, overflow: 'auto' }}>
             <List dense>
@@ -618,7 +622,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
                 <ListItem
                   key={index}
                   secondaryAction={
-                    <IconButton edge="end" size="small" onClick={() => removePdfFile(index)}>
+                    <IconButton edge="end" size="small" onClick={() => removePdfFile(index)} disabled={!canEdit}>
                       <CloseIcon fontSize="small" />
                     </IconButton>
                   }
@@ -636,6 +640,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
             size="small"
             sx={{ mt: 1 }}
             onClick={() => canEdit && pdfInputRef.current?.click()}
+            disabled={!canEdit}
           >
             继续添加文件
           </Button>
@@ -709,7 +714,7 @@ export const ContractImportDialog: React.FC<ContractImportDialogProps> = ({
                 {(createPdfFile.size / 1024).toFixed(2)} KB
               </Typography>
             </Box>
-            <IconButton onClick={removeCreatePdfFile} size="small" color="error">
+            <IconButton onClick={removeCreatePdfFile} size="small" color="error" disabled={!canEdit}>
               <CloseIcon />
             </IconButton>
           </Paper>

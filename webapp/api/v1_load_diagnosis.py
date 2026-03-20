@@ -601,7 +601,8 @@ async def trigger_reaggregate(
     mode: str = Query("incremental", description="聚合模式: incremental(增量)/full(全量)"),
     delete_existing: bool = Query(False, description="是否删除原数据（仅全量模式有效）"),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("module:basic_monthly_manual_import:edit"))
+    _ctx = Depends(require_permission("module:basic_monthly_manual_import:edit")),
+    _reaggregate_ctx = Depends(require_permission("load:data:reaggregate")),
 ):
     """
     触发重新聚合计算（真正的增量逻辑）

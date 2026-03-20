@@ -47,6 +47,8 @@ def _write_audit_log(event: str, operator: str, target: Optional[str] = None,
         logger.error(f"审计日志写入失败: {e}")
 
 
+
+
 # ==================== 当前用户信息 ====================
 
 @router.get("/me", response_model=UserInfo, summary="获取当前用户信息与权限")
@@ -79,6 +81,15 @@ async def list_permissions(
     """获取所有权限点定义（供管理页使用）"""
     docs = list(db.auth_permissions.find({}, {"_id": 0}))
     return {"total": len(docs), "permissions": docs}
+
+
+@router.get("/modules", summary="获取模块定义列表")
+async def list_modules(
+    _: CurrentUserContext = Depends(require_permission("system:auth:manage")),
+):
+    """获取模块定义（按菜单顺序）"""
+    docs = list(db.auth_modules.find({}, {"_id": 0}).sort([("sort_order", 1), ("module_code", 1)]))
+    return {"total": len(docs), "modules": docs}
 
 
 # ==================== 角色管理 ====================
@@ -150,6 +161,26 @@ async def update_role_permissions(
         "before": old_perms, "after": body.permissions
     })
     return {"message": "权限更新成功"}
+
+
+@router.delete("/roles/{role_code}", summary="删除角色")
+async def delete_role(
+    role_code: str,
+    ctx: CurrentUserContext = Depends(require_permission("system:auth:manage")),
+):
+    role = db.auth_roles.find_one({"code": role_code})
+    if not role:
+        raise HTTPException(status_code=404, detail="角色不存在")
+    if role.get("is_system"):
+        raise HTTPException(status_code=400, detail="系统内置角色不允许删除")
+
+    in_use = db.users.count_documents({"roles": role_code})
+    if in_use > 0:
+        raise HTTPException(status_code=400, detail=f"角色仍被 {in_use} 个用户使用，无法删除")
+
+    db.auth_roles.delete_one({"code": role_code})
+    _write_audit_log("ROLE_DELETED", ctx.username, role_code, {"name": role.get("name")})
+    return {"message": "角色删除成功"}
 
 
 # ==================== 用户管理 ====================
@@ -249,6 +280,26 @@ async def reset_user_password(
     }})
     _write_audit_log("USER_PASSWORD_RESET", ctx.username, username)
     return {"message": "密码重置成功，用户下次登录需修改密码"}
+
+
+@router.delete("/users/{username}", summary="删除用户")
+async def delete_user(
+    username: str,
+    ctx: CurrentUserContext = Depends(require_permission("system:auth:manage")),
+):
+    user = db.users.find_one({"username": username})
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if username == ctx.username:
+        raise HTTPException(status_code=400, detail="不能删除当前登录账号")
+    if username in {"admin"}:
+        raise HTTPException(status_code=400, detail="系统保留账号不允许删除")
+    if user.get("is_active", True):
+        raise HTTPException(status_code=400, detail="仅允许删除已禁用用户，请先禁用该用户")
+
+    db.users.delete_one({"username": username})
+    _write_audit_log("USER_DELETED", ctx.username, username)
+    return {"message": "用户删除成功"}
 
 
 # ==================== 审计日志 ====================

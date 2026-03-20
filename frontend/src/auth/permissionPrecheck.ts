@@ -72,7 +72,7 @@ const MUTATION_PERMISSION_RULES: MutationPermissionRule[] = [
     { methods: ['post'], pattern: /^\/api\/v1\/customers$/, allPermissions: [modulePermission('customer_profiles', 'edit')] },
     { methods: ['post'], pattern: /^\/api\/v1\/customers\/sync$/, allPermissions: [modulePermission('customer_profiles', 'edit')] },
     { methods: ['put', 'patch'], pattern: /^\/api\/v1\/customers\/[^/]+$/, allPermissions: [modulePermission('customer_profiles', 'edit')] },
-    { methods: ['delete'], pattern: /^\/api\/v1\/customers\/[^/]+$/, allPermissions: [modulePermission('customer_profiles', 'edit'), 'data:critical:delete'] },
+    { methods: ['delete'], pattern: /^\/api\/v1\/customers\/[^/]+$/, allPermissions: [modulePermission('customer_profiles', 'edit'), 'customer:profile:delete'] },
     { methods: ['post', 'put', 'patch', 'delete'], pattern: /^\/api\/v1\/customers\/[^/]+\/accounts(\/.*)?$/, allPermissions: [modulePermission('customer_profiles', 'edit')] },
     { methods: ['post', 'put', 'patch', 'delete'], pattern: /^\/api\/v1\/customers\/meters\/[^/]+\/sync-update$/, allPermissions: [modulePermission('customer_profiles', 'edit')] },
     { methods: ['post'], pattern: /^\/api\/v1\/customers\/[^/]+\/(sign-contract|cancel-contract|activate|suspend|resume|terminate)$/, allPermissions: [modulePermission('customer_profiles', 'edit')] },
@@ -82,7 +82,7 @@ const MUTATION_PERMISSION_RULES: MutationPermissionRule[] = [
     { methods: ['post'], pattern: /^\/api\/v1\/retail-contracts$/, allPermissions: [modulePermission('customer_retail_contracts', 'edit')] },
     { methods: ['post'], pattern: /^\/api\/v1\/retail-contracts\/(import|import-create|upload-pdfs|parse-pdf)$/, allPermissions: [modulePermission('customer_retail_contracts', 'edit')] },
     { methods: ['put', 'patch'], pattern: /^\/api\/v1\/retail-contracts\/[^/]+$/, allPermissions: [modulePermission('customer_retail_contracts', 'edit')] },
-    { methods: ['delete'], pattern: /^\/api\/v1\/retail-contracts\/[^/]+$/, allPermissions: [modulePermission('customer_retail_contracts', 'edit'), 'data:critical:delete'] },
+    { methods: ['delete'], pattern: /^\/api\/v1\/retail-contracts\/[^/]+$/, allPermissions: [modulePermission('customer_retail_contracts', 'edit'), 'customer:contract:delete'] },
     { methods: ['post'], pattern: /^\/api\/v1\/retail-contracts\/[^/]+\/upload-pdf$/, allPermissions: [modulePermission('customer_retail_contracts', 'edit')] },
 
     { methods: ['post'], pattern: /^\/api\/v1\/retail-packages\/validate-price-ratio$/, allPermissions: [modulePermission('customer_retail_packages', 'edit')] },
@@ -90,7 +90,7 @@ const MUTATION_PERMISSION_RULES: MutationPermissionRule[] = [
     { methods: ['post'], pattern: /^\/api\/v1\/retail-packages\/[^/]+\/copy$/, allPermissions: [modulePermission('customer_retail_packages', 'edit')] },
     { methods: ['put', 'patch'], pattern: /^\/api\/v1\/retail-packages\/[^/]+$/, allPermissions: [modulePermission('customer_retail_packages', 'edit')] },
     { methods: ['post'], pattern: /^\/api\/v1\/retail-packages\/[^/]+\/(activate|archive)$/, allPermissions: [modulePermission('customer_retail_packages', 'edit')] },
-    { methods: ['delete'], pattern: /^\/api\/v1\/retail-packages\/[^/]+$/, allPermissions: [modulePermission('customer_retail_packages', 'edit'), 'data:critical:delete'] },
+    { methods: ['delete'], pattern: /^\/api\/v1\/retail-packages\/[^/]+$/, allPermissions: [modulePermission('customer_retail_packages', 'edit'), 'customer:package:delete'] },
 
     { methods: ['post'], pattern: /^\/api\/v1\/manual-adjustment\/(save|reset)$/, allPermissions: [modulePermission('forecast_short_term_load', 'edit')] },
     { methods: ['post'], pattern: /^\/api\/v1\/price-forecast\/trigger$/, allPermissions: [modulePermission('forecast_dayahead_price', 'edit')] },
@@ -102,8 +102,8 @@ const MUTATION_PERMISSION_RULES: MutationPermissionRule[] = [
     { methods: ['post'], pattern: /^\/api\/v1\/intent-customer-diagnosis\/(preview|import)(\/.*)?$/, allPermissions: [modulePermission('analysis_intent_customer_diagnosis', 'edit')] },
     { methods: ['post'], pattern: /^\/api\/v1\/intent-customer-diagnosis\/customers\/[^/]+\/wholesale-simulation$/, allPermissions: [modulePermission('analysis_intent_customer_diagnosis', 'edit')] },
     { methods: ['post'], pattern: /^\/api\/v1\/intent-customer-diagnosis\/customers\/[^/]+\/retail-simulation$/, allPermissions: [modulePermission('analysis_intent_customer_diagnosis', 'edit')] },
-    { methods: ['delete'], pattern: /^\/api\/v1\/intent-customer-diagnosis\/customers\/[^/]+$/, allPermissions: [modulePermission('analysis_intent_customer_diagnosis', 'edit'), 'data:critical:delete'] },
-    { methods: ['delete'], pattern: /^\/api\/v1\/intent-customer-diagnosis\/customers\/[^/]+\/retail-simulation\/packages\/[^/]+$/, allPermissions: [modulePermission('analysis_intent_customer_diagnosis', 'edit'), 'data:critical:delete'] },
+    { methods: ['delete'], pattern: /^\/api\/v1\/intent-customer-diagnosis\/customers\/[^/]+$/, allPermissions: [modulePermission('analysis_intent_customer_diagnosis', 'edit')] },
+    { methods: ['delete'], pattern: /^\/api\/v1\/intent-customer-diagnosis\/customers\/[^/]+\/retail-simulation\/packages\/[^/]+$/, allPermissions: [modulePermission('analysis_intent_customer_diagnosis', 'edit')] },
     { methods: ['post'], pattern: /^\/api\/v1\/load-characteristics\/alerts\/[^/]+\/acknowledge$/, allPermissions: [modulePermission('analysis_load_characteristics', 'edit')] },
     { methods: ['post'], pattern: /^\/api\/v1\/load-characteristics\/analyze\/batch\/all$/, allPermissions: [modulePermission('analysis_load_characteristics', 'edit')] },
 
@@ -111,7 +111,8 @@ const MUTATION_PERMISSION_RULES: MutationPermissionRule[] = [
     { methods: ['post'], pattern: /^\/api\/v1\/prices\/sgcc\/import$/, allPermissions: [modulePermission('basic_sgcc_price', 'edit')] },
     { methods: ['post', 'delete'], pattern: /^\/api\/v1\/prices\/retail-settlement(\/.*)?$/, allPermissions: [modulePermission('basic_monthly_manual_import', 'edit')] },
     { methods: ['post'], pattern: /^\/api\/v1\/load-data\/import\/(meter|mp)$/, allPermissions: [modulePermission('basic_monthly_manual_import', 'edit')] },
-    { methods: ['post'], pattern: /^\/api\/v1\/load-data\/(reaggregate|calibration\/preview|calibration\/calculate|calibration\/apply|calibration\/details)$/, allPermissions: [modulePermission('basic_monthly_manual_import', 'edit')] },
+    { methods: ['post'], pattern: /^\/api\/v1\/load-data\/reaggregate$/, allPermissions: [modulePermission('basic_monthly_manual_import', 'edit'), 'load:data:reaggregate'] },
+    { methods: ['post'], pattern: /^\/api\/v1\/load-data\/(calibration\/preview|calibration\/calculate|calibration\/apply|calibration\/details)$/, allPermissions: [modulePermission('basic_monthly_manual_import', 'edit')] },
     { methods: ['post'], pattern: /^\/api\/v1\/load-data\/diagnose$/, allPermissions: [modulePermission('basic_load_validation', 'edit')] },
     { methods: ['post'], pattern: /^\/api\/v1\/(mechanism-energy|customer-energy|wholesale-monthly-settlement)\/import$/, allPermissions: [modulePermission('basic_monthly_manual_import', 'edit')] },
     { methods: ['delete'], pattern: /^\/api\/v1\/customer-energy\/[^/]+$/, allPermissions: [modulePermission('basic_monthly_manual_import', 'edit')] },
@@ -122,8 +123,8 @@ const MUTATION_PERMISSION_RULES: MutationPermissionRule[] = [
         allPermissions: [modulePermission('settlement_daily_overview', 'edit'), 'settlement:recalc:execute'],
     },
 
-    { methods: ['post'], pattern: /^\/api\/v1\/system\/alerts\/[^/]+\/resolve$/, allPermissions: [modulePermission('system_logs', 'edit'), 'system:logs:resolve'] },
-    { methods: ['post'], pattern: /^\/api\/v1\/rpa\/tasks\/[^/]+\/[^/]+\/retry$/, allPermissions: [modulePermission('system_data_access', 'edit'), 'system:data_access:manage'] },
+    { methods: ['post'], pattern: /^\/api\/v1\/system\/alerts\/[^/]+\/resolve$/, allPermissions: [modulePermission('system_logs', 'edit')] },
+    { methods: ['post'], pattern: /^\/api\/v1\/rpa\/tasks\/[^/]+\/[^/]+\/retry$/, allPermissions: [modulePermission('system_data_access', 'edit')] },
 ];
 
 const EXCLUDED_PATH_PATTERNS: RegExp[] = [

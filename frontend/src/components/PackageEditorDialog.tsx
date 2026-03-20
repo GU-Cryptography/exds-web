@@ -26,10 +26,11 @@ interface PackageEditorDialogProps {
   mode: 'create' | 'edit' | 'copy';
   onClose: () => void;
   onSave: (data: PackageFormData, asDraft: boolean) => Promise<void>;
+  canEdit?: boolean;
 }
 
 export const PackageEditorDialog: React.FC<PackageEditorDialogProps> = ({
-  open, packageId, mode, onClose, onSave
+  open, packageId, mode, onClose, onSave, canEdit = true
 }) => {
 
   const { control, handleSubmit, watch, reset, setError, clearErrors, setValue } = usePackageForm();
@@ -290,6 +291,9 @@ export const PackageEditorDialog: React.FC<PackageEditorDialogProps> = ({
 
   // 保存处理函数
   const handleSaveClick = async (asDraft: boolean) => {
+    if (!canEdit) {
+      return;
+    }
     handleSubmit(async (data: PackageFormData) => {
       setSaving(true);
       clearErrors();
@@ -334,7 +338,7 @@ export const PackageEditorDialog: React.FC<PackageEditorDialogProps> = ({
         <Button
           variant="outlined"
           onClick={() => handleSaveClick(true)}
-          disabled={loadingPackageData || saving}
+          disabled={loadingPackageData || saving || !canEdit}
         >
           {saving ? '保存中...' : '保存为草稿'}
         </Button>

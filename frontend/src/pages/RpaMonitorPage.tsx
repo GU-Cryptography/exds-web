@@ -309,7 +309,7 @@ const MobileTaskRow: React.FC<{
 
 export const RpaMonitorPage: React.FC = () => {
     const { hasPermission } = useAuth();
-    const canRetryTask = hasPermission('system:data_access:manage');
+    const canRetryTask = hasPermission('module:system_data_access:edit');
     const theme = useTheme();
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
     const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));

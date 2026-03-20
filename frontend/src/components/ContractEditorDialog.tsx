@@ -25,6 +25,7 @@ interface ContractEditorDialogProps {
   contract: Contract | null;
   mode: 'create' | 'edit' | 'view';
   onSuccess: () => void;
+  canEdit?: boolean;
 }
 
 // 套餐选项类型
@@ -51,7 +52,8 @@ export const ContractEditorDialog: React.FC<ContractEditorDialogProps> = ({
   onClose,
   contract,
   mode,
-  onSuccess
+  onSuccess,
+  canEdit = true
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -79,7 +81,7 @@ export const ContractEditorDialog: React.FC<ContractEditorDialogProps> = ({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isReadOnly = mode === 'view';
+  const isReadOnly = mode === 'view' || !canEdit;
   const { getModelByCode } = usePricingModels();
 
   // 加载套餐和客户选项
@@ -492,7 +494,7 @@ export const ContractEditorDialog: React.FC<ContractEditorDialogProps> = ({
             form="contract-form"
             variant="contained"
             color="primary"
-            disabled={saving}
+            disabled={saving || !canEdit}
           >
             {saving ? '保存中...' : '保存'}
           </Button>

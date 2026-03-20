@@ -977,7 +977,7 @@ export const IntentCustomerDiagnosisPage: React.FC = () => {
     const isTablet = useMediaQuery(theme.breakpoints.down('md'));
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('module:analysis_intent_customer_diagnosis:edit');
-    const canDelete = canEdit && hasPermission('data:critical:delete');
+    const canDelete = canEdit;
 
     const [customers, setCustomers] = useState<IntentCustomerSummary[]>([]);
     const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);

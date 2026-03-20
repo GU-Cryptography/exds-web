@@ -63,7 +63,7 @@ const getStatusChipColor = (status: string): 'success' | 'warning' | 'default' =
 const RetailPackagePage: React.FC = () => {
   const { hasPermission } = useAuth();
   const canModuleEdit = hasPermission('module:customer_retail_packages:edit');
-  const canCriticalDelete = hasPermission('data:critical:delete');
+  const canCriticalDelete = hasPermission('customer:package:delete');
   // 路由参数和导航
   const params = useParams<{ packageId?: string }>();
   const navigate = useNavigate();
@@ -491,6 +491,7 @@ const RetailPackagePage: React.FC = () => {
           packageId={undefined}
           onClose={handleBackToList}
           onSave={handleSave}
+          canEdit={canModuleEdit}
         />
       </Box>
     );
@@ -561,6 +562,7 @@ const RetailPackagePage: React.FC = () => {
             packageId={currentPackageId}
             onClose={handleBackToList}
             onSave={handleSave}
+            canEdit={canModuleEdit}
           />
         ) : null}
       </Box>
@@ -847,11 +849,13 @@ const RetailPackagePage: React.FC = () => {
                       </IconButton>
                     </Tooltip>
                   )}
-                  <Tooltip title="复制套餐">
-                    <IconButton size="small" onClick={() => handleCopy(getPackageId(pkg))}>
-                      <ContentCopyIcon />
-                    </IconButton>
-                  </Tooltip>
+                  {canCopy(pkg.status) && (
+                    <Tooltip title="复制套餐">
+                      <IconButton size="small" onClick={() => handleCopy(getPackageId(pkg))}>
+                        <ContentCopyIcon />
+                      </IconButton>
+                    </Tooltip>
+                  )}
                   {canActivate(pkg.status) && (
                     <Tooltip title="激活套餐">
                       <IconButton
@@ -874,8 +878,7 @@ const RetailPackagePage: React.FC = () => {
                       </IconButton>
                     </Tooltip>
                   )}
-                  {/* 新增：删除按钮（仅草稿可见） */}
-                  {pkg.status === 'draft' && (
+                  {canDelete(pkg.status) && (
                     <Tooltip title="删除套餐">
                       <IconButton
                         size="small"
@@ -1015,11 +1018,13 @@ const RetailPackagePage: React.FC = () => {
                           </IconButton>
                         </Tooltip>
                       )}
-                      <Tooltip title="复制套餐">
-                        <IconButton size="small" onClick={() => handleCopy(getPackageId(pkg))}>
-                          <ContentCopyIcon />
-                        </IconButton>
-                      </Tooltip>
+                      {canCopy(pkg.status) && (
+                        <Tooltip title="复制套餐">
+                          <IconButton size="small" onClick={() => handleCopy(getPackageId(pkg))}>
+                            <ContentCopyIcon />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                       {canActivate(pkg.status) && (
                         <Tooltip title="激活套餐">
                           <IconButton
@@ -1042,8 +1047,7 @@ const RetailPackagePage: React.FC = () => {
                           </IconButton>
                         </Tooltip>
                       )}
-                      {/* 新增：删除按钮（仅草稿可见） */}
-                      {pkg.status === 'draft' && (
+                      {canDelete(pkg.status) && (
                         <Tooltip title="删除套餐">
                           <IconButton
                             size="small"
@@ -1094,6 +1098,7 @@ const RetailPackagePage: React.FC = () => {
         packageId={editPackageId}
         mode={editorMode}
         onSave={handleSave}
+        canEdit={canModuleEdit}
       />
 
       {/* 删除确认对话框 */}
@@ -1121,7 +1126,7 @@ const RetailPackagePage: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleDeleteCancel}>取消</Button>
-          <Button onClick={handleDeleteConfirm} color="error" variant="contained">
+          <Button onClick={handleDeleteConfirm} color="error" variant="contained" disabled={!canModuleEdit || !canCriticalDelete}>
             删除
           </Button>
         </DialogActions>
@@ -1147,7 +1152,7 @@ const RetailPackagePage: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleArchiveCancel}>取消</Button>
-          <Button onClick={handleArchiveConfirm} color="warning" variant="contained">
+          <Button onClick={handleArchiveConfirm} color="warning" variant="contained" disabled={!canModuleEdit}>
             归档
           </Button>
         </DialogActions>
@@ -1173,7 +1178,7 @@ const RetailPackagePage: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleActivateCancel}>取消</Button>
-          <Button onClick={handleActivateConfirm} color="success" variant="contained">
+          <Button onClick={handleActivateConfirm} color="success" variant="contained" disabled={!canModuleEdit}>
             激活
           </Button>
         </DialogActions>
