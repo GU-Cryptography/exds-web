@@ -7,6 +7,7 @@ from webapp.services.package_service import PackageService
 from webapp.services.pricing_engine import PricingEngine
 from webapp.tools.mongo import DATABASE
 from webapp.tools.security import User, get_current_active_user
+from webapp.api.dependencies.authz import require_permission
 
 router = APIRouter(prefix="/retail-packages", tags=["Retail Packages"])
 
@@ -14,7 +15,8 @@ router = APIRouter(prefix="/retail-packages", tags=["Retail Packages"])
 async def create_package(
     package: RetailPackage,
     save_as_draft: bool = True,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:package:create"))
 ):
     """创建新的零售套餐"""
     service = PackageService(DATABASE)
@@ -42,7 +44,8 @@ async def create_package(
 async def update_package(
     package_id: str,
     package: RetailPackage,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:package:update"))
 ):
     """更新套餐"""
     service = PackageService(DATABASE)
@@ -74,7 +77,8 @@ async def update_package(
 @router.post("/{package_id}/copy", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def copy_package(
     package_id: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:package:create"))
 ):
     """复制套餐"""
     service = PackageService(DATABASE)
@@ -123,7 +127,8 @@ async def list_packages(
 @router.post("/{package_id}/activate", response_model=dict)
 async def activate_package(
     package_id: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:package:update"))
 ):
     """激活套餐"""
     service = PackageService(DATABASE)
@@ -150,7 +155,8 @@ async def activate_package(
 @router.post("/{package_id}/archive", response_model=dict)
 async def archive_package(
     package_id: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:package:update"))
 ):
     """归档套餐"""
     service = PackageService(DATABASE)
@@ -193,7 +199,8 @@ async def get_package(
 @router.delete("/{package_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_package(
     package_id: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:package:delete"))
 ):
     """删除套餐（仅草稿状态）"""
     service = PackageService(DATABASE)

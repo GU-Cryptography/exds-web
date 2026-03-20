@@ -10,6 +10,7 @@ from webapp.services.contract_service import ContractService
 from webapp.tools.mongo import DATABASE
 from webapp.tools.security import get_current_active_user, User
 from webapp.tools.excel_handler import ExcelReader, DataValidator, ContractDataTransformer
+from webapp.api.dependencies.authz import require_permission
 
 router = APIRouter(prefix="/retail-contracts", tags=["Retail Contracts"])
 
@@ -17,7 +18,8 @@ router = APIRouter(prefix="/retail-contracts", tags=["Retail Contracts"])
 @router.post("", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def create_contract(
     contract: ContractCreate,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:contract:create"))
 ):
     """创建新合同"""
     service = ContractService(DATABASE)
@@ -100,7 +102,8 @@ async def get_contract_years(
 @router.post("/import", summary="导入合同数据")
 async def import_contracts(
     file: UploadFile = File(..., description="交易中心平台下载的Excel文件"),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:contract:create"))
 ):
     """
     批量导入合同数据（同步方案）
@@ -205,7 +208,8 @@ async def export_contracts(
     status: Optional[str] = Query(None, description="合同状态筛选"),
     start_month: Optional[str] = Query(None, description="购电开始月份筛选(YYYY-MM)"),
     end_month: Optional[str] = Query(None, description="购电结束月份筛选(YYYY-MM)"),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:contract:export"))
 ):
     """
     导出合同数据为Excel文件
@@ -306,7 +310,8 @@ async def get_contract(
 async def update_contract(
     contract_id: str,
     contract: ContractCreate,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:contract:update"))
 ):
     """更新合同（仅待生效状态）"""
     service = ContractService(DATABASE)
@@ -339,7 +344,8 @@ async def update_contract(
 @router.delete("/{contract_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_contract(
     contract_id: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:contract:delete"))
 ):
     """删除合同（仅待生效状态）"""
     service = ContractService(DATABASE)

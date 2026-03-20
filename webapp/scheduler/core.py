@@ -4,7 +4,9 @@
 
 管理所有定时任务和事件驱动任务
 """
+import os
 import logging
+import configparser
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.executors.asyncio import AsyncIOExecutor
@@ -36,6 +38,16 @@ scheduler = AsyncIOScheduler(
 )
 
 
+def get_scheduler_enabled() -> bool:
+    """从配置文件读取调度器开关"""
+    config_path = os.path.expanduser("~/.exds/config.ini")
+    if os.path.exists(config_path):
+        config = configparser.ConfigParser()
+        config.read(config_path, encoding='utf-8')
+        if "SCHEDULER" in config and "enabled" in config["SCHEDULER"]:
+            return config.getboolean("SCHEDULER", "enabled", fallback=True)
+    return True
+
 def setup_scheduler(app):
     """
     设置调度器并注册任务
@@ -43,6 +55,9 @@ def setup_scheduler(app):
     Args:
         app: FastAPI 应用实例
     """
+    if not get_scheduler_enabled():
+        logger.warning("⚙️ 定时任务已被配置禁用 ([SCHEDULER] enabled = false)，本实例将不运行定时任务。")
+        return
     
     # ========== 事件驱动任务 ==========
     

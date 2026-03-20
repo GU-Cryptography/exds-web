@@ -36,11 +36,13 @@ import {
 } from '@mui/icons-material';
 import { useTabContext } from '../contexts/TabContext';
 import { getRouteConfig } from '../config/routes';
+import { useAuth } from '../contexts/AuthContext';
 
 interface SubMenuItem {
     text: string;
     path: string;
     icon: React.ReactElement;
+    requiredPermission?: string;
 }
 
 interface MenuItem {
@@ -48,6 +50,7 @@ interface MenuItem {
     icon: React.ReactElement;
     path?: string;
     subItems?: SubMenuItem[];
+    requiredPermission?: string;
 }
 
 const menuItems: MenuItem[] = [
@@ -135,8 +138,8 @@ const menuItems: MenuItem[] = [
         text: '系统管理',
         icon: <SettingsIcon />,
         subItems: [
-            { text: '用户与权限', path: '/system-settings/user-permissions', icon: <VpnKeyOutlined /> },
-            { text: '数据下载监控', path: '/system-settings/data-access', icon: <SourceOutlined /> },
+            { text: '用户与权限', path: '/system-settings/user-permissions', icon: <VpnKeyOutlined />, requiredPermission: 'system:auth:manage' },
+            { text: '数据下载监控', path: '/system-settings/data-access', icon: <SourceOutlined />, requiredPermission: 'system:data_access:manage' },
             { text: '告警与日志', path: '/system-settings/system-logs', icon: <NotificationsActiveOutlined /> },
         ],
     },
@@ -150,6 +153,23 @@ export const Sidebar: React.FC<{
     const navigate = useNavigate();
     const [open, setOpen] = useState<{ [key: string]: boolean }>({});
     const tabContext = useTabContext();
+    const { hasPermission } = useAuth();
+
+    // 过滤菜单项
+    const filteredMenuItems = React.useMemo(() => {
+        return menuItems.map(item => {
+            if (item.requiredPermission && !hasPermission(item.requiredPermission)) return null;
+            if (item.subItems) {
+                const subItems = item.subItems.filter(sub => {
+                    if (sub.requiredPermission && !hasPermission(sub.requiredPermission)) return false;
+                    return true;
+                });
+                if (subItems.length === 0) return null;
+                return { ...item, subItems };
+            }
+            return item;
+        }).filter(Boolean) as MenuItem[];
+    }, [hasPermission]);
 
     const handleClick = (text: string) => {
         setOpen((prev) => ({ ...prev, [text]: !prev[text] }));
@@ -185,14 +205,14 @@ export const Sidebar: React.FC<{
 
     useEffect(() => {
         if (!activePath) return;
-        menuItems.forEach((item) => {
+        filteredMenuItems.forEach((item) => {
             if (!item.subItems) return;
             const hasActiveSubItem = item.subItems.some((sub) => activePath.startsWith(sub.path));
             if (hasActiveSubItem) {
                 setOpen((prev) => ({ ...prev, [item.text]: true }));
             }
         });
-    }, [activePath]);
+    }, [activePath, filteredMenuItems]);
 
     const handleLogout = () => {
         localStorage.removeItem('token');
@@ -204,7 +224,7 @@ export const Sidebar: React.FC<{
             <Toolbar />
             <Divider />
             <List component="nav" sx={{ flexGrow: 1, p: 1 }}>
-                {menuItems.map((item) => {
+                {filteredMenuItems.map((item) => {
                     if (item.subItems) {
                         const isOpen = open[item.text] || item.subItems.some((sub) => activePath.startsWith(sub.path));
                         return (

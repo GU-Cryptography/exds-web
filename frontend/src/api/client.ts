@@ -52,12 +52,18 @@ apiClient.interceptors.response.use(
     },
     (error) => {
         // 任何超出 2xx 范围的状态码都会触发此函数
-        if (error.response && error.response.status === 401) {
-            // 如果是401错误，则清除token并重定向到登录页
-            console.warn('收到 401 响应，会话已失效');
-            localStorage.removeItem('token');
-            // 使用 window.location.href 来强制刷新页面，清除所有旧的状态
-            window.location.href = '/login';
+        if (error.response) {
+            if (error.response.status === 401) {
+                // 如果是401错误，则清除token并重定向到登录页
+                console.warn('收到 401 响应，会话已失效');
+                localStorage.removeItem('token');
+                // 使用 window.location.href 来强制刷新页面，清除所有旧的状态
+                window.location.href = '/login?reason=session_expired';
+            } else if (error.response.status === 403) {
+                // 如果是 403 无权限，只做提示，不清理 token 也不跳转
+                console.warn('访问被拒绝，无相应权限：', error.response.data);
+                alert(error.response.data?.detail || '您没有权限执行此操作');
+            }
         }
         return Promise.reject(error);
     }

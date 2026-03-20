@@ -35,6 +35,7 @@ export interface RouteConfig {
     path: string;
     title: string;
     component: React.ComponentType;
+    requiredPermission?: string;  // 新增：进入该路由需要的权限码
 }
 
 export const routeConfigs: RouteConfig[] = [

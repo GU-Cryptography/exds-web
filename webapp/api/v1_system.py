@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from webapp.tools.mongo import DATABASE
 from webapp.tools.security import get_current_active_user
+from webapp.api.dependencies.authz import require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -317,7 +318,8 @@ async def get_commands(
 async def resolve_alert(
     alert_id: str,
     request: ResolveAlertRequest,
-    current_user: dict = Depends(get_current_active_user)
+    current_user: dict = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("system:logs:resolve"))
 ):
     """解决告警"""
     try:

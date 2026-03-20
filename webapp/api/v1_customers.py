@@ -8,6 +8,7 @@ from webapp.models.customer import (
 from webapp.services.customer_service import CustomerService
 from webapp.tools.mongo import DATABASE
 from webapp.tools.security import get_current_active_user, User
+from webapp.api.dependencies.authz import require_permission
 
 router = APIRouter(prefix="/customers", tags=["Customers"])
 
@@ -15,7 +16,8 @@ router = APIRouter(prefix="/customers", tags=["Customers"])
 @router.post("", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def create_customer(
     customer: CustomerCreate,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:create"))
 ):
     """创建新客户"""
     service = CustomerService(DATABASE)
@@ -51,7 +53,8 @@ async def preview_sync_data(
 @router.post("/sync", response_model=dict)
 async def sync_customers(
     request: SyncRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:create"))
 ):
     """批量同步客户数据"""
     service = CustomerService(DATABASE)
@@ -125,7 +128,8 @@ async def get_customer(
 async def update_customer(
     customer_id: str,
     customer: CustomerUpdate,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:update"))
 ):
     """更新客户信息"""
     service = CustomerService(DATABASE)
@@ -159,7 +163,8 @@ async def update_customer(
 async def delete_customer(
     customer_id: str,
     password: str = Body(..., embed=True, description="当前用户登录密码"),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:delete"))
 ):
     """删除客户（需密码确认）"""
     # 验证密码
@@ -190,7 +195,8 @@ async def delete_customer(
 async def add_utility_account(
     customer_id: str,
     account_data: dict = Body(...),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:update"))
 ):
     """为客户添加户号"""
     service = CustomerService(DATABASE)
@@ -225,7 +231,8 @@ async def update_utility_account(
     customer_id: str,
     account_id: str,
     account_data: dict = Body(...),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:update"))
 ):
     """更新户号信息"""
     service = CustomerService(DATABASE)
@@ -255,7 +262,8 @@ async def update_utility_account(
 async def delete_utility_account(
     customer_id: str,
     account_id: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:update"))
 ):
     """删除户号"""
     service = CustomerService(DATABASE)
@@ -418,7 +426,8 @@ async def sync_update_meter(
 async def sign_contract(
     customer_id: str,
     contract_id: Optional[str] = Body(None, embed=True, description="关联的合同ID"),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:update"))
 ):
     """
     签约操作：将意向客户转换为待生效状态
@@ -451,7 +460,8 @@ async def sign_contract(
 async def cancel_contract(
     customer_id: str,
     reason: Optional[str] = Body(None, description="撤销原因"),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("customer:profile:update"))
 ):
     """
     撤销操作：将待生效客户转换为已终止状态

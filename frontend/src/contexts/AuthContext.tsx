@@ -1,167 +1,264 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
 import { jwtDecode } from 'jwt-decode';
+import apiClient from '../api/client';
 
-/**
- * JWT 载荷接口
- */
+// ===== 类型定义 =====
 interface JwtPayload {
-    exp: number; // 过期时间（Unix 时间戳，秒）
-    sub: string; // 用户标识
+    sub: string;
+    exp: number;
+    sid?: string;
 }
 
-/**
- * 认证上下文接口
- */
+interface UserInfo {
+    username: string;
+    display_name?: string;
+    email?: string;
+    roles: string[];
+    permissions: string[];
+    is_super_admin: boolean;
+    idle_timeout_minutes: number;
+}
+
 interface AuthContextType {
     isAuthenticated: boolean;
+    username: string | null;
+    displayName: string | null;
+    roles: string[];
+    permissions: string[];
+    isSuperAdmin: boolean;
+    hasPermission: (code: string) => boolean;
+    isPermissionLoaded: boolean;
     login: (token: string) => void;
-    logout: () => void;
+    logout: (reason?: string) => void;
 }
 
-/**
- * 创建认证上下文
- */
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+// ===== 工具函数 =====
+const AUTH_TOKEN_KEY = 'token';
 
-/**
- * AuthProvider 组件
- * 提供全局的认证状态管理和会话过期自动登出功能
- */
+function getToken(): string | null {
+    return localStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+function removeToken(): void {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+}
+
+function decodeToken(token: string): JwtPayload | null {
+    try {
+        return jwtDecode<JwtPayload>(token);
+    } catch {
+        return null;
+    }
+}
+
+// ===== Context =====
+const AuthContext = createContext<AuthContextType>({
+    isAuthenticated: false,
+    username: null,
+    displayName: null,
+    roles: [],
+    permissions: [],
+    isSuperAdmin: false,
+    hasPermission: () => false,
+    isPermissionLoaded: false,
+    login: () => { },
+    logout: () => { },
+});
+
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-    const [logoutTimer, setLogoutTimer] = useState<NodeJS.Timeout | null>(null);
+    const [username, setUsername] = useState<string | null>(null);
+    const [displayName, setDisplayName] = useState<string | null>(null);
+    const [roles, setRoles] = useState<string[]>([]);
+    const [permissions, setPermissions] = useState<string[]>([]);
+    const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
+    const [isPermissionLoaded, setIsPermissionLoaded] = useState<boolean>(false);
 
-    /**
-     * 登出函数
-     * 清除 token、清除定时器、重定向到登录页
-     */
-    const logout = useCallback(() => {
-        // 清除本地存储的 JWT
-        localStorage.removeItem('token');
+    // 空闲超时相关
+    const [idleTimeoutMinutes, setIdleTimeoutMinutes] = useState<number>(30);
+    const [showIdleWarning, setShowIdleWarning] = useState<boolean>(false);
+    const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const WARNING_BEFORE_SECONDS = 120; // 提前 2 分钟警告
 
-        // 清除定时器
-        if (logoutTimer) {
-            clearTimeout(logoutTimer);
-            setLogoutTimer(null);
-        }
-
-        // 更新认证状态
+    // ===== 登出 =====
+    const logout = useCallback((reason?: string) => {
+        removeToken();
         setIsAuthenticated(false);
+        setUsername(null);
+        setDisplayName(null);
+        setRoles([]);
+        setPermissions([]);
+        setIsSuperAdmin(false);
+        setIsPermissionLoaded(false);
+        setShowIdleWarning(false);
+        if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+        if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
+        const redirect = reason ? `/login?reason=${encodeURIComponent(reason)}` : '/login';
+        window.location.replace(redirect);
+    }, []);
 
-        // 强制重定向到登录页
-        window.location.href = '/login';
-    }, [logoutTimer]);
-
-    /**
-     * 启动登出定时器
-     * @param expiresIn 剩余有效时间（毫秒）
-     */
-    const startLogoutTimer = useCallback((expiresIn: number) => {
-        // 清除现有定时器（如果有）
-        if (logoutTimer) {
-            clearTimeout(logoutTimer);
-        }
-
-        // 启动新的登出定时器
-        const timer = setTimeout(() => {
-            console.log('会话已过期，自动登出');
-            logout();
-        }, expiresIn);
-
-        setLogoutTimer(timer);
-    }, [logoutTimer, logout]);
-
-    /**
-     * 登录函数
-     * 保存 JWT、解析过期时间、启动登出定时器
-     * @param token JWT token
-     */
-    const login = useCallback((token: string) => {
+    // ===== 权限加载 =====
+    const loadUserPermissions = useCallback(async () => {
         try {
-            // 解码 JWT 获取过期时间
-            const decoded = jwtDecode<JwtPayload>(token);
-            const expTimestamp = decoded.exp * 1000; // 转换为毫秒
-            const currentTime = Date.now();
-            const expiresIn = expTimestamp - currentTime;
-
-            // 如果 token 已经过期，立即登出
-            if (expiresIn <= 0) {
-                console.warn('Token 已过期');
-                logout();
-                return;
-            }
-
-            // 保存 token 到 localStorage
-            localStorage.setItem('token', token);
-
-            // 更新认证状态
-            setIsAuthenticated(true);
-
-            // 启动登出定时器
-            startLogoutTimer(expiresIn);
-
-            console.log(`会话将在 ${Math.round(expiresIn / 1000 / 60)} 分钟后过期`);
-        } catch (error) {
-            console.error('Token 解析失败:', error);
-            logout();
+            const res = await apiClient.get<UserInfo>('/api/v1/auth/me');
+            const info = res.data;
+            setDisplayName(info.display_name || info.username);
+            setRoles(info.roles);
+            setPermissions(info.permissions);
+            setIsSuperAdmin(info.is_super_admin);
+            setIdleTimeoutMinutes(info.idle_timeout_minutes || 30);
+        } catch (e) {
+            console.warn('权限加载失败，使用空权限集', e);
+        } finally {
+            setIsPermissionLoaded(true);
         }
-    }, [logout, startLogoutTimer]);
+    }, []);
 
-    /**
-     * 初始化时检查 localStorage 中的 token
-     * 如果 token 存在且未过期，则重新启动定时器
-     */
+    const hasPermission = useCallback(
+        (code: string): boolean => {
+            if (isSuperAdmin) return true;
+            return permissions.includes(code);
+        },
+        [isSuperAdmin, permissions]
+    );
+
+    // ===== 空闲超时计时器 =====
+    const resetIdleTimer = useCallback(() => {
+        if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+        if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
+        setShowIdleWarning(false);
+
+        const totalMs = idleTimeoutMinutes * 60 * 1000;
+        const warningMs = totalMs - WARNING_BEFORE_SECONDS * 1000;
+
+        if (warningMs > 0) {
+            warningTimerRef.current = setTimeout(() => {
+                setShowIdleWarning(true);
+            }, warningMs);
+        }
+
+        idleTimerRef.current = setTimeout(() => {
+            logout('idle_timeout');
+        }, totalMs);
+    }, [idleTimeoutMinutes, logout]);
+
+    // ===== 登录 =====
+    const login = useCallback(async (token: string) => {
+        localStorage.setItem(AUTH_TOKEN_KEY, token);
+        const decoded = decodeToken(token);
+        if (!decoded) {
+            removeToken();
+            return;
+        }
+        setUsername(decoded.sub);
+        setIsAuthenticated(true);
+        await loadUserPermissions();
+    }, [loadUserPermissions]);
+
+    // ===== 初始化：检查本地 token =====
     useEffect(() => {
-        const token = localStorage.getItem('token');
-
-        if (token) {
-            try {
-                // 解码 JWT 检查是否过期
-                const decoded = jwtDecode<JwtPayload>(token);
-                const expTimestamp = decoded.exp * 1000; // 转换为毫秒
-                const currentTime = Date.now();
-                const expiresIn = expTimestamp - currentTime;
-
-                if (expiresIn > 0) {
-                    // Token 未过期，重新启动定时器
-                    setIsAuthenticated(true);
-                    startLogoutTimer(expiresIn);
-                    console.log(`恢复会话，将在 ${Math.round(expiresIn / 1000 / 60)} 分钟后过期`);
-                } else {
-                    // Token 已过期，立即登出
-                    console.warn('检测到过期的 token，自动登出');
-                    logout();
-                }
-            } catch (error) {
-                console.error('Token 解析失败，清除无效 token:', error);
-                logout();
-            }
+        const token = getToken();
+        if (!token) return;
+        const decoded = decodeToken(token);
+        if (!decoded || decoded.exp * 1000 < Date.now()) {
+            removeToken();
+            return;
         }
+        setUsername(decoded.sub);
+        setIsAuthenticated(true);
+        loadUserPermissions();
 
-        // 清理函数：组件卸载时清除定时器
+        // JWT 绝对过期兜底
+        const remainingMs = decoded.exp * 1000 - Date.now();
+        const expTimer = setTimeout(() => logout('token_expired'), remainingMs);
+        return () => clearTimeout(expTimer);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);  // 仅在挂载时执行一次
+
+    // ===== 空闲事件监听 =====
+    useEffect(() => {
+        if (!isAuthenticated) return;
+        const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'];
+        const handler = () => resetIdleTimer();
+        events.forEach(evt => window.addEventListener(evt, handler, { passive: true }));
+        resetIdleTimer(); // 登录后立即启动
         return () => {
-            if (logoutTimer) {
-                clearTimeout(logoutTimer);
-            }
+            events.forEach(evt => window.removeEventListener(evt, handler));
+            if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+            if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
         };
-    }, []); // 仅在组件挂载时执行一次
+    }, [isAuthenticated, resetIdleTimer]);
 
-    const value: AuthContextType = {
-        isAuthenticated,
-        login,
-        logout,
-    };
+    // ===== 空闲警告弹窗 =====
+    const IdleWarningDialog = showIdleWarning ? (
+        <div
+            style={{
+                position: 'fixed', inset: 0, zIndex: 9999,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                backgroundColor: 'rgba(0,0,0,0.5)',
+            }}
+        >
+            <div
+                style={{
+                    background: '#fff', borderRadius: 8, padding: '32px 40px',
+                    minWidth: 320, boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+                    textAlign: 'center',
+                }}
+            >
+                <div style={{ fontSize: 40, marginBottom: 12 }}>⏱️</div>
+                <h3 style={{ margin: '0 0 8px', color: '#333' }}>即将自动退出</h3>
+                <p style={{ color: '#666', marginBottom: 24 }}>
+                    检测到您已长时间无操作。<br />
+                    如需继续使用，请点击下方按钮。
+                </p>
+                <button
+                    onClick={() => { setShowIdleWarning(false); resetIdleTimer(); }}
+                    style={{
+                        background: '#1976d2', color: '#fff', border: 'none',
+                        borderRadius: 6, padding: '10px 28px', fontSize: 15,
+                        cursor: 'pointer', marginRight: 12,
+                    }}
+                >
+                    继续使用
+                </button>
+                <button
+                    onClick={() => logout('user_idle_choice')}
+                    style={{
+                        background: '#fff', color: '#666', border: '1px solid #ccc',
+                        borderRadius: 6, padding: '10px 28px', fontSize: 15,
+                        cursor: 'pointer',
+                    }}
+                >
+                    退出登录
+                </button>
+            </div>
+        </div>
+    ) : null;
 
-    return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+    return (
+        <AuthContext.Provider
+            value={{
+                isAuthenticated,
+                username,
+                displayName,
+                roles,
+                permissions,
+                isSuperAdmin,
+                hasPermission,
+                isPermissionLoaded,
+                login,
+                logout,
+            }}
+        >
+            {children}
+            {IdleWarningDialog}
+        </AuthContext.Provider>
+    );
 };
 
-/**
- * 自定义 Hook：使用认证上下文
- */
-export const useAuth = (): AuthContextType => {
-    const context = useContext(AuthContext);
-    if (!context) {
-        throw new Error('useAuth 必须在 AuthProvider 内部使用');
-    }
-    return context;
-};
+export function useAuth(): AuthContextType {
+    return useContext(AuthContext);
+}
+
+export default AuthContext;

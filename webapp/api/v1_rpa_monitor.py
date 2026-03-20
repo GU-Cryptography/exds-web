@@ -11,6 +11,7 @@ from datetime import datetime, date
 from webapp.tools.mongo import DATABASE
 from webapp.services.rpa_monitor_service import RpaMonitorService
 from webapp.tools.security import get_current_active_user
+from webapp.api.dependencies.authz import require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,8 @@ async def get_alerts(
 async def create_retry_request(
     pipeline_name: str,
     task_key: str,
-    current_user: dict = Depends(get_current_active_user)
+    current_user: dict = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("system:data_access:manage"))
 ):
     """创建重试请求"""
     service = get_rpa_monitor_service()

@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field, validator
 from webapp.tools.mongo import DATABASE
 from webapp.services.load_forecast_service import LoadForecastService
 from webapp.tools.security import get_current_active_user
+from webapp.api.dependencies.authz import require_permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,8 @@ class ResetAdjustmentRequest(BaseModel):
 def save_manual_adjustment(
     request: SaveAdjustmentRequest,
     service: LoadForecastService = Depends(get_service),
-    current_user: Any = Depends(get_current_active_user)
+    current_user: Any = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("forecast:adjust:update"))
 ):
     user_info = {
         "username": current_user.username if hasattr(current_user, "username") else str(current_user),
@@ -58,7 +60,8 @@ def save_manual_adjustment(
 def reset_manual_adjustment(
     request: ResetAdjustmentRequest,
     service: LoadForecastService = Depends(get_service),
-    current_user: Any = Depends(get_current_active_user)
+    current_user: Any = Depends(get_current_active_user),
+    _ctx = Depends(require_permission("forecast:adjust:update"))
 ):
     user_info = {
         "username": current_user.username if hasattr(current_user, "username") else str(current_user)

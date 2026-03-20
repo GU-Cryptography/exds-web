@@ -20,6 +20,7 @@ from webapp.api import (
     v1_intent_customer_diagnosis,
     medium_term_forecast  # New module
 )
+from webapp.api import v1_auth
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,7 @@ router.include_router(v1_load_forecast.router)
 router.include_router(v1_manual_adjustment.router)
 router.include_router(v1_system.router)
 router.include_router(medium_term_forecast.router, prefix="/load-forecast/medium-term", tags=["LoadForecast"])
+router.include_router(v1_auth.router)  # 认证与授权管理
 
 # Include public routers
 public_router.include_router(v1_sgcc_price.public_router)
