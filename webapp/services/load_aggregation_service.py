@@ -1033,7 +1033,7 @@ class LoadAggregationService:
             "mp_load": mp_load,
             "meter_load": meter_load,
             "deviation": deviation,
-            "updated_at": datetime.utcnow()
+            "updated_at": datetime.now()
         }
         
         return doc

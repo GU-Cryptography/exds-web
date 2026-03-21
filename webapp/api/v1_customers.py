@@ -678,7 +678,7 @@ async def create_customer_tag(
         "category": tag_data.get("category"),
         "description": tag_data.get("description"),
         "created_by": current_user.username,
-        "created_at": datetime.utcnow()
+        "created_at": datetime.now()
     }
     
     result = tags_collection.insert_one(new_tag)
@@ -740,7 +740,7 @@ async def update_customer_tag(
         "category": tag_data.get("category", existing_tag.get("category")),
         "description": tag_data.get("description", existing_tag.get("description")),
         "updated_by": current_user.username,
-        "updated_at": datetime.utcnow()
+        "updated_at": datetime.now()
     }
     
     tags_collection.update_one(

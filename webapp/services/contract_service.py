@@ -122,8 +122,8 @@ class ContractService:
         contract = Contract(**contract_data)
         contract.created_by = operator
         contract.updated_by = operator
-        contract.created_at = datetime.utcnow()
-        contract.updated_at = datetime.utcnow()
+        contract.created_at = datetime.now()
+        contract.updated_at = datetime.now()
 
         # 6. 准备插入文档
         doc_to_insert = contract.model_dump(by_alias=True, exclude_unset=True)
@@ -367,7 +367,7 @@ class ContractService:
 
         # 7. 更新审计字段
         update_data = contract_data.copy()
-        update_data["updated_at"] = datetime.utcnow()
+        update_data["updated_at"] = datetime.now()
         update_data["updated_by"] = operator
 
         # 8. 执行更新

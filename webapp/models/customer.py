@@ -107,8 +107,8 @@ class CustomerCreate(BaseModel):
 class Customer(BaseMongoModel, CustomerCreate):
     """客户完整模型 (v2)"""
     # 审计字段
-    created_at: datetime = Field(default_factory=datetime.utcnow, description="创建时间")
-    updated_at: datetime = Field(default_factory=datetime.utcnow, description="更新时间")
+    created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
+    updated_at: datetime = Field(default_factory=datetime.now, description="更新时间")
     created_by: Optional[str] = Field(None, description="创建人")
     updated_by: Optional[str] = Field(None, description="更新人")
 

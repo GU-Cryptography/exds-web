@@ -4,7 +4,7 @@
 """
 import logging
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 
 from bson import json_util
 from fastapi import APIRouter, File, UploadFile, Depends, HTTPException
@@ -202,7 +202,7 @@ async def import_retail_settlement_prices(
     # 确定数据库 ID: 常规/默认使用 YYYY-MM，节假日使用 YYYY-MM-holiday
     doc_id = month if price_date_type == "regular" else f"{month}-holiday"
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     doc = {
         '_id': doc_id,
         'month': month,

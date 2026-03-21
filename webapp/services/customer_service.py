@@ -269,8 +269,8 @@ class CustomerService:
                 account_count=account_count,
                 meter_count=meter_count,
                 mp_count=mp_count,
-                created_at=doc.get("created_at", datetime.utcnow()),
-                updated_at=doc.get("updated_at", datetime.utcnow()),
+                created_at=doc.get("created_at", datetime.now()),
+                updated_at=doc.get("updated_at", datetime.now()),
                 current_year_contract_amount=doc.get("current_year_contract_amount", 0.0)
             )
             items.append(item.model_dump())
@@ -341,7 +341,7 @@ class CustomerService:
 
         # 更新数据
         update_data = customer_data.copy()
-        update_data["updated_at"] = datetime.utcnow()
+        update_data["updated_at"] = datetime.now()
         update_data["updated_by"] = operator
 
         result = self.collection.update_one(
@@ -458,7 +458,7 @@ class CustomerService:
             {"_id": ObjectId(customer_id)},
             {
                 "$push": {"utility_accounts": account_data},
-                "$set": {"updated_at": datetime.utcnow(), "updated_by": operator}
+                "$set": {"updated_at": datetime.now(), "updated_by": operator}
             }
         )
 
@@ -516,7 +516,7 @@ class CustomerService:
             {
                 "$set": {
                     "utility_accounts": accounts,
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": datetime.now(),
                     "updated_by": operator
                 }
             }
@@ -559,7 +559,7 @@ class CustomerService:
             {"_id": ObjectId(customer_id)},
             {
                 "$pull": {"utility_accounts": {"account_id": account_id}},
-                "$set": {"updated_at": datetime.utcnow(), "updated_by": operator}
+                "$set": {"updated_at": datetime.now(), "updated_by": operator}
             }
         )
 
@@ -812,7 +812,7 @@ class CustomerService:
                 {
                     "$set": {
                         **update_fields,
-                        "updated_at": datetime.utcnow(),
+                        "updated_at": datetime.now(),
                         "updated_by": operator
                     }
                 },
@@ -862,7 +862,7 @@ class CustomerService:
         # 更新状态为待生效
         update_data = {
             "status": "pending",
-            "updated_at": datetime.utcnow(),
+            "updated_at": datetime.now(),
             "updated_by": operator
         }
 
@@ -912,7 +912,7 @@ class CustomerService:
         # 更新状态为已终止
         update_data = {
             "status": "terminated",
-            "updated_at": datetime.utcnow(),
+            "updated_at": datetime.now(),
             "updated_by": operator
         }
 
@@ -962,7 +962,7 @@ class CustomerService:
             {"_id": ObjectId(customer_id)},
             {"$set": {
                 "status": "active",
-                "updated_at": datetime.utcnow(),
+                "updated_at": datetime.now(),
                 "updated_by": operator
             }}
         )
@@ -1004,7 +1004,7 @@ class CustomerService:
         # 更新状态为已暂停
         update_data = {
             "status": "suspended",
-            "updated_at": datetime.utcnow(),
+            "updated_at": datetime.now(),
             "updated_by": operator
         }
 
@@ -1055,7 +1055,7 @@ class CustomerService:
             {
                 "$set": {
                     "status": "active",
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": datetime.now(),
                     "updated_by": operator
                 },
                 "$unset": {"suspension_reason": ""}
@@ -1099,7 +1099,7 @@ class CustomerService:
         # 更新状态为已终止
         update_data = {
             "status": "terminated",
-            "updated_at": datetime.utcnow(),
+            "updated_at": datetime.now(),
             "updated_by": operator
         }
 
@@ -1192,7 +1192,7 @@ class CustomerService:
                 if updated:
                     self.collection.update_one(
                         {"_id": customer["_id"]},
-                        {"$set": {"accounts": accounts, "updated_at": datetime.utcnow(), "updated_by": operator}}
+                        {"$set": {"accounts": accounts, "updated_at": datetime.now(), "updated_by": operator}}
                     )
                     updated_count += 1
                 continue
@@ -1226,7 +1226,7 @@ class CustomerService:
                 
                 self.collection.update_one(
                     {"_id": customer["_id"]},
-                    {"$set": {"accounts": accounts, "updated_at": datetime.utcnow(), "updated_by": operator}}
+                    {"$set": {"accounts": accounts, "updated_at": datetime.now(), "updated_by": operator}}
                 )
                 updated_count += 1
                 continue
@@ -1248,8 +1248,8 @@ class CustomerService:
             # 使用现有 create 逻辑太重(有重名检查等)，这里手动插入更灵活且安全(因为是批量)
             # 但为了保持一致性，还是手动构造文档插入
             doc = new_customer.model_dump(by_alias=True)
-            doc["created_at"] = datetime.utcnow()
-            doc["updated_at"] = datetime.utcnow()
+            doc["created_at"] = datetime.now()
+            doc["updated_at"] = datetime.now()
             doc["created_by"] = operator
             doc["updated_by"] = operator
             # 确保 tags 字段存在
@@ -1306,7 +1306,7 @@ class CustomerService:
             {
                 "$set": {
                     "tags": tags,
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": datetime.now(),
                     "updated_by": operator
                 }
             }
@@ -1338,7 +1338,7 @@ class CustomerService:
             {
                 "$pull": {"tags": {"name": tag_name}},
                 "$set": {
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": datetime.now(),
                     "updated_by": operator
                 }
             }

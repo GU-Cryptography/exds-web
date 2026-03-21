@@ -98,7 +98,13 @@ npm test --prefix frontend
 2. 信息不足时先说明不确定性，不做拍脑袋改动。
 3. 默认最小改动，除非明确要求重构。
 
-## 10. 参考文件
+## 10. 时间字段规范（强制）
+
+1. 项目统一使用 `datetime.now()`（naive）生成时间，禁止新增 `datetime.utcnow()` 与 `datetime.now(timezone.utc)`。
+2. 涉及数据库落库时间字段（如 `created_at`、`updated_at`、`imported_at`、`login_at`、`logout_at`）必须按本规则执行。
+3. 历史数据若包含时区信息，读取时可做兼容转换，但新写入必须保持 naive 格式一致。
+
+## 11. 参考文件
 
 - `AI_RULES.md`
 - `frontend/src/auth/permissionPrecheck.ts`

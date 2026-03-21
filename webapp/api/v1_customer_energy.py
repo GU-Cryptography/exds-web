@@ -5,7 +5,7 @@
 import logging
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 
 from bson import json_util
 from fastapi import APIRouter, File, UploadFile, Depends, HTTPException
@@ -195,7 +195,7 @@ async def import_customer_energy(
     
     month = parsed['month']
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     doc = {
         '_id': month,
         'month': month,

@@ -75,3 +75,9 @@ git config core.hooksPath .githooks
 3. 前端 `B/Q` 在哪里实现？
 4. 后端 `S` 在哪里实现？
 5. 自动化检查是否通过？
+
+## 9. 时间字段统一规则（强制）
+
+1. 后端统一使用 `datetime.now()`（naive）生成时间。
+2. 禁止新增 `datetime.utcnow()` 与 `datetime.now(timezone.utc)`。
+3. 涉及落库时间字段（`created_at/updated_at/imported_at/login_at/logout_at` 等）必须保持同一格式。

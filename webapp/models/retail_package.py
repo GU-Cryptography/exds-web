@@ -64,8 +64,8 @@ class RetailPackage(BaseMongoModel):
 
     # 审计字段
     created_by: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
     updated_by: Optional[str] = None
     activated_at: Optional[datetime] = None
     archived_at: Optional[datetime] = None

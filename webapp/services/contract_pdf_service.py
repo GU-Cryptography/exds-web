@@ -224,7 +224,7 @@ class ContractPdfService:
                 "$set": {
                     "pdf_binary_data": Binary(pdf_data),
                     "pdf_filename": filename,
-                    "pdf_uploaded_at": datetime.utcnow(),
+                    "pdf_uploaded_at": datetime.now(),
                     "pdf_uploader": uploader
                 }
             }

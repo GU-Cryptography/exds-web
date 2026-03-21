@@ -17,8 +17,8 @@ class PricingModel(BaseMongoModel):
     enabled: bool = Field(default=True, description="是否启用")
     sort_order: int = Field(..., description="排序顺序")
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
 
 
 class PricingModelListItem(BaseModel):

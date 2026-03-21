@@ -211,14 +211,14 @@ class PackageService:
         update_fields = {
             "status": new_status,
             "updated_by": operator,
-            "updated_at": datetime.utcnow()
+            "updated_at": datetime.now()
         }
 
         # 记录状态变更时间
         if new_status == "active":
-            update_fields["activated_at"] = datetime.utcnow()
+            update_fields["activated_at"] = datetime.now()
         elif new_status == "archived":
-            update_fields["archived_at"] = datetime.utcnow()
+            update_fields["archived_at"] = datetime.now()
 
         # 4. 执行更新
         result = self.collection.update_one(
@@ -312,7 +312,7 @@ class PackageService:
 
         # 4. 更新元数据
         package_data["updated_by"] = operator
-        package_data["updated_at"] = datetime.utcnow()
+        package_data["updated_at"] = datetime.now()
 
         # 5. 价格配置校验（使用新的统一校验）
         model_code = package_data.get("model_code")

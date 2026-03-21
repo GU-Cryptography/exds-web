@@ -75,9 +75,9 @@ class Contract(BaseMongoModel, ContractCreate):
     """合同完整数据模型"""
     # 审计字段
     created_by: Optional[str] = Field(None, description="创建人")
-    created_at: datetime = Field(default_factory=datetime.utcnow, description="创建时间")
+    created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
     updated_by: Optional[str] = Field(None, description="更新人")
-    updated_at: datetime = Field(default_factory=datetime.utcnow, description="更新时间")
+    updated_at: datetime = Field(default_factory=datetime.now, description="更新时间")
 
 
 # 合同列表项模型
@@ -122,7 +122,7 @@ def calculate_contract_status(purchase_start_month: datetime, purchase_end_month
     Returns:
         str: 合同状态 ('pending' | 'active' | 'expired')
     """
-    now = datetime.utcnow()
+    now = datetime.now()
     # 将所有日期统一为每月1号进行比较
     current_month = datetime(now.year, now.month, 1)
     start_month = datetime(purchase_start_month.year, purchase_start_month.month, 1)

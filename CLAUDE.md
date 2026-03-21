@@ -118,6 +118,13 @@ npm test --prefix frontend
 
 ## 关键开发规范
 
+### 时间字段统一规范（强制）
+
+1. 项目统一使用 `datetime.now()`（naive）生成时间。
+2. 禁止新增 `datetime.utcnow()` 和 `datetime.now(timezone.utc)` 写法。
+3. 所有落库时间字段（如 `created_at`、`updated_at`、`imported_at`、`login_at`、`logout_at`）必须使用同一规则。
+4. 读取历史带时区数据允许兼容转换，但新写入必须保持 naive 一致。
+
 ### 0. 移动端面包屑标题（强制要求）
 
 **重要原则**：所有页面**必须**在移动端（`md` 以下断点）显示面包屑标题，桌面端不显示：

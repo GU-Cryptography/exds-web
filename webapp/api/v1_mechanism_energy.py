@@ -4,7 +4,7 @@
 """
 import logging
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 
 from bson import json_util
 from fastapi import APIRouter, File, UploadFile, Depends, HTTPException
@@ -134,7 +134,7 @@ async def import_mechanism_energy(
         raise HTTPException(status_code=400, detail=f"Excel应包含48个时段列，当前检测到 {len(value_cols)} 列")
         
     imported_months = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     
     for _, row in df.iterrows():
         entity_name = str(row['名称']).strip()

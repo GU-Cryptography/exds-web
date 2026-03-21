@@ -424,7 +424,7 @@ class ContractDataTransformer:
 
         if not package:
             # 自动创建新套餐
-            now = datetime.utcnow()
+            now = datetime.now()
             new_package = {
                 "package_name": package_name,
                 "package_description": f"自动导入创建 - {now.strftime('%Y-%m-%d')}",
@@ -460,7 +460,7 @@ class ContractDataTransformer:
         )
 
         # 5. 添加审计字段
-        now = datetime.utcnow()
+        now = datetime.now()
         contract_data.update({
             'created_by': operator,
             'created_at': now,

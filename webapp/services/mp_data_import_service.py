@@ -182,7 +182,7 @@ class MpDataImportService:
                             "customer_name": customer_name,
                             "account_id": account_id
                         },
-                        "updated_at": datetime.utcnow()
+                        "updated_at": datetime.now()
                     }
                     records.append(record)
                     
