@@ -30,10 +30,20 @@ def _get_ip2region_searcher():
         return None
 
     try:
-        import ip2region  # type: ignore
-        return ip2region.XdbSearcher(dbfile=db_path)
+        # 优先适配当前 py-ip2region 包（ip2region.searcher.Searcher）
+        from ip2region import searcher, util  # type: ignore
+        header = util.load_header_from_file(db_path)
+        version = util.version_from_header(header)
+        if not version:
+            return None
+        return searcher.new_with_file_only(version, db_path)
     except Exception:
-        return None
+        # 兼容部分旧版包 API（XdbSearcher）
+        try:
+            import ip2region  # type: ignore
+            return ip2region.XdbSearcher(dbfile=db_path)
+        except Exception:
+            return None
 
 
 def resolve_ip_city(ip: Optional[str]) -> str:
