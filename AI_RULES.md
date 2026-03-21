@@ -81,3 +81,28 @@ git config core.hooksPath .githooks
 1. 后端统一使用 `datetime.now()`（naive）生成时间。
 2. 禁止新增 `datetime.utcnow()` 与 `datetime.now(timezone.utc)`。
 3. 涉及落库时间字段（`created_at/updated_at/imported_at/login_at/logout_at` 等）必须保持同一格式。
+
+## 10. 提交日志规则（强制）
+
+1. 提交日志格式必须为：
+- `type(scope): 中文描述`
+
+2. `type` 仅允许：
+- `feat|fix|refactor|docs|chore|perf|test|build|ci|revert`
+
+3. `scope` 仅允许英文小写 kebab-case（如 `auth`、`user-permissions`、`settlement`）。
+建议优先 scope：
+- `auth`
+- `user-permissions`
+- `settlement`
+- `pricing`
+- `customer`
+- `load-analysis`
+- `trade-review`
+- `frontend`
+- `backend`
+- `docs`
+
+4. 描述必须是中文语义，不允许空描述。
+
+5. 建议通过 `commit-msg` hook 自动检查提交日志格式。

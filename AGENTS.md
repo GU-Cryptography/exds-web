@@ -112,6 +112,45 @@ npm test --prefix frontend
 - `scripts/check_auth_all.py`
 - `docs/todo/用户权限管理实施计划1.1.md`
 
+## 12. 提交日志规范（强制）
+
+1. 提交信息必须使用以下格式：
+- `type(scope): 中文描述`
+
+2. `type` 允许值：
+- `feat`
+- `fix`
+- `refactor`
+- `docs`
+- `chore`
+- `perf`
+- `test`
+- `build`
+- `ci`
+- `revert`
+
+3. `scope` 规则：
+- 使用英文小写 + kebab-case（示例：`auth`、`user-permissions`、`settlement`）
+- 禁止中文、空格、下划线、驼峰
+- 推荐 scope 白名单（优先使用）：
+- `auth`
+- `user-permissions`
+- `settlement`
+- `pricing`
+- `customer`
+- `load-analysis`
+- `trade-review`
+- `frontend`
+- `backend`
+- `docs`
+
+4. 描述规则：
+- 必须为中文语义，简洁明确
+- 示例：`feat(auth): 新增登录失败锁定与自动解锁机制`
+
+5. 提交门禁：
+- 可通过 `commit-msg` hook 对提交日志格式进行自动校验（按团队需要启用）。
+
 # 🚨 中文编码保护规则（必须遵守）
 
 ## 基本原则
