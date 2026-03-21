@@ -51,6 +51,18 @@ export interface AuthAuditLog {
     created_at: string;
 }
 
+export interface AuthSession {
+    sid: string;
+    username: string;
+    status: string;
+    login_at?: string;
+    logout_at?: string;
+    duration_seconds?: number;
+    login_ip?: string;
+    login_city?: string;
+    logout_reason?: string;
+}
+
 export interface PagedResult<T> {
     total: number;
     items: T[];
@@ -147,6 +159,27 @@ export async function listAuditLogs(params: {
         },
     });
     return { total: res.data.total || 0, items: res.data.logs || [] };
+}
+
+export async function listAuthSessions(params: {
+    username?: string;
+    status?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    page: number;
+    pageSize: number;
+}): Promise<PagedResult<AuthSession>> {
+    const res = await apiClient.get<{ total: number; sessions: AuthSession[] }>('/api/v1/auth/sessions', {
+        params: {
+            username: params.username || undefined,
+            status: params.status || undefined,
+            date_from: params.dateFrom || undefined,
+            date_to: params.dateTo || undefined,
+            page: params.page,
+            page_size: params.pageSize,
+        },
+    });
+    return { total: res.data.total || 0, items: res.data.sessions || [] };
 }
 
 export async function updateMyProfile(payload: {

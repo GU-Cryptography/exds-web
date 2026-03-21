@@ -257,7 +257,11 @@ async def list_users(
     docs = list(db.users.find(
         {},
         {"hashed_password": 0, "last_active_at": 0}
-    ).skip(skip).limit(page_size))
+    ).sort([
+        ("last_active_at", -1),
+        ("created_at", -1),
+        ("username", 1),
+    ]).skip(skip).limit(page_size))
     for doc in docs:
         doc["_id"] = str(doc["_id"])
     return {"total": total, "users": docs}

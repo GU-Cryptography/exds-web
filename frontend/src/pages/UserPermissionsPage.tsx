@@ -9,12 +9,14 @@ import { useTheme } from '@mui/material/styles';
 import AddIcon from '@mui/icons-material/Add';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import HistoryIcon from '@mui/icons-material/History';
 import SaveIcon from '@mui/icons-material/Save';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import { useAuth } from '../contexts/AuthContext';
 import {
   AuthAuditLog,
+  AuthSession,
   AuthModule,
   AuthPermission,
   AuthRole,
@@ -24,11 +26,13 @@ import {
   deleteRole,
   deleteUser,
   listAuditLogs,
+  listAuthSessions,
   listModules,
   listPermissions,
   listRoles,
   listUsers,
   resetUserPassword,
+  updateRole,
   updateRolePermissions,
   updateUserRoles,
   updateUserStatus,
@@ -73,6 +77,7 @@ const UserPermissionsPage: React.FC = () => {
 
   const [createRoleOpen, setCreateRoleOpen] = useState(false);
   const [deleteRoleOpen, setDeleteRoleOpen] = useState(false);
+  const [editRoleOpen, setEditRoleOpen] = useState(false);
   const [createUserOpen, setCreateUserOpen] = useState(false);
   const [assignRoleOpen, setAssignRoleOpen] = useState(false);
   const [resetPasswordOpen, setResetPasswordOpen] = useState(false);
@@ -80,6 +85,7 @@ const UserPermissionsPage: React.FC = () => {
   const [auditOpen, setAuditOpen] = useState(false);
 
   const [roleDraft, setRoleDraft] = useState<RoleDraft>({ code: '', name: '', description: '' });
+  const [editRoleDraft, setEditRoleDraft] = useState({ name: '', description: '' });
   const [userDraft, setUserDraft] = useState<UserDraft>({ username: '', password: '', display_name: '', email: '', roles: [] });
   const [assignRoles, setAssignRoles] = useState<string[]>([]);
   const [targetUser, setTargetUser] = useState<AuthUser | null>(null);
@@ -92,6 +98,13 @@ const UserPermissionsPage: React.FC = () => {
   const [auditPage, setAuditPage] = useState(0);
   const [auditPageSize, setAuditPageSize] = useState(10);
   const [auditLoading, setAuditLoading] = useState(false);
+  const [sessionOpen, setSessionOpen] = useState(false);
+  const [sessionTargetUser, setSessionTargetUser] = useState<AuthUser | null>(null);
+  const [sessions, setSessions] = useState<AuthSession[]>([]);
+  const [sessionTotal, setSessionTotal] = useState(0);
+  const [sessionPage, setSessionPage] = useState(0);
+  const [sessionPageSize, setSessionPageSize] = useState(10);
+  const [sessionLoading, setSessionLoading] = useState(false);
 
   const selectedRole = useMemo(() => roles.find((r) => r.code === selectedRoleCode) || null, [roles, selectedRoleCode]);
 
@@ -185,6 +198,28 @@ const UserPermissionsPage: React.FC = () => {
     }
   }, [canManage, auditPage, auditPageSize]);
 
+  const loadSessions = useCallback(async () => {
+    if (!canManage || !sessionTargetUser?.username) {
+      setSessions([]);
+      setSessionTotal(0);
+      return;
+    }
+    setSessionLoading(true);
+    try {
+      const data = await listAuthSessions({
+        username: sessionTargetUser.username,
+        page: sessionPage + 1,
+        pageSize: sessionPageSize,
+      });
+      setSessions(data.items);
+      setSessionTotal(data.total);
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || e?.message || '会话信息加载失败');
+    } finally {
+      setSessionLoading(false);
+    }
+  }, [canManage, sessionTargetUser?.username, sessionPage, sessionPageSize]);
+
   useEffect(() => {
     setInitialLoading(true);
     loadBase().finally(() => setInitialLoading(false));
@@ -192,6 +227,7 @@ const UserPermissionsPage: React.FC = () => {
   useEffect(() => { if (canManage) loadUsers(); }, [canManage, loadUsers]);
   useEffect(() => { if (selectedRole) setRolePermDraft(selectedRole.permissions || []); }, [selectedRole]);
   useEffect(() => { if (auditOpen) loadAudit(); }, [auditOpen, loadAudit]);
+  useEffect(() => { if (sessionOpen) void loadSessions(); }, [sessionOpen, loadSessions]);
 
   const onRefresh = async () => {
     if (!canManage) return;
@@ -286,9 +322,14 @@ const UserPermissionsPage: React.FC = () => {
 
   const onAssignRoles = async () => {
     if (!selectedUser) return;
+    const nextRole = assignRoles[0];
+    if (!nextRole) {
+      setError('请选择角色');
+      return;
+    }
     setSaving(true);
     try {
-      await updateUserRoles(selectedUser.username, assignRoles);
+      await updateUserRoles(selectedUser.username, [nextRole]);
       setMessage('用户角色更新成功');
       setAssignRoleOpen(false);
       await loadUsers();
@@ -309,6 +350,39 @@ const UserPermissionsPage: React.FC = () => {
       await onRefresh();
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || '删除角色失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onOpenEditRole = () => {
+    if (!selectedRole) return;
+    setEditRoleDraft({
+      name: selectedRole.name || '',
+      description: selectedRole.description || '',
+    });
+    setEditRoleOpen(true);
+  };
+
+  const onUpdateRole = async () => {
+    if (!selectedRole) return;
+    const nextName = editRoleDraft.name.trim();
+    if (!nextName) {
+      setError('角色名称不能为空');
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateRole(selectedRole.code, {
+        name: nextName,
+        description: editRoleDraft.description.trim() || undefined,
+      });
+      setMessage('角色信息更新成功');
+      setEditRoleOpen(false);
+      await loadBase();
+      setSelectedRoleCode(selectedRole.code);
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || e?.message || '更新角色失败');
     } finally {
       setSaving(false);
     }
@@ -481,6 +555,18 @@ const UserPermissionsPage: React.FC = () => {
               <Typography variant="subtitle1">角色列表</Typography>
               <Stack direction="row" spacing={0.5}>
                 <Button size="small" startIcon={<AddIcon />} onClick={() => setCreateRoleOpen(true)} disabled={!canManage || saving}>新建</Button>
+                <Tooltip title={!selectedRole ? '请选择角色' : (selectedRole.is_system ? '系统角色不允许编辑' : '编辑角色')}>
+                  <span>
+                    <IconButton
+                      size="small"
+                      color="primary"
+                      onClick={onOpenEditRole}
+                      disabled={!canManage || saving || !selectedRole || !!selectedRole.is_system}
+                    >
+                      <EditOutlinedIcon fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
                 <Tooltip title={!selectedRole ? '请选择角色' : (selectedRole.is_system ? '系统角色不允许删除' : '删除角色')}>
                   <span>
                     <IconButton
@@ -576,6 +662,31 @@ const UserPermissionsPage: React.FC = () => {
         </DialogActions>
       </Dialog>
 
+      <Dialog open={editRoleOpen} onClose={() => setEditRoleOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>编辑角色</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField label="角色编码" value={selectedRole?.code || ''} disabled />
+            <TextField
+              label="角色名称"
+              value={editRoleDraft.name}
+              onChange={(e) => setEditRoleDraft((s) => ({ ...s, name: e.target.value }))}
+            />
+            <TextField
+              label="描述"
+              value={editRoleDraft.description}
+              onChange={(e) => setEditRoleDraft((s) => ({ ...s, description: e.target.value }))}
+              multiline
+              minRows={2}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditRoleOpen(false)}>取消</Button>
+          <Button variant="contained" onClick={onUpdateRole} disabled={!canManage || saving || !selectedRole}>保存</Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={createUserOpen} onClose={() => setCreateUserOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>新建用户</DialogTitle>
         <DialogContent>
@@ -596,8 +707,13 @@ const UserPermissionsPage: React.FC = () => {
             <TextField label="显示名" value={userDraft.display_name} onChange={(e) => setUserDraft((s) => ({ ...s, display_name: e.target.value }))} />
             <TextField label="邮箱" value={userDraft.email} onChange={(e) => setUserDraft((s) => ({ ...s, email: e.target.value }))} />
             <FormControl fullWidth>
-              <InputLabel id="create-user-role-select">角色</InputLabel>
-              <Select labelId="create-user-role-select" multiple value={userDraft.roles} label="角色" onChange={(e: SelectChangeEvent<string[]>) => setUserDraft((s) => ({ ...s, roles: e.target.value as string[] }))}>
+              <InputLabel id="create-user-role-select">角色（单选）</InputLabel>
+              <Select
+                labelId="create-user-role-select"
+                value={userDraft.roles[0] || ''}
+                label="角色（单选）"
+                onChange={(e: SelectChangeEvent<string>) => setUserDraft((s) => ({ ...s, roles: e.target.value ? [e.target.value] : [] }))}
+              >
                 {roles.map((r) => <MenuItem key={r.code} value={r.code}>{r.name} ({r.code})</MenuItem>)}
               </Select>
             </FormControl>
@@ -610,8 +726,13 @@ const UserPermissionsPage: React.FC = () => {
         <DialogTitle>分配角色：{selectedUser?.username}</DialogTitle>
         <DialogContent>
           <FormControl fullWidth sx={{ mt: 1 }}>
-            <InputLabel id="assign-role-select">角色</InputLabel>
-            <Select labelId="assign-role-select" multiple value={assignRoles} label="角色" onChange={(e: SelectChangeEvent<string[]>) => setAssignRoles(e.target.value as string[])}>
+            <InputLabel id="assign-role-select">角色（单选）</InputLabel>
+            <Select
+              labelId="assign-role-select"
+              value={assignRoles[0] || ''}
+              label="角色（单选）"
+              onChange={(e: SelectChangeEvent<string>) => setAssignRoles(e.target.value ? [e.target.value] : [])}
+            >
               {roles.map((r) => <MenuItem key={r.code} value={r.code}>{r.name} ({r.code})</MenuItem>)}
             </Select>
           </FormControl>
@@ -659,12 +780,24 @@ const UserPermissionsPage: React.FC = () => {
           onClick={() => {
             if (!userActionTarget) return;
             setSelectedUser(userActionTarget);
-            setAssignRoles(userActionTarget.roles || []);
+            setAssignRoles(userActionTarget.roles?.[0] ? [userActionTarget.roles[0]] : []);
             setAssignRoleOpen(true);
             closeUserActionMenu();
           }}
         >
           分配角色
+        </MenuItem>
+        <MenuItem
+          disabled={!canManage || saving || !userActionTarget}
+          onClick={() => {
+            if (!userActionTarget) return;
+            setSessionTargetUser(userActionTarget);
+            setSessionPage(0);
+            setSessionOpen(true);
+            closeUserActionMenu();
+          }}
+        >
+          查看会话信息
         </MenuItem>
         <MenuItem
           disabled={!canManage || saving || !userActionTarget}
@@ -723,6 +856,93 @@ const UserPermissionsPage: React.FC = () => {
                 </Table>
               </TableContainer>
               <TablePagination component="div" count={auditTotal} page={auditPage} rowsPerPage={auditPageSize} onPageChange={(_, p) => setAuditPage(p)} onRowsPerPageChange={(e) => { setAuditPageSize(parseInt(e.target.value, 10)); setAuditPage(0); }} rowsPerPageOptions={[10, 20, 50]} />
+            </>
+          )}
+        </Box>
+      </Drawer>
+
+      <Drawer
+        anchor="right"
+        open={sessionOpen}
+        onClose={() => setSessionOpen(false)}
+        sx={{
+          '& .MuiDrawer-paper': {
+            top: { xs: 56, sm: 64 },
+            height: { xs: 'calc(100% - 56px)', sm: 'calc(100% - 64px)' },
+          },
+        }}
+      >
+        <Box sx={{ width: { xs: '100vw', sm: 980 }, p: 2 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>
+            用户会话信息
+          </Typography>
+          <Box
+            sx={{
+              mb: 1.5,
+              px: 1.5,
+              py: 1,
+              borderRadius: 1,
+              bgcolor: 'action.hover',
+              border: '1px solid',
+              borderColor: 'divider',
+            }}
+          >
+            <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'normal', wordBreak: 'break-all' }}>
+              用户：{sessionTargetUser?.username || '-'}
+            </Typography>
+          </Box>
+          {sessionLoading ? <Box display="flex" justifyContent="center" py={4}><CircularProgress /></Box> : (
+            <>
+              <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: '70vh', mt: 1.5 }}>
+                <Table
+                  size="small"
+                  stickyHeader
+                  sx={{
+                    minWidth: 940,
+                    tableLayout: 'fixed',
+                    '& .MuiTableCell-root': {
+                      whiteSpace: 'normal',
+                      wordBreak: 'break-all',
+                      lineHeight: 1.35,
+                    },
+                  }}
+                >
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ width: 168 }}>登录时间</TableCell>
+                      <TableCell sx={{ width: 96 }}>状态</TableCell>
+                      <TableCell sx={{ width: 150 }}>登录IP</TableCell>
+                      <TableCell sx={{ width: 140 }}>城市</TableCell>
+                      <TableCell sx={{ width: 168 }}>登出时间</TableCell>
+                      <TableCell sx={{ width: 92 }}>时长(秒)</TableCell>
+                      <TableCell sx={{ width: 126 }}>原因</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {sessions.map((s, i) => (
+                      <TableRow key={`${s.sid}-${i}`}>
+                        <TableCell>{(s.login_at || '').replace('T', ' ').slice(0, 19) || '-'}</TableCell>
+                        <TableCell>{s.status || '-'}</TableCell>
+                        <TableCell>{s.login_ip || '-'}</TableCell>
+                        <TableCell>{s.login_city || '-'}</TableCell>
+                        <TableCell>{(s.logout_at || '').replace('T', ' ').slice(0, 19) || '-'}</TableCell>
+                        <TableCell>{typeof s.duration_seconds === 'number' ? s.duration_seconds : '-'}</TableCell>
+                        <TableCell>{s.logout_reason || '-'}</TableCell>
+                      </TableRow>
+                    ))}
+                    {sessions.length === 0 && <TableRow><TableCell colSpan={7} align="center">暂无数据</TableCell></TableRow>}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              <TablePagination
+                component="div"
+                count={sessionTotal}
+                page={sessionPage}
+                rowsPerPage={sessionPageSize}
+                onPageChange={(_, p) => setSessionPage(p)}
+                onRowsPerPageChange={(e) => { setSessionPageSize(parseInt(e.target.value, 10)); setSessionPage(0); }}
+                rowsPerPageOptions={[10, 20, 50]}
+              />
             </>
           )}
         </Box>
