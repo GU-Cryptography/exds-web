@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
     Container,
     Box,
@@ -8,7 +8,12 @@ import {
     Typography,
     Paper,
     Alert,
-    CircularProgress
+    CircularProgress,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogContentText,
+    DialogActions,
 } from '@mui/material';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
@@ -18,14 +23,27 @@ import { useAuth } from '../contexts/AuthContext';
 
 const LoginPage: React.FC = () => {
     const navigate = useNavigate();
+    const location = useLocation();
     const { login: authLogin } = useAuth(); // 使用 AuthContext 的 login 方法
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [showConflictDialog, setShowConflictDialog] = useState(false);
 
-    const handleLogin = async (event: React.FormEvent) => {
-        event.preventDefault();
+    useEffect(() => {
+        const search = new URLSearchParams(location.search);
+        const reason = search.get('reason');
+        if (reason === 'kicked') {
+            setError('当前账号已在其他设备登录，您已被下线，请重新登录');
+        } else if (reason === 'idle_timeout') {
+            setError('会话因长时间无操作已超时，请重新登录');
+        } else if (reason === 'token_expired' || reason === 'session_expired') {
+            setError('登录状态已失效，请重新登录');
+        }
+    }, [location.search]);
+
+    const executeLogin = async (force = false) => {
         setError('');
         setLoading(true);
 
@@ -36,7 +54,7 @@ const LoginPage: React.FC = () => {
         }
 
         try {
-            const response = await login(username, password);
+            const response = await login(username, password, force);
             if (response.data && response.data.access_token) {
                 // 使用 AuthContext 的 login 方法，它会自动处理 token 保存和定时器
                 authLogin(response.data.access_token);
@@ -47,6 +65,18 @@ const LoginPage: React.FC = () => {
         } catch (err) {
             if (err instanceof AxiosError && err.response?.status === 401) {
                 setError('用户名或密码错误');
+            } else if (err instanceof AxiosError && err.response?.status === 429) {
+                const detail = err.response?.data?.detail;
+                const detailText = typeof detail === 'string' ? detail : '';
+                const match = detailText.match(/(\d+)\s*per\s*1\s*minute/i);
+                if (match) {
+                    setError(`登录过于频繁（每分钟最多 ${match[1]} 次），请稍后再试`);
+                } else {
+                    setError('登录过于频繁，请 1 分钟后重试');
+                }
+            } else if (err instanceof AxiosError && err.response?.status === 409) {
+                setShowConflictDialog(true);
+                return;
             } else {
                 setError('登录失败，请检查您的凭据或网络连接');
             }
@@ -54,6 +84,16 @@ const LoginPage: React.FC = () => {
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleLogin = async (event: React.FormEvent) => {
+        event.preventDefault();
+        await executeLogin(false);
+    };
+
+    const handleForceLogin = async () => {
+        setShowConflictDialog(false);
+        await executeLogin(true);
     };
 
     return (
@@ -113,6 +153,18 @@ const LoginPage: React.FC = () => {
                     </Button>
                 </Box>
             </Paper>
+            <Dialog open={showConflictDialog} onClose={() => setShowConflictDialog(false)}>
+                <DialogTitle>检测到在线会话</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        当前账号已在其他会话登录。继续登录将踢下线旧会话，是否继续？
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setShowConflictDialog(false)} disabled={loading}>取消</Button>
+                    <Button onClick={handleForceLogin} variant="contained" disabled={loading}>继续并踢下线</Button>
+                </DialogActions>
+            </Dialog>
         </Container>
     );
 };

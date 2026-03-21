@@ -35,7 +35,7 @@ interface AuthContextType {
     hasPermission: (code: string) => boolean;
     isPermissionLoaded: boolean;
     login: (token: string) => void;
-    logout: (reason?: string) => void;
+    logout: (reason?: string) => Promise<void>;
     reloadUserInfo: () => Promise<void>;
 }
 
@@ -58,6 +58,19 @@ function decodeToken(token: string): JwtPayload | null {
     }
 }
 
+async function notifyServerLogout(token: string): Promise<void> {
+    try {
+        await fetch('/api/v1/auth/logout', {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+        });
+    } catch {
+        // best effort
+    }
+}
+
 // ===== Context =====
 const AuthContext = createContext<AuthContextType>({
     isAuthenticated: false,
@@ -70,7 +83,7 @@ const AuthContext = createContext<AuthContextType>({
     hasPermission: () => false,
     isPermissionLoaded: false,
     login: () => { },
-    logout: () => { },
+    logout: async () => { },
     reloadUserInfo: async () => { },
 });
 
@@ -89,10 +102,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [showIdleWarning, setShowIdleWarning] = useState<boolean>(false);
     const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const sessionProbeRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const WARNING_BEFORE_SECONDS = 120; // 提前 2 分钟警告
 
     // ===== 登出 =====
-    const logout = useCallback((reason?: string) => {
+    const logout = useCallback(async (reason?: string) => {
+        const token = getToken();
+        if (token) {
+            await notifyServerLogout(token);
+        }
         removeToken();
         clearPermissionSnapshot();
         setIsAuthenticated(false);
@@ -157,7 +175,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
 
         idleTimerRef.current = setTimeout(() => {
-            logout('idle_timeout');
+            void logout('idle_timeout');
         }, totalMs);
     }, [idleTimeoutMinutes, logout]);
 
@@ -191,7 +209,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         // JWT 绝对过期兜底
         const remainingMs = decoded.exp * 1000 - Date.now();
-        const expTimer = setTimeout(() => logout('token_expired'), remainingMs);
+        const expTimer = setTimeout(() => { void logout('token_expired'); }, remainingMs);
         return () => clearTimeout(expTimer);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);  // 仅在挂载时执行一次
@@ -209,6 +227,35 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
         };
     }, [isAuthenticated, resetIdleTimer]);
+
+    // ===== 会话有效性探测（用于“被踢下线”快速生效） =====
+    useEffect(() => {
+        if (!isAuthenticated) {
+            if (sessionProbeRef.current) {
+                clearInterval(sessionProbeRef.current);
+                sessionProbeRef.current = null;
+            }
+            return;
+        }
+
+        const probe = async () => {
+            try {
+                await apiClient.get('/api/v1/auth/me');
+            } catch {
+                // 401 将由 apiClient 拦截器统一处理并跳转登录页
+            }
+        };
+
+        probe();
+        sessionProbeRef.current = setInterval(probe, 20000);
+
+        return () => {
+            if (sessionProbeRef.current) {
+                clearInterval(sessionProbeRef.current);
+                sessionProbeRef.current = null;
+            }
+        };
+    }, [isAuthenticated]);
 
     // ===== 空闲警告弹窗 =====
     const IdleWarningDialog = showIdleWarning ? (

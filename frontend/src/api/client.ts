@@ -70,7 +70,15 @@ apiClient.interceptors.response.use(
                 localStorage.removeItem(AUTH_STORAGE_KEYS.token);
                 localStorage.removeItem(AUTH_STORAGE_KEYS.permissions);
                 localStorage.removeItem(AUTH_STORAGE_KEYS.isSuperAdmin);
-                window.location.href = '/login?reason=session_expired';
+                const detail = error.response.data?.detail;
+                const detailText = typeof detail === 'string' ? detail.toLowerCase() : '';
+                const isKicked =
+                    detailText.includes('replaced by a newer login')
+                    || detailText.includes('newer login')
+                    || detailText.includes('session replaced')
+                    || detailText.includes('kicked');
+                const reason = isKicked ? 'kicked' : 'session_expired';
+                window.location.href = `/login?reason=${reason}`;
             } else if (error.response.status === 403) {
                 console.warn('访问被拒绝，无相应权限：', error.response.data);
                 alert(error.response.data?.detail || '您没有权限执行此操作');
@@ -80,12 +88,13 @@ apiClient.interceptors.response.use(
     }
 );
 
-export const login = (username: string, password: string) => {
+export const login = (username: string, password: string, force = false) => {
     const params = new URLSearchParams();
     params.append('username', username);
     params.append('password', password);
 
     return apiClient.post('/api/v1/token', params, {
+        params: force ? { force: true } : undefined,
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
         },

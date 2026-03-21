@@ -1,12 +1,14 @@
 import re
 import os
 import logging
-from datetime import datetime, timedelta, timezone
+import uuid
+from datetime import datetime, timedelta
 from typing import Optional, List
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
+from pymongo.errors import OperationFailure
 from pydantic import BaseModel
 
 # This is a relative import, assuming the mongo tool is in the same 'tools' directory
@@ -118,7 +120,7 @@ def authenticate_user(db_session, username: str, password: str):
     try:
         db_session.users.update_one(
             {"username": username},
-            {"$set": {"last_active_at": datetime.now(timezone.utc).isoformat()}}
+            {"$set": {"last_active_at": datetime.now().isoformat()}}
         )
     except Exception as e:
         logger.warning(f"登录后更新 last_active_at 失败（非致命）: {e}")
@@ -127,18 +129,290 @@ def authenticate_user(db_session, username: str, password: str):
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = datetime.now() + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
+        expire = datetime.now() + timedelta(minutes=15)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+
+def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+        # 统一转换为 naive 本地时间，兼容历史带时区字符串。
+        if dt.tzinfo is not None:
+            dt = dt.astimezone().replace(tzinfo=None)
+        return dt
+    except Exception:
+        return None
+
+
+def _duration_seconds(start: Optional[datetime], end: Optional[datetime]) -> Optional[int]:
+    if not start or not end:
+        return None
+    return max(0, int((end - start).total_seconds()))
+
+
+def create_auth_session(
+    username: str,
+    expire_minutes: int,
+    login_ip: Optional[str] = None,
+    login_city: Optional[str] = None,
+) -> str:
+    """
+    创建并登记会话，返回 sid。
+    """
+    sid = uuid.uuid4().hex
+    now = datetime.now()
+    expires_at = now + timedelta(minutes=expire_minutes)
+    db.auth_sessions.insert_one({
+        "username": username,
+        "sid": sid,
+        "status": "active",
+        "login_at": now.isoformat(),
+        "login_ip": login_ip,
+        "login_city": login_city,
+        "created_at": now.isoformat(),
+        "last_seen_at": now.isoformat(),
+        "expires_at": expires_at.isoformat(),
+    })
+    return sid
+
+
+def find_active_session(username: str):
+    return db.auth_sessions.find_one(
+        {"username": username, "status": "active"},
+        sort=[("last_seen_at", -1)]
+    )
+
+
+def cleanup_stale_active_sessions(username: str) -> int:
+    """
+    登录冲突判断前即时清理该用户已过期/超时但仍标记为 active 的会话。
+    返回清理数量。
+    """
+    now = datetime.now()
+    cleaned = 0
+    cursor = db.auth_sessions.find(
+        {"username": username, "status": "active"},
+        {"sid": 1, "expires_at": 1, "last_seen_at": 1}
+    )
+    for doc in cursor:
+        sid = doc.get("sid")
+        if not sid:
+            db.auth_sessions.update_one(
+                {"_id": doc.get("_id")},
+                {"$set": {
+                    "status": "expired",
+                    "logout_reason": "invalid_session_record",
+                    "updated_at": now.isoformat(),
+                }}
+            )
+            cleaned += 1
+            continue
+
+        expires_at = _parse_iso_datetime(doc.get("expires_at"))
+        if expires_at and now > expires_at:
+            close_session(sid, status="expired", reason="token_expired_login_check")
+            cleaned += 1
+            continue
+
+        last_seen_at = _parse_iso_datetime(doc.get("last_seen_at"))
+        if last_seen_at and IDLE_TIMEOUT_MINUTES > 0:
+            idle_seconds = (now - last_seen_at).total_seconds()
+            if idle_seconds > IDLE_TIMEOUT_MINUTES * 60:
+                close_session(sid, status="expired", reason="idle_timeout_login_check")
+                cleaned += 1
+
+    return cleaned
+
+
+def close_session(sid: str, status: str, reason: Optional[str] = None):
+    session_doc = db.auth_sessions.find_one({"sid": sid})
+    if not session_doc:
+        return
+    now = datetime.now()
+    login_at = _parse_iso_datetime(session_doc.get("login_at") or session_doc.get("created_at"))
+    update_fields = {
+        "status": status,
+        "logout_at": now.isoformat(),
+        "duration_seconds": _duration_seconds(login_at, now),
+        "updated_at": now.isoformat(),
+    }
+    if reason:
+        update_fields["logout_reason"] = reason
+    if status == "kicked":
+        update_fields["kicked_at"] = now.isoformat()
+        update_fields["kicked_reason"] = reason or "force_login"
+    db.auth_sessions.update_one({"sid": sid}, {"$set": update_fields})
+
+    username = session_doc.get("username")
+    if username:
+        db.users.update_one(
+            {"username": username, "current_session_sid": sid},
+            {"$unset": {"current_session_sid": ""}}
+        )
+
+
+def kick_active_sessions(username: str, reason: str = "login_conflict"):
+    active_sessions = list(db.auth_sessions.find({"username": username, "status": "active"}, {"sid": 1}))
+    for item in active_sessions:
+        sid = item.get("sid")
+        if sid:
+            close_session(sid, status="kicked", reason=reason)
+        else:
+            db.auth_sessions.update_one(
+                {"_id": item.get("_id")},
+                {"$set": {
+                    "status": "expired",
+                    "logout_reason": "invalid_session_record",
+                    "updated_at": datetime.now().isoformat(),
+                }}
+            )
+
+
+def enforce_single_active_session(username: str, current_sid: str):
+    """
+    强制单会话：保留 current_sid，其余 active 会话全部关闭。
+    """
+    active_sessions = list(
+        db.auth_sessions.find(
+            {"username": username, "status": "active", "sid": {"$ne": current_sid}},
+            {"sid": 1}
+        )
+    )
+    for item in active_sessions:
+        sid = item.get("sid")
+        if sid:
+            close_session(sid, status="kicked", reason="single_session_enforced")
+        else:
+            db.auth_sessions.update_one(
+                {"_id": item.get("_id")},
+                {"$set": {
+                    "status": "expired",
+                    "logout_reason": "invalid_session_record",
+                    "updated_at": datetime.now().isoformat(),
+                }}
+            )
+
+
+def _collapse_duplicate_active_sessions():
+    """
+    索引创建前收敛历史脏数据：同一 username 仅保留 1 条 active（优先保留最近且 sid 有效）。
+    """
+    active_docs = list(
+        db.auth_sessions.find(
+            {"status": "active"},
+            {"_id": 1, "username": 1, "sid": 1, "last_seen_at": 1, "created_at": 1}
+        ).sort([("username", 1), ("last_seen_at", -1), ("created_at", -1)])
+    )
+
+    by_user = {}
+    for doc in active_docs:
+        username = doc.get("username")
+        if not username:
+            sid = doc.get("sid")
+            if sid:
+                close_session(sid, status="expired", reason="invalid_session_record")
+            else:
+                db.auth_sessions.update_one(
+                    {"_id": doc.get("_id")},
+                    {"$set": {
+                        "status": "expired",
+                        "logout_reason": "invalid_session_record",
+                        "updated_at": datetime.now().isoformat(),
+                    }}
+                )
+            continue
+        by_user.setdefault(username, []).append(doc)
+
+    for username, docs in by_user.items():
+        keep_doc = next((d for d in docs if d.get("sid")), None)
+        if not keep_doc:
+            for d in docs:
+                db.auth_sessions.update_one(
+                    {"_id": d.get("_id")},
+                    {"$set": {
+                        "status": "expired",
+                        "logout_reason": "invalid_session_record",
+                        "updated_at": datetime.now().isoformat(),
+                    }}
+                )
+            continue
+
+        for d in docs:
+            if d.get("_id") == keep_doc.get("_id"):
+                continue
+            sid = d.get("sid")
+            if sid:
+                close_session(sid, status="kicked", reason="active_dedup")
+            else:
+                db.auth_sessions.update_one(
+                    {"_id": d.get("_id")},
+                    {"$set": {
+                        "status": "expired",
+                        "logout_reason": "invalid_session_record",
+                        "updated_at": datetime.now().isoformat(),
+                    }}
+                )
+
+
+def ensure_auth_session_indexes():
+    _collapse_duplicate_active_sessions()
+    db.auth_sessions.create_index([("username", 1), ("status", 1)])
+    db.auth_sessions.create_index([("sid", 1)], unique=True)
+    db.auth_sessions.create_index([("expires_at", 1)])
+    db.auth_sessions.create_index([("login_at", -1)])
+    expected_name = "uniq_active_session_per_user"
+    expected_key = [("username", 1)]
+    expected_partial = {"status": "active", "username": {"$type": "string"}}
+    index_info = db.auth_sessions.index_information()
+    existing = index_info.get(expected_name)
+    if existing:
+        existing_key = existing.get("key")
+        existing_unique = existing.get("unique", False)
+        existing_partial = existing.get("partialFilterExpression")
+        if existing_key != expected_key or not existing_unique or existing_partial != expected_partial:
+            db.auth_sessions.drop_index(expected_name)
+
+    try:
+        db.auth_sessions.create_index(
+            expected_key,
+            unique=True,
+            name=expected_name,
+            partialFilterExpression=expected_partial,
+        )
+    except OperationFailure as e:
+        logger.warning(f"创建单活会话唯一索引失败（非致命）: {e}")
+
+
+def _throttled_touch_session(sid: str):
+    now = datetime.now()
+    session_doc = db.auth_sessions.find_one({"sid": sid}, {"last_seen_at": 1})
+    if session_doc:
+        last_seen = session_doc.get("last_seen_at")
+        if last_seen and isinstance(last_seen, str):
+            try:
+                last_seen = datetime.fromisoformat(last_seen)
+                if last_seen.tzinfo is not None:
+                    last_seen = last_seen.astimezone().replace(tzinfo=None)
+            except ValueError:
+                last_seen = None
+        if last_seen and (now - last_seen).total_seconds() < 60:
+            return
+    db.auth_sessions.update_one(
+        {"sid": sid, "status": "active"},
+        {"$set": {"last_seen_at": now.isoformat(), "updated_at": now.isoformat()}}
+    )
 
 def _throttled_update_last_active(username: str):
     """
     节流写入 last_active_at：仅当距上次更新超过 1 分钟时才写库，避免高频写入。
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     user_doc = db.users.find_one({"username": username}, {"last_active_at": 1})
     if user_doc:
         last_active = user_doc.get("last_active_at")
@@ -146,8 +420,8 @@ def _throttled_update_last_active(username: str):
             if isinstance(last_active, str):
                 try:
                     last_active = datetime.fromisoformat(last_active)
-                    if last_active.tzinfo is None:
-                        last_active = last_active.replace(tzinfo=timezone.utc)
+                    if last_active.tzinfo is not None:
+                        last_active = last_active.astimezone().replace(tzinfo=None)
                 except ValueError:
                     last_active = None
             if last_active and (now - last_active).total_seconds() < 60:
@@ -177,6 +451,49 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     if user is None:
         raise credentials_exception
 
+    sid = token_data.sid
+    if not sid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired, please login again",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user_session_doc = db.users.find_one({"username": username}, {"current_session_sid": 1})
+    current_session_sid = (user_session_doc or {}).get("current_session_sid")
+    if current_session_sid and sid != current_session_sid:
+        # 旧会话被新会话替换时，立即落库关闭，避免 active 脏会话残留。
+        close_session(sid, status="kicked", reason="replaced_by_new_login")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session replaced by a newer login",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    session_doc = db.auth_sessions.find_one({"sid": sid, "username": username})
+    if not session_doc or session_doc.get("status") != "active":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session revoked, please login again",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    expires_at = session_doc.get("expires_at")
+    if isinstance(expires_at, str):
+        try:
+            expires_at = datetime.fromisoformat(expires_at)
+            if expires_at.tzinfo is not None:
+                expires_at = expires_at.astimezone().replace(tzinfo=None)
+        except ValueError:
+            expires_at = None
+    if expires_at and datetime.now() > expires_at:
+        close_session(sid, status="expired", reason="token_expired")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired, please login again",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     # 空闲超时校验（AUTH_ENABLED 开关控制）
     if AUTH_ENABLED and IDLE_TIMEOUT_MINUTES > 0:
         user_doc = db.users.find_one({"username": username}, {"last_active_at": 1})
@@ -186,13 +503,14 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
                 if isinstance(last_active, str):
                     try:
                         last_active = datetime.fromisoformat(last_active)
-                        if last_active.tzinfo is None:
-                            last_active = last_active.replace(tzinfo=timezone.utc)
+                        if last_active.tzinfo is not None:
+                            last_active = last_active.astimezone().replace(tzinfo=None)
                     except ValueError:
                         last_active = None
                 if last_active:
-                    idle_seconds = (datetime.now(timezone.utc) - last_active).total_seconds()
+                    idle_seconds = (datetime.now() - last_active).total_seconds()
                     if idle_seconds > IDLE_TIMEOUT_MINUTES * 60:
+                        close_session(sid, status="expired", reason="idle_timeout")
                         raise HTTPException(
                             status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="Session expired due to inactivity",
@@ -205,7 +523,23 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     except Exception as e:
         logger.warning(f"更新 last_active_at 失败（非致命）: {e}")
 
+    try:
+        _throttled_touch_session(sid)
+    except Exception as e:
+        logger.warning(f"更新 auth_sessions.last_seen_at 失败（非致命）: {e}")
+
     return user
+
+
+async def get_current_token_data(token: str = Depends(oauth2_scheme)) -> TokenData:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        return TokenData(username=username, sid=payload.get("sid"))
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 async def get_current_active_user(current_user: User = Depends(get_current_user)):
     if not current_user.is_active:

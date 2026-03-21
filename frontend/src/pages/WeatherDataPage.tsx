@@ -72,7 +72,7 @@ import {
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
 import { useAuth } from '../contexts/AuthContext';
 
-// 鏇茬嚎閰嶇疆
+// 曲线配置
 const CURVE_CONFIG = [
     { key: 'apparent_temperature', label: '温度', icon: 'T', color: '#ff7300', unit: '°C' },
     { key: 'shortwave_radiation', label: '辐射', icon: 'R', color: '#ffc658', unit: 'W/m²' },
@@ -81,13 +81,13 @@ const CURVE_CONFIG = [
     { key: 'relative_humidity_2m', label: '湿度', icon: 'H', color: '#00bcd4', unit: '%' },
 ];
 
-// 鏄熸湡绠€鍐?
+// 星期简称
 const getWeekdayName = (date: Date): string => {
-    const weekdays = ['鍛ㄦ棩', '鍛ㄤ竴', '鍛ㄤ簩', '鍛ㄤ笁', '鍛ㄥ洓', '鍛ㄤ簲', '鍛ㄥ叚'];
+    const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
     return weekdays[date.getDay()];
 };
 
-// SVG 澶╂皵鍥炬爣缁勪欢锛堢畝娲侀鏍硷紝鍙傝€冨浘鐗囨牱寮忥級
+// SVG 天气图标组件，保持简洁样式
 const WeatherIcon: React.FC<{ type: string; size?: number }> = ({ type, size = 40 }) => {
     return (
         <Box
@@ -108,7 +108,7 @@ const WeatherIcon: React.FC<{ type: string; size?: number }> = ({ type, size = 4
     );
 };
 
-// 鏇茬嚎閫夋嫨鎸夐挳缁勪欢锛堝崟閫夋ā寮忥級
+// 曲线选择按钮组件（单选模式）
 const CurveSelectorSingle: React.FC<{
     selectedCurve: string;
     onSelect: (key: string) => void;
@@ -127,7 +127,7 @@ const CurveSelectorSingle: React.FC<{
     </Box>
 );
 
-// 鏇茬嚎閫夋嫨鎸夐挳缁勪欢锛堝閫夋ā寮忥紝鐢ㄤ簬澶╂皵棰勬祴锛?
+// 曲线选择按钮组件（多选模式，用于天气预测）
 const CurveSelector: React.FC<{
     selectedCurves: string[];
     onToggle: (key: string) => void;
@@ -146,7 +146,7 @@ const CurveSelector: React.FC<{
     </Box>
 );
 
-// 澶╂皵鍗＄墖缁勪欢锛堝甫鏄熸湡鏄剧ず锛岀畝娲侀鏍硷級
+// 天气卡片组件（带星期显示，简洁风格）
 const DailyWeatherCard: React.FC<{
     summary: DailyWeatherSummary;
     selected?: boolean;
@@ -181,13 +181,13 @@ const DailyWeatherCard: React.FC<{
                 {summary.weather_type}
             </Typography>
             <Typography variant="body2" sx={{ color: selected ? 'inherit' : 'text.primary' }}>
-                {summary.min_temp}~{summary.max_temp}掳C
+                {summary.min_temp}~{summary.max_temp}°C
             </Typography>
         </Paper>
     );
 };
 
-// 绔欑偣缂栬緫寮圭獥
+// 站点编辑弹窗
 const LocationFormModal: React.FC<{
     open: boolean;
     onClose: () => void;
@@ -219,11 +219,11 @@ const LocationFormModal: React.FC<{
 
     return (
         <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-            <DialogTitle>{location ? '缂栬緫绔欑偣' : '鏂板绔欑偣'}</DialogTitle>
+            <DialogTitle>{location ? '编辑站点' : '新增站点'}</DialogTitle>
             <DialogContent>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
                     <TextField
-                        label="绔欑偣ID"
+                        label="站点ID"
                         value={formData.location_id}
                         onChange={e => setFormData({ ...formData, location_id: e.target.value })}
                         disabled={!!location || readonly}
@@ -231,7 +231,7 @@ const LocationFormModal: React.FC<{
                         fullWidth
                     />
                     <TextField
-                        label="绔欑偣鍚嶇О"
+                        label="站点名称"
                         value={formData.name}
                         onChange={e => setFormData({ ...formData, name: e.target.value })}
                         disabled={readonly}
@@ -239,7 +239,7 @@ const LocationFormModal: React.FC<{
                         fullWidth
                     />
                     <TextField
-                        label="绾害"
+                        label="纬度"
                         type="number"
                         value={formData.latitude}
                         onChange={e => setFormData({ ...formData, latitude: parseFloat(e.target.value) || 0 })}
@@ -248,7 +248,7 @@ const LocationFormModal: React.FC<{
                         fullWidth
                     />
                     <TextField
-                        label="缁忓害"
+                        label="经度"
                         type="number"
                         value={formData.longitude}
                         onChange={e => setFormData({ ...formData, longitude: parseFloat(e.target.value) || 0 })}
@@ -264,13 +264,13 @@ const LocationFormModal: React.FC<{
                                 disabled={readonly}
                             />
                         }
-                        label="鍚敤"
+                        label="启用"
                     />
                 </Box>
             </DialogContent>
             <DialogActions>
-                <Button onClick={onClose}>鍙栨秷</Button>
-                <Button onClick={handleSubmit} variant="contained" disabled={readonly}>淇濆瓨</Button>
+                <Button onClick={onClose}>取消</Button>
+                <Button onClick={handleSubmit} variant="contained" disabled={readonly}>保存</Button>
             </DialogActions>
         </Dialog>
     );
@@ -283,29 +283,29 @@ export const WeatherDataPage: React.FC = () => {
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('module:forecast_weather_data:edit');
 
-    // 鐘舵€?
+    // 状态
     const [locations, setLocations] = useState<WeatherLocation[]>([]);
     const [selectedLocation, setSelectedLocation] = useState<WeatherLocation | null>(null);
     const [activeTab, setActiveTab] = useState(0);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    // 绔欑偣绠＄悊
+    // 站点管理
     const [locationModalOpen, setLocationModalOpen] = useState(false);
     const [editingLocation, setEditingLocation] = useState<WeatherLocation | null>(null);
     const [managementOpen, setManagementOpen] = useState(false);
     const [locationPage, setLocationPage] = useState(0);
-    const LOCATIONS_PER_PAGE = 10; // 姣忛〉鏄剧ず鐨勭珯鐐规暟
+    const LOCATIONS_PER_PAGE = 10; // 每页显示的站点数
 
-    // 澶╂皵棰勬祴 Tab 鐘舵€?
+    // 天气预测 Tab 状态
     const [forecastDate, setForecastDate] = useState<Date>(subDays(new Date(), 1));
     const [forecastSummaries, setForecastSummaries] = useState<DailyWeatherSummary[]>([]);
     const [selectedForecastDay, setSelectedForecastDay] = useState<string | null>(null);
     const [forecastHourlyData, setForecastHourlyData] = useState<WeatherHourlyData[]>([]);
-    const [forecastCardPage, setForecastCardPage] = useState(0); // 澶╂皵鍗＄墖鍒嗛〉
-    const CARDS_PER_PAGE = 3; // 绉诲姩绔瘡椤垫樉绀虹殑鍗＄墖鏁?
+    const [forecastCardPage, setForecastCardPage] = useState(0); // 天气卡片分页
+    const CARDS_PER_PAGE = 3; // 移动端每页显示的卡片数
 
-    // 鍘嗗彶澶╂皵 Tab 鐘舵€?
+    // 历史天气 Tab 状态
     const [actualsDate, setActualsDate] = useState<Date>(subDays(new Date(), 1));
     const [actualsSummary, setActualsSummary] = useState<DailyWeatherSummary | null>(null);
     const [actualsHourlyData, setActualsHourlyData] = useState<WeatherHourlyData[]>([]);
@@ -314,25 +314,25 @@ export const WeatherDataPage: React.FC = () => {
     const [compareHourlyData, setCompareHourlyData] = useState<WeatherHourlyData[]>([]);
     const [accuracy, setAccuracy] = useState<{ [key: string]: number }>({});
 
-    // 鏇茬嚎閫夋嫨锛堝ぉ姘旈娴嬪閫夛紝鍘嗗彶澶╂皵鍗曢€夛級
+    // 曲线选择：天气预测多选，历史天气单选
     const [selectedCurves, setSelectedCurves] = useState<string[]>(['apparent_temperature']);
     const [selectedActualsCurve, setSelectedActualsCurve] = useState<string>('apparent_temperature');
 
-    // 鍥捐〃 ref
+    // 图表 ref
     const forecastChartRef = useRef<HTMLDivElement>(null);
     const actualsChartRef = useRef<HTMLDivElement>(null);
 
     const forecastFullscreen = useChartFullscreen({
         chartRef: forecastChartRef,
-        title: `澶╂皵棰勬祴 - ${selectedLocation?.name || ''}`
+        title: `天气预测 - ${selectedLocation?.name || ''}`
     });
 
     const actualsFullscreen = useChartFullscreen({
         chartRef: actualsChartRef,
-        title: `鍘嗗彶澶╂皵 - ${selectedLocation?.name || ''}`
+        title: `历史天气 - ${selectedLocation?.name || ''}`
     });
 
-    // 鍔犺浇绔欑偣鍒楄〃
+    // 加载站点列表
     useEffect(() => {
         const fetchLocations = async () => {
             try {
@@ -343,7 +343,7 @@ export const WeatherDataPage: React.FC = () => {
                     setSelectedLocation(data.find(l => l.enabled) || data[0]);
                 }
             } catch (err) {
-                setError('鍔犺浇绔欑偣鍒楄〃澶辫触');
+                setError('加载站点列表失败');
                 console.error(err);
             } finally {
                 setLoading(false);
@@ -352,7 +352,7 @@ export const WeatherDataPage: React.FC = () => {
         fetchLocations();
     }, []);
 
-    // 鍔犺浇澶╂皵棰勬祴鏁版嵁
+    // 加载天气预测数据
     useEffect(() => {
         if (!selectedLocation || activeTab !== 0) return;
         const fetchForecastData = async () => {
@@ -364,13 +364,13 @@ export const WeatherDataPage: React.FC = () => {
                     setSelectedForecastDay(summaries[0].date);
                 }
             } catch (err) {
-                console.error('鍔犺浇棰勬祴鏁版嵁澶辫触', err);
+                console.error('加载预测数据失败', err);
             }
         };
         fetchForecastData();
     }, [selectedLocation, forecastDate, activeTab]);
 
-    // 鍔犺浇閫変腑鏃ユ湡鐨勯娴嬭鎯?
+    // 加载选中日期的预测详情
     useEffect(() => {
         if (!selectedLocation || !selectedForecastDay || activeTab !== 0) return;
         const fetchHourlyData = async () => {
@@ -379,13 +379,13 @@ export const WeatherDataPage: React.FC = () => {
                 const data = await getWeatherForecasts(selectedLocation.location_id, forecastDateStr, selectedForecastDay);
                 setForecastHourlyData(data);
             } catch (err) {
-                console.error('鍔犺浇棰勬祴璇︽儏澶辫触', err);
+                console.error('加载预测详情失败', err);
             }
         };
         fetchHourlyData();
     }, [selectedLocation, forecastDate, selectedForecastDay, activeTab]);
 
-    // 鍔犺浇鍘嗗彶澶╂皵鏁版嵁
+    // 加载历史天气数据
     useEffect(() => {
         if (!selectedLocation || activeTab !== 1) return;
         const fetchActualsData = async () => {
@@ -403,13 +403,13 @@ export const WeatherDataPage: React.FC = () => {
                     setForecastCompareDate(forecastDates[0]);
                 }
             } catch (err) {
-                console.error('鍔犺浇鍘嗗彶鏁版嵁澶辫触', err);
+                console.error('加载历史数据失败', err);
             }
         };
         fetchActualsData();
     }, [selectedLocation, actualsDate, activeTab]);
 
-    // 鍔犺浇瀵规瘮棰勬祴鏁版嵁
+    // 加载对比预测数据
     useEffect(() => {
         if (!selectedLocation || !forecastCompareDate || activeTab !== 1) return;
         const fetchCompareData = async () => {
@@ -418,7 +418,7 @@ export const WeatherDataPage: React.FC = () => {
                 const data = await getWeatherForecasts(selectedLocation.location_id, forecastCompareDate, targetDateStr);
                 setCompareHourlyData(data);
 
-                // 璁＄畻鍑嗙‘鐜?
+                // 计算准确率
                 if (actualsHourlyData.length > 0 && data.length > 0) {
                     const accuracyMap: { [key: string]: number } = {};
                     CURVE_CONFIG.forEach(curve => {
@@ -429,7 +429,7 @@ export const WeatherDataPage: React.FC = () => {
                     setAccuracy(accuracyMap);
                 }
             } catch (err) {
-                console.error('鍔犺浇瀵规瘮鏁版嵁澶辫触', err);
+                console.error('加载对比数据失败', err);
             }
         };
         fetchCompareData();
@@ -452,13 +452,13 @@ export const WeatherDataPage: React.FC = () => {
             const data = await getWeatherLocations();
             setLocations(data);
         } catch (err) {
-            console.error('淇濆瓨绔欑偣澶辫触', err);
+            console.error('保存站点失败', err);
         }
     };
 
     const handleDeleteLocation = async (locationId: string) => {
         if (!canEdit) return;
-        if (!window.confirm('纭畾瑕佸垹闄よ绔欑偣鍚楋紵')) return;
+        if (!window.confirm('确定要删除该站点吗？')) return;
         try {
             await deleteWeatherLocation(locationId);
             const data = await getWeatherLocations();
@@ -467,11 +467,11 @@ export const WeatherDataPage: React.FC = () => {
                 setSelectedLocation(data[0] || null);
             }
         } catch (err) {
-            console.error('鍒犻櫎绔欑偣澶辫触', err);
+            console.error('删除站点失败', err);
         }
     };
 
-    // 娓叉煋绔欑偣鍒楄〃锛堝甫鍒嗛〉锛?
+    // 渲染站点列表（带分页）
     const renderLocationSidebar = () => {
         const totalPages = Math.ceil(locations.length / LOCATIONS_PER_PAGE);
         const startIndex = locationPage * LOCATIONS_PER_PAGE;
@@ -480,7 +480,7 @@ export const WeatherDataPage: React.FC = () => {
         return (
             <Paper sx={{ height: '100%', minHeight: 500, display: 'flex', flexDirection: 'column' }} elevation={2}>
                 <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Typography variant="h6">绔欑偣鍒楄〃</Typography>
+                    <Typography variant="h6">站点列表</Typography>
                     <IconButton size="small" onClick={() => setManagementOpen(!managementOpen)}>
                         <SettingsIcon />
                     </IconButton>
@@ -512,7 +512,7 @@ export const WeatherDataPage: React.FC = () => {
                     ))}
                 </List>
 
-                {/* 鍒嗛〉瀵艰埅 */}
+                {/* 分页导航 */}
                 {totalPages > 1 && (
                     <>
                         <Divider />
@@ -546,21 +546,21 @@ export const WeatherDataPage: React.FC = () => {
                         disabled={!canEdit}
                         onClick={() => { setEditingLocation(null); setLocationModalOpen(true); }}
                     >
-                        鏂板绔欑偣
+                        新增站点
                     </Button>
                 </Box>
             </Paper>
         );
     };
 
-    // 娓叉煋澶╂皵棰勬祴 Tab
+    // 渲染天气预测 Tab
     const renderForecastTab = () => (
         <Box>
-            {/* 绔欑偣 + 棰勬祴鍙戝竷鏃ユ湡閫夋嫨锛堢Щ鍔ㄧ涓€琛屾樉绀猴級 */}
+            {/* 站点 + 预测发布日期选择（移动端一行显示） */}
             <Paper sx={{ p: { xs: 1.5, sm: 2 }, mb: 2, display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 2 }, flexWrap: 'nowrap', justifyContent: 'center' }} variant="outlined">
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
                     <LocationIcon color="primary" sx={{ fontSize: { xs: 18, sm: 24 } }} />
-                    <Typography variant="body2" fontWeight="bold" sx={{ fontSize: { xs: '0.8rem', sm: '1rem' } }}>{selectedLocation?.name || '鏈€夋嫨'}</Typography>
+                    <Typography variant="body2" fontWeight="bold" sx={{ fontSize: { xs: '0.8rem', sm: '1rem' } }}>{selectedLocation?.name || '未选择'}</Typography>
                 </Box>
                 <Divider orientation="vertical" flexItem sx={{ display: { xs: 'none', sm: 'block' } }} />
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0 }}>
@@ -578,11 +578,11 @@ export const WeatherDataPage: React.FC = () => {
                 </Box>
             </Paper>
 
-            {/* 鏈潵澶╂皵姒傝 */}
+            {/* 未来天气概览 */}
             <Paper sx={{ p: { xs: 1.5, sm: 2 }, mb: 2, overflow: 'hidden' }} variant="outlined">
-                <Typography variant="subtitle2" gutterBottom>鏈潵澶╂皵棰勬姤</Typography>
+                <Typography variant="subtitle2" gutterBottom>未来天气预报</Typography>
                 {forecastSummaries.length === 0 ? (
-                    <Typography variant="body2" color="text.secondary">鏆傛棤棰勬祴鏁版嵁</Typography>
+                    <Typography variant="body2" color="text.secondary">暂无预测数据</Typography>
                 ) : (
                     <Box
                         sx={{
@@ -617,10 +617,10 @@ export const WeatherDataPage: React.FC = () => {
                 )}
             </Paper>
 
-            {/* 24灏忔椂棰勬祴鏇茬嚎 */}
+            {/* 24小时预测曲线 */}
             <Paper sx={{ p: 2 }} variant="outlined">
                 <Typography variant="subtitle2" gutterBottom>
-                    {selectedForecastDay ? `${selectedForecastDay} 24灏忔椂棰勬祴` : '閫夋嫨鏃ユ湡鏌ョ湅璇︽儏'}
+                    {selectedForecastDay ? `${selectedForecastDay} 24小时预测` : '选择日期查看详情'}
                 </Typography>
                 <CurveSelector selectedCurves={selectedCurves} onToggle={handleCurveToggle} />
                 <Box
@@ -662,14 +662,14 @@ export const WeatherDataPage: React.FC = () => {
         </Box>
     );
 
-    // 娓叉煋鍘嗗彶澶╂皵 Tab
+    // 渲染历史天气 Tab
     const renderActualsTab = () => (
         <Box>
-            {/* 绔欑偣 + 鏃ユ湡閫夋嫨锛堢Щ鍔ㄧ涓€琛屾樉绀猴級 */}
+            {/* 站点 + 日期选择（移动端一行显示） */}
             <Paper sx={{ p: { xs: 1.5, sm: 2 }, mb: 2, display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 2 }, flexWrap: 'nowrap', justifyContent: 'center' }} variant="outlined">
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
                     <LocationIcon color="primary" sx={{ fontSize: { xs: 18, sm: 24 } }} />
-                    <Typography variant="body2" fontWeight="bold" sx={{ fontSize: { xs: '0.8rem', sm: '1rem' } }}>{selectedLocation?.name || '鏈€夋嫨'}</Typography>
+                    <Typography variant="body2" fontWeight="bold" sx={{ fontSize: { xs: '0.8rem', sm: '1rem' } }}>{selectedLocation?.name || '未选择'}</Typography>
                 </Box>
                 <Divider orientation="vertical" flexItem sx={{ display: { xs: 'none', sm: 'block' } }} />
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0 }}>
@@ -687,23 +687,23 @@ export const WeatherDataPage: React.FC = () => {
                 </Box>
             </Paper>
 
-            {/* 姣忔棩姒傚喌锛堢Щ鍔ㄧ绠€鍖栵級 */}
+            {/* 每日概况（移动端简化） */}
             {actualsSummary && (
                 <Paper sx={{ p: { xs: 1.5, sm: 2 }, mb: 2, display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 }, justifyContent: 'center' }} variant="outlined">
                     <WeatherIcon type={actualsSummary.weather_type} size={isMobile ? 36 : 48} />
                     <Typography variant={isMobile ? 'body1' : 'h6'} fontWeight="bold">{actualsSummary.weather_type}</Typography>
                     <Divider orientation="vertical" flexItem />
-                    <Typography variant={isMobile ? 'body2' : 'body1'}>馃尅锔?{actualsSummary.min_temp}~{actualsSummary.max_temp}掳C</Typography>
+                    <Typography variant={isMobile ? 'body2' : 'body1'}>温度 {actualsSummary.min_temp}~{actualsSummary.max_temp}°C</Typography>
                 </Paper>
             )}
 
-            {/* 鏇茬嚎閫夋嫨锛堝崟閫夛紝妯悜婊氬姩锛?*/}
+            {/* 曲线选择（单选，横向滚动） */}
             <Paper sx={{ p: { xs: 1.5, sm: 2 }, mb: 2 }} variant="outlined">
                 <Box sx={{ overflowX: 'auto', pb: 1 }}>
                     <CurveSelectorSingle selectedCurve={selectedActualsCurve} onSelect={setSelectedActualsCurve} />
                 </Box>
 
-                {/* 24灏忔椂鏇茬嚎 */}
+                {/* 24小时曲线 */}
                 <Box
                     ref={actualsChartRef}
                     sx={{
@@ -735,7 +735,7 @@ export const WeatherDataPage: React.FC = () => {
                                     <Line
                                         type="monotone"
                                         dataKey={curve.key}
-                                        name={`${curve.label}瀹炲喌`}
+                                        name={`${curve.label}实况`}
                                         stroke={curve.color}
                                         strokeWidth={2}
                                         dot={false}
@@ -744,7 +744,7 @@ export const WeatherDataPage: React.FC = () => {
                                         <Line
                                             type="monotone"
                                             dataKey={`${curve.key}_forecast`}
-                                            name={`${curve.label}棰勬祴`}
+                                            name={`${curve.label}预测`}
                                             stroke={curve.color}
                                             strokeWidth={2}
                                             strokeDasharray="5 5"
@@ -758,11 +758,11 @@ export const WeatherDataPage: React.FC = () => {
                 </Box>
             </Paper>
 
-            {/* 棰勬祴瀵规瘮锛堢Щ鍔ㄧ浼樺寲锛?*/}
+            {/* 预测对比（移动端优化） */}
             <Paper sx={{ p: { xs: 1.5, sm: 2 } }} variant="outlined">
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 }, flexWrap: 'wrap', mb: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: { xs: '100%', sm: 'auto' }, justifyContent: { xs: 'space-between', sm: 'flex-start' } }}>
-                        <Typography variant="subtitle2">棰勬祴瀵规瘮:</Typography>
+                        <Typography variant="subtitle2">预测对比:</Typography>
                         <FormControl size="small" sx={{ minWidth: { xs: 150, sm: 200 } }}>
                             <Select
                                 value={forecastCompareDate}
@@ -776,7 +776,7 @@ export const WeatherDataPage: React.FC = () => {
                     </Box>
                     {Object.keys(accuracy).length > 0 && (
                         <Typography variant="body2" color="primary" fontWeight="bold">
-                            缁煎悎鍑嗙‘鐜? {(Object.values(accuracy).reduce((a, b) => a + b, 0) / Object.values(accuracy).length).toFixed(1)}%
+                            综合准确率 {(Object.values(accuracy).reduce((a, b) => a + b, 0) / Object.values(accuracy).length).toFixed(1)}%
                         </Typography>
                     )}
                 </Box>
@@ -816,24 +816,24 @@ export const WeatherDataPage: React.FC = () => {
                 overflowX: 'hidden',
                 boxSizing: 'border-box'
             }}>
-                {/* 绉诲姩绔潰鍖呭睉 */}
+                {/* 移动端面包屑 */}
                 {isTablet && (
                     <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold' }}>
-                        鍩虹鏁版嵁 / 澶╂皵棰勬祴鏁版嵁
+                        基础数据 / 天气预测数据
                     </Typography>
                 )}
 
                 <Grid container spacing={isMobile ? 0 : 2} sx={{ margin: 0, width: '100%' }}>
-                    {/* 宸︿晶绔欑偣鍒楄〃 - 妗岄潰绔樉绀?*/}
+                    {/* 左侧站点列表 - 桌面端显示 */}
                     {!isMobile && (
                         <Grid size={{ xs: 12, md: 3, lg: 2 }}>
                             {renderLocationSidebar()}
                         </Grid>
                     )}
 
-                    {/* 鍙充晶鍐呭鍖?*/}
+                    {/* 右侧内容区 */}
                     <Grid size={{ xs: 12, md: 9, lg: 10 }}>
-                        {/* 绉诲姩绔珯鐐归€夋嫨 */}
+                        {/* 移动端站点选择 */}
                         {isMobile && (
                             <Paper sx={{ p: 2, mb: 2, display: 'flex', gap: 1, alignItems: 'center' }} variant="outlined">
                                 <FormControl fullWidth size="small">
@@ -845,7 +845,7 @@ export const WeatherDataPage: React.FC = () => {
                                         }}
                                         displayEmpty
                                         renderValue={(value) => {
-                                            if (!value) return <em>閫夋嫨绔欑偣</em>;
+                                            if (!value) return <em>选择站点</em>;
                                             const loc = locations.find(l => l.location_id === value);
                                             return loc?.name || value;
                                         }}
@@ -863,14 +863,14 @@ export const WeatherDataPage: React.FC = () => {
                             </Paper>
                         )}
 
-                        {/* 绌虹珯鐐规彁绀?*/}
+                        {/* 空站点提示 */}
                         {locations.length === 0 ? (
                             <Paper sx={{ p: 4, textAlign: 'center' }} variant="outlined">
                                 <Typography variant="h6" color="text.secondary" gutterBottom>
-                                    鏆傛棤澶╂皵绔欑偣
+                                    暂无天气站点
                                 </Typography>
                                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                                    璇峰厛娣诲姞澶╂皵绔欑偣浠ユ煡鐪嬪ぉ姘旀暟鎹?
+                                    请先添加天气站点以查看天气数据
                                 </Typography>
                                 <Button
                                     variant="contained"
@@ -878,20 +878,20 @@ export const WeatherDataPage: React.FC = () => {
                                     disabled={!canEdit}
                                     onClick={() => { setEditingLocation(null); setLocationModalOpen(true); }}
                                 >
-                                    鏂板绔欑偣
+                                    新增站点
                                 </Button>
                             </Paper>
                         ) : (
                             <>
-                                {/* Tab 鍒囨崲 */}
+                                {/* Tab 切换 */}
                                 <Paper sx={{ mb: 2 }} variant="outlined">
                                     <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)}>
-                                        <Tab label="澶╂皵棰勬祴" />
-                                        <Tab label="鍘嗗彶澶╂皵" />
+                                        <Tab label="天气预测" />
+                                        <Tab label="历史天气" />
                                     </Tabs>
                                 </Paper>
 
-                                {/* Tab 鍐呭 */}
+                                {/* Tab 内容 */}
                                 {activeTab === 0 && renderForecastTab()}
                                 {activeTab === 1 && renderActualsTab()}
                             </>
@@ -899,7 +899,7 @@ export const WeatherDataPage: React.FC = () => {
                     </Grid>
                 </Grid>
 
-                {/* 绔欑偣缂栬緫寮圭獥 */}
+                {/* 站点编辑弹窗 */}
                 <LocationFormModal
                     open={locationModalOpen}
                     onClose={() => setLocationModalOpen(false)}

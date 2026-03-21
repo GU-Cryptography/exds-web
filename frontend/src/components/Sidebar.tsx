@@ -155,7 +155,7 @@ export const Sidebar: React.FC<{
     const navigate = useNavigate();
     const [open, setOpen] = useState<{ [key: string]: boolean }>({});
     const tabContext = useTabContext();
-    const { hasPermission } = useAuth();
+    const { hasPermission, logout } = useAuth();
 
     const getPathPermissionState = React.useCallback((path: string, requiredPermission?: string) => {
         const viewPermission = getRequiredViewPermissionForRoute(path);
@@ -212,8 +212,7 @@ export const Sidebar: React.FC<{
     }, [activePath]);
 
     const handleLogout = () => {
-        localStorage.removeItem('token');
-        navigate('/login');
+        logout();
     };
 
     return (

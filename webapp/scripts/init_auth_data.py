@@ -9,7 +9,7 @@ Run:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -294,7 +294,7 @@ def _build_roles(now: str) -> List[Dict[str, Any]]:
 def run() -> None:
     from webapp.tools.mongo import DATABASE as db
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now().isoformat()
 
     logger.info("[1/5] 初始化 auth_modules...")
     for mod in MODULE_DEFINITIONS:

@@ -12,6 +12,12 @@ from typing import Iterable
 
 WRITE_METHODS = {"post", "put", "patch", "delete"}
 
+# 白名单：允许仅认证（无动作级权限）的写接口。
+# 目前仅保留“当前用户主动登出”这一项。
+AUTH_ONLY_WRITE_ENDPOINTS = {
+    ("POST", "/logout"),
+}
+
 
 @dataclass
 class Violation:
@@ -101,6 +107,8 @@ def _scan_file(path: Path) -> Iterable[Violation]:
 
         fn_has_auth = _function_has_auth_dependency(node)
         for method, route_path, dec_has_auth in write_decorators:
+            if (method.upper(), route_path or "<unknown>") in AUTH_ONLY_WRITE_ENDPOINTS:
+                continue
             if fn_has_auth or dec_has_auth:
                 continue
             yield Violation(

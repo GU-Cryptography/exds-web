@@ -521,6 +521,7 @@
 | `created_at` | `String(DateTime ISO)` | 创建时间 |
 | `updated_at` | `String(DateTime ISO)` | 更新时间 |
 | `last_active_at` | `String(DateTime ISO)` | 最后活跃时间 |
+| `current_session_sid` | `String` | 当前有效会话 SID（单账号互斥登录） |
 
 索引（权限体系直接依赖）：
 - `username`（唯一）
@@ -529,22 +530,60 @@
 
 ### 9.5 `auth_audit_logs` - 权限审计日志
 
-用途：记录角色、用户、权限管理操作（由 `/api/v1/auth/*` 管理接口写入）。
+用途：记录认证与授权相关审计事件（来源包括 `/api/v1/token` 登录流程、`/api/v1/auth/*` 用户角色权限管理接口）。
 
 | 字段名 | 类型 | 说明 |
 | :--- | :--- | :--- |
-| `event` | `String` | 审计事件类型（如 `ROLE_CREATED`） |
+| `event` | `String` | 审计事件类型 |
 | `operator` | `String` | 操作人用户名 |
 | `target` | `String` | 被操作对象（角色码/用户名等） |
-| `detail` | `Object` | 变更详情 |
+| `detail` | `Object` | 事件详情（不同事件字段不同） |
 | `created_at` | `String(DateTime ISO)` | 记录时间 |
+
+当前已落地事件（代码已实现）：
+- 登录相关：`AUTH_LOGIN_FAILED`、`AUTH_LOGIN_CONFLICT`、`AUTH_SESSION_KICKED`、`AUTH_LOGIN_SUCCESS`
+- 个人账号：`SELF_PROFILE_UPDATED`、`SELF_PASSWORD_CHANGED`
+- 角色管理：`ROLE_CREATED`、`ROLE_UPDATED`、`ROLE_PERMISSIONS_UPDATED`、`ROLE_DELETED`
+- 用户管理：`USER_CREATED`、`USER_ROLES_UPDATED`、`USER_ENABLED`、`USER_DISABLED`、`USER_PASSWORD_RESET`、`USER_DELETED`
+
+`detail` 字段常见结构：
+- 登录地理信息：`detail.login_ip`、`detail.login_city`
+- 会话信息：`detail.sid`、`detail.active_sid`、`detail.kicked_sid`、`detail.force_login`、`detail.reason`
+- 变更前后对比：`detail.before`、`detail.after`
+- 其他上下文：例如 `roles`、`used_default_password`、`name` 等
 
 建议索引（当前代码未统一创建，建议补齐）：
 - `(created_at)`
 - `(operator, created_at)`
 - `(event, created_at)`
 
-### 9.6 关系与读取路径说明
+### 9.6 `auth_sessions` - 登录会话记录
+
+用途：记录用户会话生命周期，用于在线会话、登录历史、登出时间与会话时长查询。
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `username` | `String` | 用户名 |
+| `sid` | `String` | 会话ID（JWT内嵌） |
+| `status` | `String` | 会话状态：`active/logout/kicked/expired` |
+| `login_at` | `String(DateTime ISO)` | 登录时间 |
+| `logout_at` | `String(DateTime ISO)` | 登出/失效时间 |
+| `duration_seconds` | `Number` | 会话时长（秒） |
+| `login_ip` | `String` | 登录 IP |
+| `login_city` | `String` | 登录城市（IP2Region 解析） |
+| `logout_reason` | `String` | 下线原因（如 `user_logout/force_login/token_expired/idle_timeout`） |
+| `expires_at` | `String(DateTime ISO)` | 会话过期时间 |
+| `last_seen_at` | `String(DateTime ISO)` | 最近活跃时间（心跳刷新） |
+| `created_at` | `String(DateTime ISO)` | 创建时间 |
+| `updated_at` | `String(DateTime ISO)` | 更新时间 |
+
+索引（已在代码中创建）：
+- `(username, status)`
+- `(sid)` 唯一
+- `(expires_at)`
+- `(login_at)`
+
+### 9.7 关系与读取路径说明
 
 1. 登录后前端调用 `/api/v1/auth/me`，后端按 `users.roles -> auth_roles.permissions` 聚合权限码。  
 2. 前端路由、菜单与按钮按权限码做 `view/edit` 前置控制。  

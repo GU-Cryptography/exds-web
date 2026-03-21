@@ -23,6 +23,9 @@ from webapp.scheduler.jobs.settlement_jobs import (
 from webapp.scheduler.jobs.characteristics_jobs import (
     event_driven_characteristics_analysis_job
 )
+from webapp.scheduler.jobs.auth_jobs import (
+    event_driven_auth_session_cleanup_job
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +97,15 @@ def setup_scheduler(app):
         'interval',
         minutes=15,
         id='web_event_characteristics_analysis',
+        replace_existing=True
+    )
+
+    # 认证会话清理 (每2分钟清理超时/过期会话)
+    scheduler.add_job(
+        event_driven_auth_session_cleanup_job,
+        'interval',
+        minutes=2,
+        id='web_event_auth_session_cleanup',
         replace_existing=True
     )
     

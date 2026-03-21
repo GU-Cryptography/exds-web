@@ -4,7 +4,7 @@
 路径前缀：/api/v1/auth
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import List, Optional
 
 from bson import ObjectId
@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from webapp.tools.mongo import DATABASE as db, get_config
 from webapp.tools.security import (
     get_current_active_user, get_password_hash, validate_password_strength, verify_password,
-    IDLE_TIMEOUT_MINUTES, User
+    IDLE_TIMEOUT_MINUTES, User, close_session, get_current_token_data, ensure_auth_session_indexes
 )
 from webapp.models.auth import (
     CurrentUserContext, UserInfo, Permission, Role,
@@ -45,7 +45,7 @@ def _write_audit_log(event: str, operator: str, target: Optional[str] = None,
             "operator": operator,
             "target": target,
             "detail": detail or {},
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now().isoformat(),
         })
     except Exception as e:
         logger.error(f"审计日志写入失败: {e}")
@@ -114,11 +114,23 @@ async def change_my_password(
         {"$set": {
             "hashed_password": get_password_hash(body.new_password),
             "must_change_password": False,
-            "password_changed_at": datetime.now(timezone.utc).isoformat(),
+            "password_changed_at": datetime.now().isoformat(),
         }}
     )
     _write_audit_log("SELF_PASSWORD_CHANGED", current_user.username, current_user.username)
     return {"message": "密码修改成功"}
+
+
+@router.post("/logout", summary="当前用户主动登出")
+async def logout_me(
+    current_user: User = Depends(get_current_active_user),
+    token_data = Depends(get_current_token_data),
+):
+    sid = token_data.sid
+    if sid:
+        close_session(sid, status="logout", reason="user_logout")
+    _write_audit_log("AUTH_LOGOUT", current_user.username, current_user.username, {"sid": sid})
+    return {"message": "登出成功"}
 
 
 # ==================== 权限点管理 ====================
@@ -166,7 +178,7 @@ async def create_role(
         "permissions": body.permissions,
         "is_system": False,
         "is_active": True,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now().isoformat(),
     }
     db.auth_roles.insert_one(doc)
     _write_audit_log("ROLE_CREATED", ctx.username, body.code, {"name": body.name})
@@ -270,7 +282,7 @@ async def create_user(
         "roles": body.roles,
         "is_active": True,
         "must_change_password": True,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now().isoformat(),
     }
     db.users.insert_one(doc)
     _write_audit_log("USER_CREATED", ctx.username, body.username, {
@@ -330,7 +342,7 @@ async def reset_user_password(
     db.users.update_one({"username": username}, {"$set": {
         "hashed_password": get_password_hash(new_password),
         "must_change_password": True,
-        "password_changed_at": datetime.now(timezone.utc).isoformat(),
+        "password_changed_at": datetime.now().isoformat(),
     }})
     _write_audit_log("USER_PASSWORD_RESET", ctx.username, username, {
         "used_default_password": not bool((body.new_password or "").strip()),
@@ -389,3 +401,38 @@ async def get_audit_logs(
                 .skip(skip)
                 .limit(page_size))
     return {"total": total, "logs": docs}
+
+
+@router.get("/sessions", summary="查询登录会话记录")
+async def get_auth_sessions(
+    _: CurrentUserContext = Depends(require_permission("system:auth:manage")),
+    username: Optional[str] = None,
+    status_filter: Optional[str] = Query(None, alias="status"),
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+):
+    ensure_auth_session_indexes()
+
+    query = {}
+    if username:
+        query["username"] = username
+    if status_filter:
+        query["status"] = status_filter
+    if date_from or date_to:
+        query["login_at"] = {}
+        if date_from:
+            query["login_at"]["$gte"] = date_from
+        if date_to:
+            query["login_at"]["$lte"] = date_to + "T23:59:59"
+
+    skip = (page - 1) * page_size
+    total = db.auth_sessions.count_documents(query)
+    docs = list(
+        db.auth_sessions.find(query, {"_id": 0})
+        .sort("login_at", -1)
+        .skip(skip)
+        .limit(page_size)
+    )
+    return {"total": total, "sessions": docs}
