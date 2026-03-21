@@ -42,7 +42,7 @@ export const MobileSimpleLayout: React.FC = () => {
     const { openTabs, activeTabKey, removeTab } = useTabContext();
     const location = useLocation();
     const navigate = useNavigate();
-    const { displayName, email, logout, reloadUserInfo } = useAuth();
+    const { username, displayName, email, logout, reloadUserInfo } = useAuth();
     const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
     const [profileOpen, setProfileOpen] = useState(false);
     const [passwordOpen, setPasswordOpen] = useState(false);
@@ -303,6 +303,13 @@ export const MobileSimpleLayout: React.FC = () => {
                     <TextField
                         fullWidth
                         margin="dense"
+                        label="账户名称"
+                        value={username || ''}
+                        InputProps={{ readOnly: true }}
+                    />
+                    <TextField
+                        fullWidth
+                        margin="dense"
                         label="显示名称"
                         value={profileDraft.display_name}
                         onChange={(e) => setProfileDraft((s) => ({ ...s, display_name: e.target.value }))}
@@ -324,6 +331,13 @@ export const MobileSimpleLayout: React.FC = () => {
             <Dialog open={passwordOpen} onClose={() => setPasswordOpen(false)} fullWidth maxWidth="xs">
                 <DialogTitle>修改密码</DialogTitle>
                 <DialogContent>
+                    <TextField
+                        fullWidth
+                        margin="dense"
+                        label="账户名称"
+                        value={username || ''}
+                        InputProps={{ readOnly: true }}
+                    />
                     <TextField
                         fullWidth
                         margin="dense"

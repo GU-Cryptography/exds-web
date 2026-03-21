@@ -396,6 +396,13 @@ export const DesktopTabLayout: React.FC = () => {
                         <TextField
                             fullWidth
                             margin="dense"
+                            label="账户名称"
+                            value={username || ''}
+                            InputProps={{ readOnly: true }}
+                        />
+                        <TextField
+                            fullWidth
+                            margin="dense"
                             label="显示名称"
                             value={profileDraft.display_name}
                             onChange={(e) => setProfileDraft((s) => ({ ...s, display_name: e.target.value }))}
@@ -417,6 +424,13 @@ export const DesktopTabLayout: React.FC = () => {
                 <Dialog open={passwordOpen} onClose={() => setPasswordOpen(false)} fullWidth maxWidth="xs">
                     <DialogTitle>修改密码</DialogTitle>
                     <DialogContent>
+                        <TextField
+                            fullWidth
+                            margin="dense"
+                            label="账户名称"
+                            value={username || ''}
+                            InputProps={{ readOnly: true }}
+                        />
                         <TextField
                             fullWidth
                             margin="dense"

@@ -65,7 +65,15 @@ apiClient.interceptors.response.use(
         }
 
         if (error.response) {
+            const requestPath = normalizeRequestPath(error.config?.url || '');
+            const requestMethod = (error.config?.method || 'get').toLowerCase();
+            const isLogin401 = error.response.status === 401
+                && requestMethod === 'post'
+                && requestPath === '/api/v1/token';
             if (error.response.status === 401) {
+                if (isLogin401) {
+                    return Promise.reject(error);
+                }
                 console.warn('收到 401 响应，会话已失效');
                 localStorage.removeItem(AUTH_STORAGE_KEYS.token);
                 localStorage.removeItem(AUTH_STORAGE_KEYS.permissions);

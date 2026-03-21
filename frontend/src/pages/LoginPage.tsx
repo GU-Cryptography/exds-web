@@ -65,6 +65,20 @@ const LoginPage: React.FC = () => {
         } catch (err) {
             if (err instanceof AxiosError && err.response?.status === 401) {
                 setError('用户名或密码错误');
+            } else if (
+                err instanceof AxiosError
+                && (err.response?.status === 423
+                    || (err.response?.status === 403 && err.response?.data?.detail?.code === 'ACCOUNT_LOCKED'))
+            ) {
+                const detail = err.response?.data?.detail;
+                const detailMessage = typeof detail === 'object' ? detail?.message : '';
+                const remainingSeconds = typeof detail === 'object' ? Number(detail?.remaining_seconds || 0) : 0;
+                if (remainingSeconds > 0) {
+                    const minutes = Math.ceil(remainingSeconds / 60);
+                    setError(`账号已临时锁定，请约 ${minutes} 分钟后重试`);
+                } else {
+                    setError(detailMessage || '账号已临时锁定，请稍后重试');
+                }
             } else if (err instanceof AxiosError && err.response?.status === 429) {
                 const detail = err.response?.data?.detail;
                 const detailText = typeof detail === 'string' ? detail : '';

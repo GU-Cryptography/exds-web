@@ -9,7 +9,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from webapp.tools.mongo import DATABASE as db
+from webapp.tools.mongo import DATABASE as db, get_config
 from webapp.tools.ip_region import resolve_ip_city
 from webapp.tools.logging_config import configure_logging
 from webapp.api import v1
@@ -38,6 +38,10 @@ configure_logging()
 
 def _now_local_iso() -> str:
     return datetime.now().isoformat()
+
+
+LOGIN_MAX_FAILED_ATTEMPTS = int(get_config("AUTH", "login_max_failed_attempts", "5"))
+LOGIN_LOCK_MINUTES = int(get_config("AUTH", "login_lock_minutes", "15"))
 
 def get_real_ip(request: Request) -> str:
     if "x-forwarded-for" in request.headers:
@@ -95,6 +99,78 @@ def _build_login_geo_detail(request: Request) -> dict:
         "login_city": resolve_ip_city(login_ip),
     }
 
+
+def _parse_local_iso(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone().replace(tzinfo=None)
+        return dt
+    except Exception:
+        return None
+
+
+def _check_locked_user(username: str):
+    now = datetime.now()
+    user_doc = db.users.find_one(
+        {"username": username},
+        {"username": 1, "is_active": 1, "login_failed_count": 1, "login_locked_until": 1},
+    )
+    if not user_doc or not user_doc.get("is_active", True):
+        return user_doc, None
+
+    locked_until_raw = user_doc.get("login_locked_until")
+    locked_until_dt = _parse_local_iso(locked_until_raw if isinstance(locked_until_raw, str) else None)
+    if locked_until_dt and now < locked_until_dt:
+        remaining_seconds = max(1, int((locked_until_dt - now).total_seconds()))
+        return user_doc, {
+            "locked": True,
+            "locked_until": locked_until_dt.isoformat(),
+            "remaining_seconds": remaining_seconds,
+        }
+
+    if locked_until_dt and now >= locked_until_dt:
+        db.users.update_one(
+            {"username": username},
+            {"$unset": {"login_locked_until": ""}, "$set": {"login_failed_count": 0}},
+        )
+
+    return user_doc, None
+
+
+def _register_login_failed(username: str) -> dict:
+    now = datetime.now()
+    user_doc = db.users.find_one(
+        {"username": username},
+        {"username": 1, "is_active": 1, "login_failed_count": 1},
+    )
+    if not user_doc or not user_doc.get("is_active", True):
+        return {"tracked": False}
+
+    old_count = int(user_doc.get("login_failed_count", 0) or 0)
+    new_count = old_count + 1
+    update_fields = {
+        "login_failed_count": new_count,
+        "last_login_failed_at": now.isoformat(),
+    }
+    locked = False
+    locked_until = None
+    if new_count >= max(1, LOGIN_MAX_FAILED_ATTEMPTS):
+        locked = True
+        locked_until_dt = now + timedelta(minutes=max(1, LOGIN_LOCK_MINUTES))
+        locked_until = locked_until_dt.isoformat()
+        update_fields["login_locked_until"] = locked_until
+
+    db.users.update_one({"username": username}, {"$set": update_fields})
+    return {
+        "tracked": True,
+        "failed_count": new_count,
+        "locked": locked,
+        "locked_until": locked_until,
+    }
+
 @app.post("/api/v1/token", response_model=Token, tags=["Authentication"])
 @limiter.limit("5/minute")
 async def login_for_access_token(
@@ -102,15 +178,57 @@ async def login_for_access_token(
     force: bool = False,
     form_data: OAuth2PasswordRequestForm = Depends()
 ):
+    geo_detail = _build_login_geo_detail(request)
+    _, lock_state = _check_locked_user(form_data.username)
+    if lock_state:
+        _write_auth_audit_log(
+            event="AUTH_LOGIN_BLOCKED_LOCKED",
+            operator=form_data.username,
+            target=form_data.username,
+            detail={
+                **geo_detail,
+                **lock_state,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail={
+                "code": "ACCOUNT_LOCKED",
+                "message": "密码连续输入错误，账号已被临时锁定，请稍后重试",
+                **lock_state,
+            },
+        )
+
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
-        geo_detail = _build_login_geo_detail(request)
+        fail_state = _register_login_failed(form_data.username)
         _write_auth_audit_log(
             event="AUTH_LOGIN_FAILED",
             operator=form_data.username,
             target=form_data.username,
-            detail=geo_detail,
+            detail={
+                **geo_detail,
+                **fail_state,
+            },
         )
+        if fail_state.get("locked"):
+            _write_auth_audit_log(
+                event="AUTH_LOGIN_LOCKED",
+                operator=form_data.username,
+                target=form_data.username,
+                detail={
+                    **geo_detail,
+                    **fail_state,
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail={
+                    "code": "ACCOUNT_LOCKED",
+                    "message": "密码连续输入错误，账号已被临时锁定，请稍后重试",
+                    "locked_until": fail_state.get("locked_until"),
+                },
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -122,7 +240,6 @@ async def login_for_access_token(
 
     active_session = find_active_session(user.username)
     if active_session and not force:
-        geo_detail = _build_login_geo_detail(request)
         _write_auth_audit_log(
             event="AUTH_LOGIN_CONFLICT",
             operator=user.username,
@@ -142,7 +259,6 @@ async def login_for_access_token(
 
     if force:
         kicked_sid = active_session.get("sid") if active_session else None
-        geo_detail = _build_login_geo_detail(request)
         kick_active_sessions(user.username, reason="force_login")
         _write_auth_audit_log(
             event="AUTH_SESSION_KICKED",
@@ -156,7 +272,6 @@ async def login_for_access_token(
         )
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    geo_detail = _build_login_geo_detail(request)
     sid = None
     for _ in range(2):
         try:
@@ -186,7 +301,10 @@ async def login_for_access_token(
 
     db.users.update_one(
         {"username": user.username},
-        {"$set": {"current_session_sid": sid}}
+        {
+            "$set": {"current_session_sid": sid, "login_failed_count": 0},
+            "$unset": {"login_locked_until": "", "last_login_failed_at": ""},
+        }
     )
     enforce_single_active_session(user.username, sid)
     access_token = create_access_token(
