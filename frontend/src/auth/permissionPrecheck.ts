@@ -5,6 +5,7 @@ export interface PermissionSnapshot {
 
 export const AUTH_STORAGE_KEYS = {
     token: 'token',
+    challengeToken: 'security_challenge_token',
     permissions: 'auth_permissions',
     isSuperAdmin: 'auth_is_super_admin',
 } as const;

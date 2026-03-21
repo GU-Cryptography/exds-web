@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from pymongo.errors import DuplicateKeyError
@@ -21,9 +22,11 @@ from webapp.tools.security import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     authenticate_user,
     cleanup_stale_active_sessions,
+    create_security_challenge,
     create_access_token,
     create_auth_session,
     ensure_auth_session_indexes,
+    get_required_security_actions,
     enforce_single_active_session,
     find_active_session,
     get_current_active_user,
@@ -171,7 +174,7 @@ def _register_login_failed(username: str) -> dict:
         "locked_until": locked_until,
     }
 
-@app.post("/api/v1/token", response_model=Token, tags=["Authentication"])
+@app.post("/api/v1/token", tags=["Authentication"])
 @limiter.limit("5/minute")
 async def login_for_access_token(
     request: Request,
@@ -233,6 +236,41 @@ async def login_for_access_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user_doc = db.users.find_one(
+        {"username": user.username},
+        {
+            "username": 1,
+            "must_change_password": 1,
+            "email": 1,
+            "email_verified": 1,
+        },
+    ) or {}
+    required_actions = get_required_security_actions(user_doc)
+    if required_actions:
+        challenge_token = create_security_challenge(
+            user.username,
+            required_actions,
+            login_ip=geo_detail.get("login_ip"),
+            login_city=geo_detail.get("login_city"),
+        )
+        _write_auth_audit_log(
+            event="AUTH_REQUIRED_ACTIONS_TRIGGERED",
+            operator=user.username,
+            target=user.username,
+            detail={
+                "required_actions": required_actions,
+                **geo_detail,
+            },
+        )
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "challenge_token": challenge_token,
+                "required_actions": required_actions,
+                "token_type": "challenge",
+            },
         )
 
     ensure_auth_session_indexes()

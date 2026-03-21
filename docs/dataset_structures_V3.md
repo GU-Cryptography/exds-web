@@ -431,12 +431,14 @@
 
 ---
 
-## 9. 用户权限与认证数据集（1.1）
+## 9. 用户权限与认证数据集（1.2）
 
-本章节补充用户权限管理 1.1 相关的数据集合结构，依据当前实现：
+本章节补充用户权限管理 1.2 相关的数据集合结构，依据当前实现：
 - `webapp/scripts/init_auth_data.py`
+- `webapp/main.py`
 - `webapp/api/v1_auth.py`
 - `webapp/models/auth.py`
+- `webapp/tools/security.py`
 
 ### 9.1 `auth_modules` - 模块字典
 
@@ -514,14 +516,19 @@
 | `hashed_password` | `String` | 加密密码 |
 | `display_name` | `String` | 显示名 |
 | `email` | `String` | 邮箱 |
+| `email_verified` | `Boolean` | 邮箱是否已验证 |
 | `roles` | `Array[String]` | 角色编码列表 |
 | `is_active` | `Boolean` | 是否启用 |
 | `must_change_password` | `Boolean` | 是否首次登录强制改密 |
 | `password_changed_at` | `String(DateTime ISO)` | 密码最近修改时间 |
+| `security_actions_completed_at` | `String(DateTime ISO) \| null` | 首登安全动作全部完成时间 |
 | `created_at` | `String(DateTime ISO)` | 创建时间 |
 | `updated_at` | `String(DateTime ISO)` | 更新时间 |
 | `last_active_at` | `String(DateTime ISO)` | 最后活跃时间 |
 | `current_session_sid` | `String` | 当前有效会话 SID（单账号互斥登录） |
+| `login_failed_count` | `Number` | 连续登录失败次数 |
+| `login_locked_until` | `String(DateTime ISO) \| null` | 临时锁定截止时间 |
+| `last_login_failed_at` | `String(DateTime ISO) \| null` | 最近一次登录失败时间 |
 
 索引（权限体系直接依赖）：
 - `username`（唯一）
@@ -541,7 +548,8 @@
 | `created_at` | `String(DateTime ISO)` | 记录时间 |
 
 当前已落地事件（代码已实现）：
-- 登录相关：`AUTH_LOGIN_FAILED`、`AUTH_LOGIN_CONFLICT`、`AUTH_SESSION_KICKED`、`AUTH_LOGIN_SUCCESS`
+- 登录相关：`AUTH_LOGIN_FAILED`、`AUTH_LOGIN_BLOCKED_LOCKED`、`AUTH_LOGIN_LOCKED`、`AUTH_LOGIN_CONFLICT`、`AUTH_SESSION_KICKED`、`AUTH_LOGIN_SUCCESS`
+- 首登安全相关：`AUTH_REQUIRED_ACTIONS_TRIGGERED`、`AUTH_PASSWORD_CHANGED_BY_REQUIRED_ACTION`、`AUTH_EMAIL_BIND_SENT`、`AUTH_EMAIL_VERIFIED`、`AUTH_REQUIRED_ACTIONS_COMPLETED`
 - 个人账号：`SELF_PROFILE_UPDATED`、`SELF_PASSWORD_CHANGED`
 - 角色管理：`ROLE_CREATED`、`ROLE_UPDATED`、`ROLE_PERMISSIONS_UPDATED`、`ROLE_DELETED`
 - 用户管理：`USER_CREATED`、`USER_ROLES_UPDATED`、`USER_ENABLED`、`USER_DISABLED`、`USER_PASSWORD_RESET`、`USER_DELETED`
@@ -583,12 +591,61 @@
 - `(expires_at)`
 - `(login_at)`
 
-### 9.7 关系与读取路径说明
+### 9.7 `auth_security_challenges` - 首登安全挑战会话
+
+用途：在账号密码校验通过但仍存在必做安全动作时，保存短期 challenge 会话；完成全部动作前，不创建正式业务会话。
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `cid` | `String` | challenge ID（唯一索引） |
+| `username` | `String` | 用户名 |
+| `required_actions` | `Array[String]` | 当前待完成动作列表，取值如 `CHANGE_PASSWORD/BIND_EMAIL/VERIFY_EMAIL` |
+| `status` | `String` | challenge 状态：`active/completed/expired/replaced/failed` |
+| `login_ip` | `String` | 触发 challenge 时的登录 IP |
+| `login_city` | `String` | 触发 challenge 时的登录城市 |
+| `created_at` | `String(DateTime ISO)` | 创建时间 |
+| `updated_at` | `String(DateTime ISO)` | 更新时间 |
+| `expires_at` | `String(DateTime ISO)` | challenge 过期时间 |
+| `invalidated_at` | `String(DateTime ISO)` | challenge 失效时间 |
+
+索引（已在代码中创建）：
+- `(cid)` 唯一
+- `(username, status, created_at)`
+- `(expires_at)`
+
+### 9.8 `auth_email_challenges` - 邮箱验证码挑战记录
+
+用途：保存首登邮箱绑定/验证流程中的验证码记录，验证码仅存哈希，不存明文。
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `_id` | `ObjectId` | 数据唯一 ID |
+| `challenge_id` | `String` | 验证码挑战ID（唯一索引） |
+| `username` | `String` | 用户名 |
+| `email` | `String` | 本次验证的邮箱 |
+| `code_hash` | `String` | 验证码哈希 |
+| `expire_at` | `String(DateTime ISO)` | 验证码过期时间 |
+| `used_at` | `String(DateTime ISO) \| null` | 验证码使用时间 |
+| `send_count` | `Number` | 当前验证码发送次数 |
+| `verify_failed_count` | `Number` | 当前验证码校验失败次数 |
+| `last_sent_at` | `String(DateTime ISO)` | 最近一次发送时间 |
+| `request_ip` | `String` | 请求来源 IP |
+| `created_at` | `String(DateTime ISO)` | 创建时间 |
+| `updated_at` | `String(DateTime ISO)` | 更新时间 |
+
+索引（已在代码中创建）：
+- `(challenge_id)` 唯一
+- `(username, email, used_at, expire_at)`
+
+### 9.9 关系与读取路径说明
 
 1. 登录后前端调用 `/api/v1/auth/me`，后端按 `users.roles -> auth_roles.permissions` 聚合权限码。  
 2. 前端路由、菜单与按钮按权限码做 `view/edit` 前置控制。  
 3. 后端写接口使用 `require_permission(...)` 做最终兜底。  
-4. 角色权限变更后，用户下次请求 `auth/me` 即可获取最新权限快照。
+4. 若 `/api/v1/token` 发现 `users.must_change_password=true`、`email` 为空或 `email_verified=false`，则先创建 `auth_security_challenges`，返回 `challenge_token + required_actions`。  
+5. 首登安全页通过 `/api/v1/auth/security/*` 推进动作；邮箱验证码明细写入 `auth_email_challenges`。  
+6. 全部安全动作完成后，后端才创建 `auth_sessions` 并回写 `users.security_actions_completed_at/current_session_sid`。  
+7. 角色权限变更后，用户下次请求 `auth/me` 即可获取最新权限快照。
 
 
 

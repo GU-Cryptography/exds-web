@@ -15,9 +15,28 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import List, Optional
 
-from webapp.tools.mongo import get_config
+from webapp.tools.mongo import config_path, get_config
+import configparser
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_email_config_section() -> str:
+    """
+    邮件配置兼容段名：
+    1. 优先使用 [ALERT]
+    2. 若不存在，则回退到历史使用的 [NOTIFICATION]
+    """
+    try:
+        config = configparser.ConfigParser()
+        config.read(config_path, encoding="utf-8")
+        if config.has_section("ALERT"):
+            return "ALERT"
+        if config.has_section("NOTIFICATION"):
+            return "NOTIFICATION"
+    except Exception:
+        pass
+    return "ALERT"
 
 
 def _to_bool(value: str, default: bool = False) -> bool:
@@ -50,7 +69,7 @@ def load_email_settings() -> EmailSettings:
     """
     从 config.ini 读取邮件配置。
 
-    约定使用 [ALERT] 段（兼容你当前配置项）：
+    约定优先使用 [ALERT] 段，兼容历史 [NOTIFICATION] 段：
     - email_enabled
     - smtp_server
     - smtp_port
@@ -61,15 +80,16 @@ def load_email_settings() -> EmailSettings:
     - smtp_use_tls（可选，默认 false）
     - smtp_timeout_seconds（可选，默认 10）
     """
-    enabled = _to_bool(get_config("ALERT", "email_enabled", "false"), default=False)
-    smtp_server = str(get_config("ALERT", "smtp_server", "") or "").strip()
-    smtp_port = int(str(get_config("ALERT", "smtp_port", "465") or "465").strip())
-    sender_email = str(get_config("ALERT", "sender_email", "") or "").strip()
-    sender_password = str(get_config("ALERT", "sender_password", "") or "").strip()
-    recipients = _split_emails(str(get_config("ALERT", "recipient_emails", "") or ""))
-    use_ssl = _to_bool(get_config("ALERT", "smtp_use_ssl", "true"), default=True)
-    use_tls = _to_bool(get_config("ALERT", "smtp_use_tls", "false"), default=False)
-    timeout_seconds = int(str(get_config("ALERT", "smtp_timeout_seconds", "10") or "10").strip())
+    section = _resolve_email_config_section()
+    enabled = _to_bool(get_config(section, "email_enabled", "false"), default=False)
+    smtp_server = str(get_config(section, "smtp_server", "") or "").strip()
+    smtp_port = int(str(get_config(section, "smtp_port", "465") or "465").strip())
+    sender_email = str(get_config(section, "sender_email", "") or "").strip()
+    sender_password = str(get_config(section, "sender_password", "") or "").strip()
+    recipients = _split_emails(str(get_config(section, "recipient_emails", "") or ""))
+    use_ssl = _to_bool(get_config(section, "smtp_use_ssl", "true"), default=True)
+    use_tls = _to_bool(get_config(section, "smtp_use_tls", "false"), default=False)
+    timeout_seconds = int(str(get_config(section, "smtp_timeout_seconds", "10") or "10").strip())
 
     return EmailSettings(
         enabled=enabled,
@@ -155,4 +175,3 @@ def send_email(
     except Exception as exc:
         logger.error("邮件发送失败：subject=%s recipients=%s error=%s", subject, to_list, exc)
         return False
-

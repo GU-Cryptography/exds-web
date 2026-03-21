@@ -69,3 +69,4 @@ router.include_router(v1_auth.router)  # 认证与授权管理
 
 # Include public routers
 public_router.include_router(v1_sgcc_price.public_router)
+public_router.include_router(v1_auth.public_router)

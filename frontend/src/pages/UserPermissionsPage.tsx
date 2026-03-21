@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle,
-  Divider, Drawer, FormControl, Grid, IconButton, InputLabel, List, ListItemButton, ListItemText, Menu,
+  Alert, Box, Button, Checkbox, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle,
+  Divider, Drawer, FormControl, FormControlLabel, Grid, IconButton, InputLabel, List, ListItemButton, ListItemText, Menu,
   MenuItem, Paper, Select, SelectChangeEvent, Stack, Switch, Table, TableBody, TableCell,
   TableContainer, TableHead, TablePagination, TableRow, TextField, Tooltip, Typography, useMediaQuery,
 } from '@mui/material';
@@ -49,7 +49,14 @@ const EXCEPTION_PERMISSION_CODES = [
 ];
 
 type RoleDraft = { code: string; name: string; description: string };
-type UserDraft = { username: string; password: string; display_name: string; email: string; roles: string[] };
+type UserDraft = {
+  username: string;
+  password: string;
+  display_name: string;
+  email: string;
+  require_email_verification: boolean;
+  roles: string[];
+};
 
 const UserPermissionsPage: React.FC = () => {
   const { hasPermission } = useAuth();
@@ -86,7 +93,14 @@ const UserPermissionsPage: React.FC = () => {
 
   const [roleDraft, setRoleDraft] = useState<RoleDraft>({ code: '', name: '', description: '' });
   const [editRoleDraft, setEditRoleDraft] = useState({ name: '', description: '' });
-  const [userDraft, setUserDraft] = useState<UserDraft>({ username: '', password: '', display_name: '', email: '', roles: [] });
+  const [userDraft, setUserDraft] = useState<UserDraft>({
+    username: '',
+    password: '',
+    display_name: '',
+    email: '',
+    require_email_verification: true,
+    roles: [],
+  });
   const [assignRoles, setAssignRoles] = useState<string[]>([]);
   const [targetUser, setTargetUser] = useState<AuthUser | null>(null);
   const [newPassword, setNewPassword] = useState('');
@@ -297,7 +311,14 @@ const UserPermissionsPage: React.FC = () => {
       });
       setMessage('用户创建成功');
       setCreateUserOpen(false);
-      setUserDraft({ username: '', password: '', display_name: '', email: '', roles: [] });
+      setUserDraft({
+        username: '',
+        password: '',
+        display_name: '',
+        email: '',
+        require_email_verification: true,
+        roles: [],
+      });
       await loadUsers();
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || '创建用户失败');
@@ -504,6 +525,11 @@ const UserPermissionsPage: React.FC = () => {
                       <TableCell>
                         <Typography variant="body2" fontWeight={600}>{u.username}</Typography>
                         <Typography variant="caption" color="text.secondary">{u.display_name || '-'}</Typography>
+                        {!isMobile && (
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            {u.email ? `${u.email} · ${u.email_verified ? '邮箱已验证' : '邮箱待验证'}` : '未绑定邮箱'}
+                          </Typography>
+                        )}
                         {isMobile && (
                           <Typography
                             variant="caption"
@@ -511,7 +537,10 @@ const UserPermissionsPage: React.FC = () => {
                             display="block"
                             sx={{ mt: 0.25, wordBreak: 'break-all', whiteSpace: 'normal' }}
                           >
-                            {(u.roles || []).join(', ') || '-'}
+                            {[
+                              (u.roles || []).join(', ') || '-',
+                              u.email ? (u.email_verified ? '邮箱已验证' : '邮箱待验证') : '未绑定邮箱',
+                            ].join(' · ')}
                           </Typography>
                         )}
                       </TableCell>
@@ -706,6 +735,18 @@ const UserPermissionsPage: React.FC = () => {
             />
             <TextField label="显示名" value={userDraft.display_name} onChange={(e) => setUserDraft((s) => ({ ...s, display_name: e.target.value }))} />
             <TextField label="邮箱" value={userDraft.email} onChange={(e) => setUserDraft((s) => ({ ...s, email: e.target.value }))} />
+            <FormControlLabel
+              control={(
+                <Checkbox
+                  checked={userDraft.require_email_verification}
+                  onChange={(e) => setUserDraft((s) => ({ ...s, require_email_verification: e.target.checked }))}
+                />
+              )}
+              label="首次登录要求邮箱验证"
+            />
+            <Typography variant="caption" color="text.secondary">
+              默认选中。若未填写邮箱，后续安全流程仍需先绑定邮箱。
+            </Typography>
             <FormControl fullWidth>
               <InputLabel id="create-user-role-select">角色（单选）</InputLabel>
               <Select

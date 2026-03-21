@@ -4,22 +4,33 @@
 路径前缀：/api/v1/auth
 """
 import logging
-from datetime import datetime
+import random
+import re
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pymongo.errors import DuplicateKeyError
 
 from webapp.tools.mongo import DATABASE as db, get_config
+from webapp.tools.ip_region import resolve_ip_city
+from webapp.tools.notification import send_email
 from webapp.tools.security import (
     get_current_active_user, get_password_hash, validate_password_strength, verify_password,
-    IDLE_TIMEOUT_MINUTES, User, close_session, get_current_token_data, ensure_auth_session_indexes
+    IDLE_TIMEOUT_MINUTES, User, close_session, get_current_token_data, ensure_auth_session_indexes,
+    ACCESS_TOKEN_EXPIRE_MINUTES, cleanup_stale_active_sessions, close_security_challenge,
+    create_access_token, create_auth_session, ensure_auth_security_indexes, enforce_single_active_session,
+    find_active_session, get_required_security_actions, get_security_challenge_by_token,
+    hash_verification_code, kick_active_sessions,
 )
 from webapp.models.auth import (
     CurrentUserContext, UserInfo, Permission, Role,
     CreateUserRequest, UpdateUserRolesRequest, UpdateUserStatusRequest,
     ResetPasswordRequest, CreateRoleRequest, UpdateRoleRequest,
     UpdateRolePermissionsRequest, UpdateMyProfileRequest, ChangeMyPasswordRequest,
+    ChallengeTokenRequest, SecurityBindEmailRequest, SecurityChangePasswordRequest,
+    SecurityCompleteRequest, SecurityVerifyEmailRequest,
 )
 from webapp.api.dependencies.authz import (
     get_current_user_context, require_permission, require_any_permission
@@ -28,6 +39,13 @@ from webapp.api.dependencies.authz import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["认证与授权"])
+public_router = APIRouter(prefix="/auth", tags=["认证与授权-公开"])
+
+EMAIL_CODE_EXPIRE_MINUTES = int(get_config("AUTH", "email_code_expire_minutes", "10"))
+EMAIL_CODE_SEND_INTERVAL_SECONDS = int(get_config("AUTH", "email_code_send_interval_seconds", "60"))
+EMAIL_CODE_MAX_SEND_COUNT = int(get_config("AUTH", "email_code_max_send_count", "5"))
+EMAIL_CODE_MAX_VERIFY_ATTEMPTS = int(get_config("AUTH", "email_code_max_verify_attempts", "5"))
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def _get_default_user_password() -> str:
@@ -49,6 +67,164 @@ def _write_audit_log(event: str, operator: str, target: Optional[str] = None,
         })
     except Exception as e:
         logger.error(f"审计日志写入失败: {e}")
+
+
+def _get_real_ip(request: Request) -> str:
+    if "x-forwarded-for" in request.headers:
+        return request.headers["x-forwarded-for"].split(",")[0].strip()
+    return (request.client.host if request.client else "") or ""
+
+
+def _build_request_geo_detail(request: Request) -> dict:
+    login_ip = _get_real_ip(request)
+    return {
+        "login_ip": login_ip,
+        "login_city": resolve_ip_city(login_ip) if login_ip else None,
+    }
+
+
+def _build_security_status(user_doc: dict, required_actions: List[str]) -> dict:
+    return {
+        "username": user_doc.get("username"),
+        "display_name": user_doc.get("display_name"),
+        "email": user_doc.get("email"),
+        "email_verified": bool(user_doc.get("email_verified")),
+        "required_actions": required_actions,
+    }
+
+
+def _load_challenge_user(challenge_token: str) -> tuple[dict, dict]:
+    challenge_doc = get_security_challenge_by_token(challenge_token)
+    user_doc = db.users.find_one({"username": challenge_doc.get("username")})
+    if not user_doc:
+        close_security_challenge(challenge_doc.get("cid"), status_value="failed")
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return challenge_doc, user_doc
+
+
+def _validate_email_address(email: str) -> str:
+    value = (email or "").strip()
+    if not value:
+        raise HTTPException(status_code=400, detail="请输入邮箱地址")
+    if not EMAIL_PATTERN.match(value):
+        raise HTTPException(status_code=400, detail="邮箱格式不正确")
+    return value
+
+
+def _issue_email_verification_code(username: str, email: str, request_ip: str) -> dict:
+    ensure_auth_security_indexes()
+    now = datetime.now()
+    active_doc = db.auth_email_challenges.find_one(
+        {"username": username, "email": email, "used_at": None},
+        sort=[("created_at", -1)],
+    )
+    if active_doc:
+        last_sent_at = active_doc.get("last_sent_at")
+        if isinstance(last_sent_at, str):
+            try:
+                last_sent_dt = datetime.fromisoformat(last_sent_at)
+                if last_sent_dt.tzinfo is not None:
+                    last_sent_dt = last_sent_dt.astimezone().replace(tzinfo=None)
+                elapsed = (now - last_sent_dt).total_seconds()
+                if elapsed < max(1, EMAIL_CODE_SEND_INTERVAL_SECONDS):
+                    wait_seconds = max(1, int(EMAIL_CODE_SEND_INTERVAL_SECONDS - elapsed))
+                    raise HTTPException(status_code=429, detail=f"验证码发送过于频繁，请 {wait_seconds} 秒后再试")
+            except HTTPException:
+                raise
+            except Exception:
+                pass
+
+        send_count = int(active_doc.get("send_count", 0) or 0)
+        created_at_raw = active_doc.get("created_at")
+        if isinstance(created_at_raw, str):
+            try:
+                created_dt = datetime.fromisoformat(created_at_raw)
+                if created_dt.tzinfo is not None:
+                    created_dt = created_dt.astimezone().replace(tzinfo=None)
+                if (now - created_dt).total_seconds() < 3600 and send_count >= max(1, EMAIL_CODE_MAX_SEND_COUNT):
+                    raise HTTPException(status_code=429, detail="验证码发送次数过多，请稍后再试")
+            except HTTPException:
+                raise
+            except Exception:
+                pass
+
+    code = f"{random.randint(0, 999999):06d}"
+    challenge_id = ObjectId()
+    expire_at = now.replace(microsecond=0)
+    expire_at = expire_at + timedelta(minutes=max(5, EMAIL_CODE_EXPIRE_MINUTES))
+    send_count = 1 if not active_doc else int(active_doc.get("send_count", 0) or 0) + 1
+    doc = {
+        "_id": challenge_id,
+        "challenge_id": str(challenge_id),
+        "username": username,
+        "email": email,
+        "code_hash": hash_verification_code(code),
+        "expire_at": expire_at.isoformat(),
+        "used_at": None,
+        "send_count": send_count,
+        "verify_failed_count": 0,
+        "last_sent_at": now.isoformat(),
+        "request_ip": request_ip,
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+    }
+    if active_doc:
+        update_doc = {k: v for k, v in doc.items() if k != "_id"}
+        update_doc["challenge_id"] = active_doc.get("challenge_id") or str(active_doc["_id"])
+        db.auth_email_challenges.update_one(
+            {"_id": active_doc["_id"]},
+            {"$set": update_doc},
+        )
+        doc["challenge_id"] = active_doc.get("challenge_id") or str(active_doc["_id"])
+    else:
+        db.auth_email_challenges.insert_one(doc)
+
+    subject = "电力交易辅助分析系统邮箱验证码"
+    body = (
+        f"您的邮箱验证码为：{code}\n"
+        f"有效期 {max(5, EMAIL_CODE_EXPIRE_MINUTES)} 分钟。\n"
+        "如非本人操作，请忽略此邮件。"
+    )
+    if not send_email(subject=subject, body=body, recipients=[email]):
+        raise HTTPException(status_code=503, detail="验证码发送失败，请联系管理员检查邮件配置")
+
+    return {"email": email, "expire_at": expire_at.isoformat(), "send_count": send_count}
+
+
+def _verify_email_code(username: str, email: str, code: str) -> None:
+    now = datetime.now()
+    doc = db.auth_email_challenges.find_one(
+        {"username": username, "email": email, "used_at": None},
+        sort=[("created_at", -1)],
+    )
+    if not doc:
+        raise HTTPException(status_code=400, detail="请先获取邮箱验证码")
+
+    expire_at = doc.get("expire_at")
+    expire_dt = datetime.fromisoformat(expire_at) if isinstance(expire_at, str) else None
+    if expire_dt and expire_dt.tzinfo is not None:
+        expire_dt = expire_dt.astimezone().replace(tzinfo=None)
+    if expire_dt and now > expire_dt:
+        raise HTTPException(status_code=400, detail="验证码已过期，请重新发送")
+
+    failed_count = int(doc.get("verify_failed_count", 0) or 0)
+    if failed_count >= max(1, EMAIL_CODE_MAX_VERIFY_ATTEMPTS):
+        raise HTTPException(status_code=400, detail="验证码错误次数过多，请重新发送")
+
+    if hash_verification_code((code or "").strip()) != doc.get("code_hash"):
+        db.auth_email_challenges.update_one(
+            {"_id": doc["_id"]},
+            {"$set": {"verify_failed_count": failed_count + 1, "updated_at": now.isoformat()}},
+        )
+        remaining = max(0, EMAIL_CODE_MAX_VERIFY_ATTEMPTS - failed_count - 1)
+        if remaining > 0:
+            raise HTTPException(status_code=400, detail=f"验证码错误，还可重试 {remaining} 次")
+        raise HTTPException(status_code=400, detail="验证码错误次数过多，请重新发送")
+
+    db.auth_email_challenges.update_one(
+        {"_id": doc["_id"]},
+        {"$set": {"used_at": now.isoformat(), "updated_at": now.isoformat()}},
+    )
 
 
 
@@ -131,6 +307,196 @@ async def logout_me(
         close_session(sid, status="logout", reason="user_logout")
     _write_audit_log("AUTH_LOGOUT", current_user.username, current_user.username, {"sid": sid})
     return {"message": "登出成功"}
+
+
+@public_router.post("/security/status", summary="查询首登安全动作状态")
+async def get_security_status(body: ChallengeTokenRequest):
+    _, user_doc = _load_challenge_user(body.challenge_token)
+    required_actions = get_required_security_actions(user_doc)
+    return _build_security_status(user_doc, required_actions)
+
+
+@public_router.post("/security/change-password", summary="首登安全流程-修改密码")
+async def change_password_by_required_action(body: SecurityChangePasswordRequest):
+    challenge_doc, user_doc = _load_challenge_user(body.challenge_token)
+    is_valid, msg = validate_password_strength(body.new_password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=msg)
+    if verify_password(body.new_password, user_doc.get("hashed_password", "")):
+        raise HTTPException(status_code=400, detail="新密码不能与当前密码相同")
+
+    now = datetime.now().isoformat()
+    db.users.update_one(
+        {"username": user_doc["username"]},
+        {"$set": {
+            "hashed_password": get_password_hash(body.new_password),
+            "must_change_password": False,
+            "password_changed_at": now,
+            "updated_at": now,
+            "security_actions_completed_at": None,
+        }},
+    )
+    updated_user = db.users.find_one({"username": user_doc["username"]}) or user_doc
+    required_actions = get_required_security_actions(updated_user)
+    _write_audit_log(
+        "AUTH_PASSWORD_CHANGED_BY_REQUIRED_ACTION",
+        updated_user["username"],
+        updated_user["username"],
+        {"required_actions": required_actions, "challenge_id": challenge_doc.get("cid")},
+    )
+    return {
+        "message": "密码修改成功",
+        **_build_security_status(updated_user, required_actions),
+    }
+
+
+@public_router.post("/security/bind-email", summary="首登安全流程-绑定邮箱并发送验证码")
+async def bind_email_by_required_action(body: SecurityBindEmailRequest, request: Request):
+    challenge_doc, user_doc = _load_challenge_user(body.challenge_token)
+    email = _validate_email_address(body.email)
+    request_ip = _get_real_ip(request)
+    now = datetime.now().isoformat()
+    db.users.update_one(
+        {"username": user_doc["username"]},
+        {"$set": {
+            "email": email,
+            "email_verified": False,
+            "updated_at": now,
+            "security_actions_completed_at": None,
+        }},
+    )
+    send_result = _issue_email_verification_code(user_doc["username"], email, request_ip)
+    updated_user = db.users.find_one({"username": user_doc["username"]}) or user_doc
+    required_actions = get_required_security_actions(updated_user)
+    _write_audit_log(
+        "AUTH_EMAIL_BIND_SENT",
+        updated_user["username"],
+        updated_user["username"],
+        {
+            "email": email,
+            "challenge_id": challenge_doc.get("cid"),
+            "expire_at": send_result.get("expire_at"),
+            "send_count": send_result.get("send_count"),
+            "request_ip": request_ip,
+        },
+    )
+    return {
+        "message": "验证码已发送，请查收邮箱",
+        **_build_security_status(updated_user, required_actions),
+    }
+
+
+@public_router.post("/security/verify-email", summary="首登安全流程-校验邮箱验证码")
+async def verify_email_by_required_action(body: SecurityVerifyEmailRequest):
+    challenge_doc, user_doc = _load_challenge_user(body.challenge_token)
+    email = _validate_email_address(str(user_doc.get("email") or ""))
+    code = (body.code or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="请输入邮箱验证码")
+
+    _verify_email_code(user_doc["username"], email, code)
+    now = datetime.now().isoformat()
+    db.users.update_one(
+        {"username": user_doc["username"]},
+        {"$set": {
+            "email_verified": True,
+            "updated_at": now,
+        }},
+    )
+    updated_user = db.users.find_one({"username": user_doc["username"]}) or user_doc
+    required_actions = get_required_security_actions(updated_user)
+    _write_audit_log(
+        "AUTH_EMAIL_VERIFIED",
+        updated_user["username"],
+        updated_user["username"],
+        {"email": email, "challenge_id": challenge_doc.get("cid")},
+    )
+    return {
+        "message": "邮箱验证成功",
+        **_build_security_status(updated_user, required_actions),
+    }
+
+
+@public_router.post("/security/complete", summary="首登安全流程完成后签发正式登录会话")
+async def complete_required_actions(
+    body: SecurityCompleteRequest,
+    request: Request,
+):
+    challenge_doc, user_doc = _load_challenge_user(body.challenge_token)
+    required_actions = get_required_security_actions(user_doc)
+    if required_actions:
+        raise HTTPException(status_code=400, detail={"message": "仍有未完成的安全动作", "required_actions": required_actions})
+
+    geo_detail = _build_request_geo_detail(request)
+    ensure_auth_session_indexes()
+    cleanup_stale_active_sessions(user_doc["username"])
+
+    active_session = find_active_session(user_doc["username"])
+    if active_session and not body.force:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "LOGIN_CONFLICT",
+                "message": "账号已在其他会话登录，确认后将踢下线旧会话",
+            },
+        )
+
+    if body.force:
+        kick_active_sessions(user_doc["username"], reason="force_login")
+
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    sid = None
+    for _ in range(2):
+        try:
+            sid = create_auth_session(
+                user_doc["username"],
+                ACCESS_TOKEN_EXPIRE_MINUTES,
+                login_ip=geo_detail.get("login_ip"),
+                login_city=geo_detail.get("login_city"),
+            )
+            break
+        except DuplicateKeyError:
+            cleanup_stale_active_sessions(user_doc["username"])
+            if body.force:
+                kick_active_sessions(user_doc["username"], reason="force_login_retry")
+                continue
+            latest_active = find_active_session(user_doc["username"])
+            if latest_active:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "LOGIN_CONFLICT",
+                        "message": "账号已在其他会话登录，确认后将踢下线旧会话",
+                    },
+                )
+
+    if not sid:
+        raise HTTPException(status_code=503, detail="登录会话创建失败，请稍后重试")
+
+    now = datetime.now().isoformat()
+    db.users.update_one(
+        {"username": user_doc["username"]},
+        {"$set": {
+            "current_session_sid": sid,
+            "login_failed_count": 0,
+            "security_actions_completed_at": now,
+            "updated_at": now,
+        },
+        "$unset": {"login_locked_until": "", "last_login_failed_at": ""}},
+    )
+    enforce_single_active_session(user_doc["username"], sid)
+    close_security_challenge(challenge_doc.get("cid"), status_value="completed")
+    access_token = create_access_token(
+        data={"sub": user_doc["username"], "sid": sid},
+        expires_delta=access_token_expires,
+    )
+    _write_audit_log(
+        "AUTH_REQUIRED_ACTIONS_COMPLETED",
+        user_doc["username"],
+        user_doc["username"],
+        {"sid": sid, "challenge_id": challenge_doc.get("cid"), **geo_detail},
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
 # ==================== 权限点管理 ====================
@@ -283,15 +649,19 @@ async def create_user(
         "hashed_password": get_password_hash(password),
         "display_name": body.display_name,
         "email": body.email,
+        "email_verified": False if body.require_email_verification else bool(body.email),
         "roles": body.roles,
         "is_active": True,
         "must_change_password": True,
+        "security_actions_completed_at": None,
+        "password_changed_at": None,
         "created_at": datetime.now().isoformat(),
     }
     db.users.insert_one(doc)
     _write_audit_log("USER_CREATED", ctx.username, body.username, {
         "roles": body.roles,
         "used_default_password": not bool((body.password or "").strip()),
+        "require_email_verification": body.require_email_verification,
     })
     return {"message": "用户创建成功", "username": body.username}
 

@@ -112,6 +112,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             await notifyServerLogout(token);
         }
         removeToken();
+        localStorage.removeItem(AUTH_STORAGE_KEYS.challengeToken);
         clearPermissionSnapshot();
         setIsAuthenticated(false);
         setUsername(null);

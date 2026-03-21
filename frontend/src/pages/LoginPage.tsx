@@ -20,6 +20,7 @@ import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 import { login } from '../api/client'; // 导入真实的login API
 import { AxiosError } from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import { AUTH_STORAGE_KEYS } from '../auth/permissionPrecheck';
 
 const LoginPage: React.FC = () => {
     const navigate = useNavigate();
@@ -57,8 +58,12 @@ const LoginPage: React.FC = () => {
             const response = await login(username, password, force);
             if (response.data && response.data.access_token) {
                 // 使用 AuthContext 的 login 方法，它会自动处理 token 保存和定时器
-                authLogin(response.data.access_token);
+                localStorage.removeItem(AUTH_STORAGE_KEYS.challengeToken);
+                await authLogin(response.data.access_token);
                 navigate('/');
+            } else if (response.status === 202 && response.data?.challenge_token) {
+                localStorage.setItem(AUTH_STORAGE_KEYS.challengeToken, response.data.challenge_token);
+                navigate('/security-setup');
             } else {
                 throw new Error('Token not found in response');
             }

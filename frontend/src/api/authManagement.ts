@@ -36,6 +36,7 @@ export interface AuthUser {
     username: string;
     display_name?: string;
     email?: string;
+    email_verified?: boolean;
     roles: string[];
     is_active?: boolean;
     must_change_password?: boolean;
@@ -119,6 +120,7 @@ export async function createUser(payload: {
     password?: string;
     display_name?: string;
     email?: string;
+    require_email_verification?: boolean;
     roles: string[];
 }): Promise<void> {
     await apiClient.post('/api/v1/auth/users', payload);

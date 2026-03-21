@@ -2,6 +2,7 @@ import re
 import os
 import logging
 import uuid
+import hashlib
 from datetime import datetime, timedelta
 from typing import Optional, List
 
@@ -65,6 +66,7 @@ else:
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(get_config('JWT', 'access_token_expire_minutes', default_value='60'))
+SECURITY_CHALLENGE_EXPIRE_MINUTES = int(get_config('AUTH', 'security_challenge_expire_minutes', default_value='30'))
 
 # 无操作空闲超时（分钟），从配置读取，默认 30 分钟
 IDLE_TIMEOUT_MINUTES = int(get_config('AUTH', 'idle_timeout_minutes', default_value='30'))
@@ -83,6 +85,12 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     username: Optional[str] = None
     sid: Optional[str] = None  # 会话ID，阶段 1.5 预留
+
+
+class ChallengeTokenData(BaseModel):
+    username: Optional[str] = None
+    cid: Optional[str] = None
+    token_type: Optional[str] = None
 
 class User(BaseModel):
     username: str
@@ -135,6 +143,122 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+
+def create_challenge_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    expire = datetime.now() + (expires_delta or timedelta(minutes=SECURITY_CHALLENGE_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire, "token_type": "security_challenge"})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def decode_challenge_token(token: str) -> ChallengeTokenData:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        token_type = payload.get("token_type")
+        if token_type != "security_challenge":
+            raise ValueError("invalid token type")
+        username: str = payload.get("sub")
+        cid: str = payload.get("cid")
+        if not username or not cid:
+            raise ValueError("invalid token payload")
+        return ChallengeTokenData(username=username, cid=cid, token_type=token_type)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="安全验证凭证无效或已过期")
+
+
+def get_required_security_actions(user_doc: Optional[dict]) -> List[str]:
+    if not user_doc:
+        return []
+
+    actions: List[str] = []
+    if bool(user_doc.get("must_change_password")):
+        actions.append("CHANGE_PASSWORD")
+
+    email = str(user_doc.get("email") or "").strip()
+    email_verified = bool(user_doc.get("email_verified"))
+    if not email:
+        actions.append("BIND_EMAIL")
+    elif not email_verified:
+        actions.append("VERIFY_EMAIL")
+
+    return actions
+
+
+def ensure_auth_security_indexes():
+    db.auth_security_challenges.create_index([("cid", 1)], unique=True)
+    db.auth_security_challenges.create_index([("username", 1), ("status", 1), ("created_at", -1)])
+    db.auth_security_challenges.create_index([("expires_at", 1)])
+    db.auth_email_challenges.create_index([("challenge_id", 1)], unique=True)
+    db.auth_email_challenges.create_index([("username", 1), ("email", 1), ("used_at", 1), ("expire_at", -1)])
+
+
+def _challenge_now() -> datetime:
+    return datetime.now()
+
+
+def create_security_challenge(
+    username: str,
+    required_actions: List[str],
+    login_ip: Optional[str] = None,
+    login_city: Optional[str] = None,
+) -> str:
+    ensure_auth_security_indexes()
+    now = _challenge_now()
+    cid = uuid.uuid4().hex
+    expires_at = now + timedelta(minutes=max(5, SECURITY_CHALLENGE_EXPIRE_MINUTES))
+    db.auth_security_challenges.update_many(
+        {"username": username, "status": "active"},
+        {"$set": {"status": "replaced", "updated_at": now.isoformat(), "invalidated_at": now.isoformat()}},
+    )
+    db.auth_security_challenges.insert_one({
+        "cid": cid,
+        "username": username,
+        "required_actions": required_actions,
+        "status": "active",
+        "login_ip": login_ip,
+        "login_city": login_city,
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+        "expires_at": expires_at.isoformat(),
+    })
+    return create_challenge_token(
+        {"sub": username, "cid": cid},
+        expires_delta=timedelta(minutes=max(5, SECURITY_CHALLENGE_EXPIRE_MINUTES)),
+    )
+
+
+def get_security_challenge_by_token(token: str) -> dict:
+    token_data = decode_challenge_token(token)
+    doc = db.auth_security_challenges.find_one({"cid": token_data.cid, "username": token_data.username})
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="安全验证会话不存在")
+
+    if doc.get("status") != "active":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="安全验证会话已失效，请重新登录")
+
+    expires_at = _parse_iso_datetime(doc.get("expires_at"))
+    if expires_at and datetime.now() > expires_at:
+        db.auth_security_challenges.update_one(
+            {"_id": doc["_id"]},
+            {"$set": {"status": "expired", "updated_at": datetime.now().isoformat(), "invalidated_at": datetime.now().isoformat()}},
+        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="安全验证会话已过期，请重新登录")
+
+    return doc
+
+
+def close_security_challenge(cid: str, status_value: str = "completed"):
+    now = datetime.now().isoformat()
+    db.auth_security_challenges.update_one(
+        {"cid": cid},
+        {"$set": {"status": status_value, "updated_at": now, "invalidated_at": now}},
+    )
+
+
+def hash_verification_code(code: str) -> str:
+    payload = f"{SECRET_KEY}:{code}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:

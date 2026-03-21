@@ -340,6 +340,10 @@ def run() -> None:
             update_fields["must_change_password"] = False
         if "password_changed_at" not in user:
             update_fields["password_changed_at"] = now
+        if "email_verified" not in user:
+            update_fields["email_verified"] = bool(user.get("email"))
+        if "security_actions_completed_at" not in user:
+            update_fields["security_actions_completed_at"] = None
 
         roles_current = user.get("roles") or []
         if username == "admin":
@@ -368,6 +372,10 @@ def run() -> None:
     db.users.create_index("username", unique=True)
     db.users.create_index("roles")
     db.users.create_index("last_active_at")
+    db.auth_security_challenges.create_index("cid", unique=True)
+    db.auth_security_challenges.create_index([("username", 1), ("status", 1), ("created_at", -1)])
+    db.auth_email_challenges.create_index("challenge_id", unique=True)
+    db.auth_email_challenges.create_index([("username", 1), ("email", 1), ("used_at", 1), ("expire_at", -1)])
 
     logger.info("初始化完成。")
 

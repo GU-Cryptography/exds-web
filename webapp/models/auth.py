@@ -54,6 +54,7 @@ class CreateUserRequest(BaseModel):
     password: Optional[str] = None
     display_name: Optional[str] = None
     email: Optional[str] = None
+    require_email_verification: bool = True
     roles: List[str] = []
 
 class UpdateUserRolesRequest(BaseModel):
@@ -72,6 +73,26 @@ class UpdateMyProfileRequest(BaseModel):
 class ChangeMyPasswordRequest(BaseModel):
     old_password: str
     new_password: str
+
+
+class ChallengeTokenRequest(BaseModel):
+    challenge_token: str
+
+
+class SecurityChangePasswordRequest(ChallengeTokenRequest):
+    new_password: str
+
+
+class SecurityBindEmailRequest(ChallengeTokenRequest):
+    email: str
+
+
+class SecurityVerifyEmailRequest(ChallengeTokenRequest):
+    code: str
+
+
+class SecurityCompleteRequest(ChallengeTokenRequest):
+    force: bool = False
 
 class CreateRoleRequest(BaseModel):
     code: str

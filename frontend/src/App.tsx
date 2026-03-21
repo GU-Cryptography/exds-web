@@ -17,6 +17,7 @@ import theme from './theme';
 import { LoadAnalysisPage } from './pages/LoadAnalysisPage';
 import { SpotIntradayAnalysisPage } from './pages/SpotIntradayAnalysisPage';
 import LoginPage from './pages/LoginPage';
+import SecuritySetupPage from './pages/SecuritySetupPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import PlaceholderPage from './components/PlaceholderPage';
 import GridAgencyPricePage from './pages/GridAgencyPricePage';
@@ -160,6 +161,7 @@ function App() {
                         <Routes>
                             {/* 登录页面 */}
                             <Route path="/login" element={<LoginPage />} />
+                            <Route path="/security-setup" element={<SecuritySetupPage />} />
 
                             {/* 受保护的路由 */}
                             <Route element={<ProtectedRoute />}>
