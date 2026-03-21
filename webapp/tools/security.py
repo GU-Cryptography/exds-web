@@ -106,8 +106,31 @@ class UserInDB(User):
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # --- Database & Auth Functions ---
-def get_user(db_session, username: str):
-    user = db_session.users.find_one({"username": username})
+def _find_user_doc_for_login(db_session, identifier: str):
+    value = (identifier or "").strip()
+    if not value:
+        return None
+
+    user = db_session.users.find_one({"username": value})
+    if user:
+        return user
+
+    if "@" not in value:
+        return None
+
+    email_matches = list(
+        db_session.users.find(
+            {"email": {"$regex": f"^{re.escape(value)}$", "$options": "i"}},
+        ).limit(2)
+    )
+    if len(email_matches) > 1:
+        logger.warning("检测到重复邮箱，无法按邮箱登录: %s", value)
+        return None
+    return email_matches[0] if email_matches else None
+
+
+def get_user(db_session, identifier: str):
+    user = _find_user_doc_for_login(db_session, identifier)
     if user:
         return UserInDB(
             username=user.get("username"),
@@ -118,8 +141,8 @@ def get_user(db_session, username: str):
             email=user.get("email"),
         )
 
-def authenticate_user(db_session, username: str, password: str):
-    user = get_user(db_session, username)
+def authenticate_user(db_session, identifier: str, password: str):
+    user = get_user(db_session, identifier)
     if not user or not user.is_active:
         return False
     if not verify_password(password, user.hashed_password):
@@ -127,7 +150,7 @@ def authenticate_user(db_session, username: str, password: str):
     # 登录成功后立刻刷新活跃时间，避免“首个受保护请求”被空闲超时误判
     try:
         db_session.users.update_one(
-            {"username": username},
+            {"username": user.username},
             {"$set": {"last_active_at": datetime.now().isoformat()}}
         )
     except Exception as e:
@@ -570,7 +593,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     except JWTError:
         raise credentials_exception
     
-    user = get_user(db, username=token_data.username)
+    user = get_user(db, token_data.username)
     
     if user is None:
         raise credentials_exception

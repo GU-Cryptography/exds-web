@@ -875,12 +875,37 @@ const UserPermissionsPage: React.FC = () => {
         </MenuItem>
       </Menu>
 
-      <Drawer anchor="right" open={auditOpen} onClose={() => setAuditOpen(false)}>
-        <Box sx={{ width: { xs: '100vw', sm: 560 }, p: 2 }}>
+      <Drawer
+        anchor="right"
+        open={auditOpen}
+        onClose={() => setAuditOpen(false)}
+        sx={{
+          '& .MuiDrawer-paper': {
+            top: { xs: 56, sm: 64 },
+            height: { xs: 'calc(100% - 56px)', sm: 'calc(100% - 64px)' },
+          },
+        }}
+      >
+        <Box sx={{ width: { xs: '100vw', sm: 760 }, p: 2 }}>
           <Typography variant="h6" sx={{ mb: 1 }}>审计日志</Typography>
+          <Box
+            sx={{
+              mb: 1.5,
+              px: 1.5,
+              py: 1,
+              borderRadius: 1,
+              bgcolor: 'action.hover',
+              border: '1px solid',
+              borderColor: 'divider',
+            }}
+          >
+            <Typography variant="body2" color="text.secondary">
+              共 {auditTotal} 条审计记录，支持分页查看最近认证与权限变更操作。
+            </Typography>
+          </Box>
           {auditLoading ? <Box display="flex" justifyContent="center" py={4}><CircularProgress /></Box> : (
             <>
-              <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: '70vh' }}>
+              <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: '70vh', mt: 1.5 }}>
                 <Table size="small" stickyHeader>
                   <TableHead><TableRow><TableCell>时间</TableCell><TableCell>事件</TableCell><TableCell>操作人</TableCell><TableCell>目标</TableCell></TableRow></TableHead>
                   <TableBody>

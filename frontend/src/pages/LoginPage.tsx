@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom';
 import {
     Container,
     Box,
@@ -14,6 +14,7 @@ import {
     DialogContent,
     DialogContentText,
     DialogActions,
+    Link,
 } from '@mui/material';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
@@ -25,7 +26,7 @@ import { AUTH_STORAGE_KEYS } from '../auth/permissionPrecheck';
 const LoginPage: React.FC = () => {
     const navigate = useNavigate();
     const location = useLocation();
-    const { login: authLogin } = useAuth(); // 使用 AuthContext 的 login 方法
+    const { login: authLogin, isAuthenticated, isPermissionLoaded } = useAuth(); // 使用 AuthContext 的 login 方法
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
@@ -44,12 +45,21 @@ const LoginPage: React.FC = () => {
         }
     }, [location.search]);
 
+    useEffect(() => {
+        const search = new URLSearchParams(location.search);
+        const reason = search.get('reason');
+        const shouldStayOnLogin = ['kicked', 'idle_timeout', 'token_expired', 'session_expired'].includes(reason || '');
+        if (isAuthenticated && isPermissionLoaded && !shouldStayOnLogin) {
+            navigate('/', { replace: true });
+        }
+    }, [isAuthenticated, isPermissionLoaded, location.search, navigate]);
+
     const executeLogin = async (force = false) => {
         setError('');
         setLoading(true);
 
         if (!username || !password) {
-            setError('请输入用户名和密码');
+            setError('请输入账户或邮箱，以及密码');
             setLoading(false);
             return;
         }
@@ -69,7 +79,7 @@ const LoginPage: React.FC = () => {
             }
         } catch (err) {
             if (err instanceof AxiosError && err.response?.status === 401) {
-                setError('用户名或密码错误');
+                setError('账户/邮箱或密码错误');
             } else if (
                 err instanceof AxiosError
                 && (err.response?.status === 423
@@ -133,7 +143,7 @@ const LoginPage: React.FC = () => {
                             required
                             fullWidth
                             id="username"
-                            label="用户名"
+                            label="账户或邮箱"
                             name="username"
                             autoComplete="username"
                             autoFocus
@@ -170,6 +180,11 @@ const LoginPage: React.FC = () => {
                     >
                         {loading ? <CircularProgress size={24} color="inherit" /> : '登 录'}
                     </Button>
+                    <Box sx={{ textAlign: 'right' }}>
+                        <Link component={RouterLink} to="/forgot-password" underline="hover">
+                            忘记密码
+                        </Link>
+                    </Box>
                 </Box>
             </Paper>
             <Dialog open={showConflictDialog} onClose={() => setShowConflictDialog(false)}>

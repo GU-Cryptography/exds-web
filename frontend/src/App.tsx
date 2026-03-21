@@ -17,6 +17,7 @@ import theme from './theme';
 import { LoadAnalysisPage } from './pages/LoadAnalysisPage';
 import { SpotIntradayAnalysisPage } from './pages/SpotIntradayAnalysisPage';
 import LoginPage from './pages/LoginPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import SecuritySetupPage from './pages/SecuritySetupPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import PlaceholderPage from './components/PlaceholderPage';
@@ -161,6 +162,7 @@ function App() {
                         <Routes>
                             {/* 登录页面 */}
                             <Route path="/login" element={<LoginPage />} />
+                            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
                             <Route path="/security-setup" element={<SecuritySetupPage />} />
 
                             {/* 受保护的路由 */}

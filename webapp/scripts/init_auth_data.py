@@ -370,6 +370,7 @@ def run() -> None:
     db.auth_roles.create_index("is_active")
 
     db.users.create_index("username", unique=True)
+    db.users.create_index("email")
     db.users.create_index("roles")
     db.users.create_index("last_active_at")
     db.auth_security_challenges.create_index("cid", unique=True)

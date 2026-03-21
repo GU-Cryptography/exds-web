@@ -550,6 +550,7 @@
 当前已落地事件（代码已实现）：
 - 登录相关：`AUTH_LOGIN_FAILED`、`AUTH_LOGIN_BLOCKED_LOCKED`、`AUTH_LOGIN_LOCKED`、`AUTH_LOGIN_CONFLICT`、`AUTH_SESSION_KICKED`、`AUTH_LOGIN_SUCCESS`
 - 首登安全相关：`AUTH_REQUIRED_ACTIONS_TRIGGERED`、`AUTH_PASSWORD_CHANGED_BY_REQUIRED_ACTION`、`AUTH_EMAIL_BIND_SENT`、`AUTH_EMAIL_VERIFIED`、`AUTH_REQUIRED_ACTIONS_COMPLETED`
+- 忘记密码相关：`AUTH_FORGOT_PASSWORD_CODE_SENT`、`AUTH_FORGOT_PASSWORD_RESET_SUCCESS`、`AUTH_FORGOT_PASSWORD_RESET_FAILED`
 - 个人账号：`SELF_PROFILE_UPDATED`、`SELF_PASSWORD_CHANGED`
 - 角色管理：`ROLE_CREATED`、`ROLE_UPDATED`、`ROLE_PERMISSIONS_UPDATED`、`ROLE_DELETED`
 - 用户管理：`USER_CREATED`、`USER_ROLES_UPDATED`、`USER_ENABLED`、`USER_DISABLED`、`USER_PASSWORD_RESET`、`USER_DELETED`
@@ -623,6 +624,7 @@
 | `challenge_id` | `String` | 验证码挑战ID（唯一索引） |
 | `username` | `String` | 用户名 |
 | `email` | `String` | 本次验证的邮箱 |
+| `scene` | `String` | 验证码使用场景，如 `first_login_verify_email`、`forgot_password` |
 | `code_hash` | `String` | 验证码哈希 |
 | `expire_at` | `String(DateTime ISO)` | 验证码过期时间 |
 | `used_at` | `String(DateTime ISO) \| null` | 验证码使用时间 |

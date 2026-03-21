@@ -16,6 +16,8 @@ WRITE_METHODS = {"post", "put", "patch", "delete"}
 # 目前仅保留“当前用户主动登出”这一项。
 AUTH_ONLY_WRITE_ENDPOINTS = {
     ("POST", "/logout"),
+    ("POST", "/password/forgot/send-code"),
+    ("POST", "/password/forgot/reset"),
     ("POST", "/security/status"),
     ("POST", "/security/change-password"),
     ("POST", "/security/bind-email"),

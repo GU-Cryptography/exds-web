@@ -31,6 +31,7 @@ from webapp.models.auth import (
     UpdateRolePermissionsRequest, UpdateMyProfileRequest, ChangeMyPasswordRequest,
     ChallengeTokenRequest, SecurityBindEmailRequest, SecurityChangePasswordRequest,
     SecurityCompleteRequest, SecurityVerifyEmailRequest,
+    ForgotPasswordResetRequest, ForgotPasswordSendCodeRequest,
 )
 from webapp.api.dependencies.authz import (
     get_current_user_context, require_permission, require_any_permission
@@ -46,6 +47,8 @@ EMAIL_CODE_SEND_INTERVAL_SECONDS = int(get_config("AUTH", "email_code_send_inter
 EMAIL_CODE_MAX_SEND_COUNT = int(get_config("AUTH", "email_code_max_send_count", "5"))
 EMAIL_CODE_MAX_VERIFY_ATTEMPTS = int(get_config("AUTH", "email_code_max_verify_attempts", "5"))
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+EMAIL_SCENE_FIRST_LOGIN = "first_login_verify_email"
+EMAIL_SCENE_FORGOT_PASSWORD = "forgot_password"
 
 
 def _get_default_user_password() -> str:
@@ -111,11 +114,31 @@ def _validate_email_address(email: str) -> str:
     return value
 
 
-def _issue_email_verification_code(username: str, email: str, request_ip: str) -> dict:
+def _ensure_email_unique(email: Optional[str], exclude_username: Optional[str] = None) -> Optional[str]:
+    value = ((email or "").strip() or None)
+    if not value:
+        return None
+
+    query = {
+        "email": {
+            "$regex": f"^{re.escape(value)}$",
+            "$options": "i",
+        }
+    }
+    if exclude_username:
+        query["username"] = {"$ne": exclude_username}
+
+    exists = db.users.find_one(query, {"username": 1, "email": 1})
+    if exists:
+        raise HTTPException(status_code=400, detail="该邮箱已被其他账户绑定")
+    return value
+
+
+def _issue_email_verification_code(username: str, email: str, request_ip: str, scene: str = EMAIL_SCENE_FIRST_LOGIN) -> dict:
     ensure_auth_security_indexes()
     now = datetime.now()
     active_doc = db.auth_email_challenges.find_one(
-        {"username": username, "email": email, "used_at": None},
+        {"username": username, "email": email, "used_at": None, "scene": scene},
         sort=[("created_at", -1)],
     )
     if active_doc:
@@ -158,6 +181,7 @@ def _issue_email_verification_code(username: str, email: str, request_ip: str) -
         "challenge_id": str(challenge_id),
         "username": username,
         "email": email,
+        "scene": scene,
         "code_hash": hash_verification_code(code),
         "expire_at": expire_at.isoformat(),
         "used_at": None,
@@ -188,13 +212,13 @@ def _issue_email_verification_code(username: str, email: str, request_ip: str) -
     if not send_email(subject=subject, body=body, recipients=[email]):
         raise HTTPException(status_code=503, detail="验证码发送失败，请联系管理员检查邮件配置")
 
-    return {"email": email, "expire_at": expire_at.isoformat(), "send_count": send_count}
+    return {"email": email, "expire_at": expire_at.isoformat(), "send_count": send_count, "scene": scene}
 
 
-def _verify_email_code(username: str, email: str, code: str) -> None:
+def _verify_email_code(username: str, email: str, code: str, scene: str = EMAIL_SCENE_FIRST_LOGIN) -> None:
     now = datetime.now()
     doc = db.auth_email_challenges.find_one(
-        {"username": username, "email": email, "used_at": None},
+        {"username": username, "email": email, "used_at": None, "scene": scene},
         sort=[("created_at", -1)],
     )
     if not doc:
@@ -225,6 +249,13 @@ def _verify_email_code(username: str, email: str, code: str) -> None:
         {"_id": doc["_id"]},
         {"$set": {"used_at": now.isoformat(), "updated_at": now.isoformat()}},
     )
+
+
+def _forgot_password_send_response(expire_at: Optional[str] = None) -> dict:
+    return {
+        "message": "如果账户与邮箱匹配，验证码已发送",
+        "expire_at": expire_at,
+    }
 
 
 
@@ -259,9 +290,11 @@ async def update_my_profile(
     current_user: User = Depends(get_current_active_user),
     _: CurrentUserContext = Depends(require_any_permission(["module:dashboard_overview:view", "system:auth:manage"])),
 ):
+    next_email = (body.email or "").strip() or None
+    _ensure_email_unique(next_email, exclude_username=current_user.username)
     update_fields = {
         "display_name": (body.display_name or "").strip() or None,
-        "email": (body.email or "").strip() or None,
+        "email": next_email,
     }
     db.users.update_one(
         {"username": current_user.username},
@@ -309,6 +342,106 @@ async def logout_me(
     return {"message": "登出成功"}
 
 
+@public_router.post("/password/forgot/send-code", summary="忘记密码-发送邮箱验证码")
+async def forgot_password_send_code(body: ForgotPasswordSendCodeRequest, request: Request):
+    username = (body.username or "").strip()
+    email = (body.email or "").strip()
+    request_ip = _get_real_ip(request)
+    if not username or not email or not EMAIL_PATTERN.match(email):
+        return _forgot_password_send_response()
+
+    user_doc = db.users.find_one(
+        {"username": username, "is_active": True},
+        {"username": 1, "email": 1, "email_verified": 1, "is_active": 1},
+    )
+    if not user_doc:
+        return _forgot_password_send_response()
+
+    bound_email = str(user_doc.get("email") or "").strip()
+    if not bound_email or bound_email.lower() != email.lower() or not bool(user_doc.get("email_verified")):
+        return _forgot_password_send_response()
+
+    try:
+        send_result = _issue_email_verification_code(
+            username=user_doc["username"],
+            email=bound_email,
+            request_ip=request_ip,
+            scene=EMAIL_SCENE_FORGOT_PASSWORD,
+        )
+        _write_audit_log(
+            "AUTH_FORGOT_PASSWORD_CODE_SENT",
+            user_doc["username"],
+            user_doc["username"],
+            {
+                "email": bound_email,
+                "expire_at": send_result.get("expire_at"),
+                "send_count": send_result.get("send_count"),
+                "request_ip": request_ip,
+            },
+        )
+        return _forgot_password_send_response(send_result.get("expire_at"))
+    except HTTPException as exc:
+        if exc.status_code == 429:
+            raise
+        logger.warning("忘记密码验证码发送失败: username=%s error=%s", username, exc.detail)
+        return _forgot_password_send_response()
+
+
+@public_router.post("/password/forgot/reset", summary="忘记密码-重置密码")
+async def forgot_password_reset(body: ForgotPasswordResetRequest, request: Request):
+    username = (body.username or "").strip()
+    email = _validate_email_address(body.email)
+    code = (body.code or "").strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="请输入账户")
+    if not code:
+        raise HTTPException(status_code=400, detail="请输入邮箱验证码")
+
+    user_doc = db.users.find_one(
+        {"username": username, "is_active": True},
+        {"username": 1, "email": 1, "hashed_password": 1, "is_active": 1},
+    )
+    if not user_doc:
+        _write_audit_log("AUTH_FORGOT_PASSWORD_RESET_FAILED", username, username, {"reason": "user_not_found", "request_ip": _get_real_ip(request)})
+        raise HTTPException(status_code=400, detail="账户或邮箱不匹配")
+
+    bound_email = str(user_doc.get("email") or "").strip()
+    if bound_email.lower() != email.lower():
+        _write_audit_log("AUTH_FORGOT_PASSWORD_RESET_FAILED", username, username, {"reason": "email_mismatch", "request_ip": _get_real_ip(request)})
+        raise HTTPException(status_code=400, detail="账户或邮箱不匹配")
+
+    is_valid, msg = validate_password_strength(body.new_password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=msg)
+    if verify_password(body.new_password, user_doc.get("hashed_password", "")):
+        raise HTTPException(status_code=400, detail="新密码不能与当前密码相同")
+
+    _verify_email_code(username, bound_email, code, scene=EMAIL_SCENE_FORGOT_PASSWORD)
+    now = datetime.now().isoformat()
+    db.users.update_one(
+        {"username": username},
+        {"$set": {
+            "hashed_password": get_password_hash(body.new_password),
+            "must_change_password": False,
+            "password_changed_at": now,
+            "updated_at": now,
+        }},
+    )
+    kick_active_sessions(username, reason="forgot_password_reset")
+    db.users.update_one({"username": username}, {"$unset": {"current_session_sid": ""}})
+    db.auth_email_challenges.update_many(
+        {"username": username, "email": bound_email, "scene": EMAIL_SCENE_FORGOT_PASSWORD, "used_at": None},
+        {"$set": {"used_at": now, "updated_at": now}},
+    )
+    _write_audit_log(
+        "AUTH_FORGOT_PASSWORD_RESET_SUCCESS",
+        username,
+        username,
+        {"email": bound_email, "request_ip": _get_real_ip(request)},
+    )
+    return {"message": "密码重置成功，请重新登录"}
+
+
 @public_router.post("/security/status", summary="查询首登安全动作状态")
 async def get_security_status(body: ChallengeTokenRequest):
     _, user_doc = _load_challenge_user(body.challenge_token)
@@ -354,6 +487,7 @@ async def change_password_by_required_action(body: SecurityChangePasswordRequest
 async def bind_email_by_required_action(body: SecurityBindEmailRequest, request: Request):
     challenge_doc, user_doc = _load_challenge_user(body.challenge_token)
     email = _validate_email_address(body.email)
+    _ensure_email_unique(email, exclude_username=user_doc["username"])
     request_ip = _get_real_ip(request)
     now = datetime.now().isoformat()
     db.users.update_one(
@@ -640,6 +774,8 @@ async def create_user(
 ):
     if db.users.find_one({"username": body.username}):
         raise HTTPException(status_code=400, detail=f"用户名 {body.username} 已存在")
+    normalized_email = ((body.email or "").strip() or None)
+    _ensure_email_unique(normalized_email)
     password = (body.password or "").strip() or _get_default_user_password()
     is_valid, msg = validate_password_strength(password)
     if not is_valid:
@@ -648,8 +784,8 @@ async def create_user(
         "username": body.username,
         "hashed_password": get_password_hash(password),
         "display_name": body.display_name,
-        "email": body.email,
-        "email_verified": False if body.require_email_verification else bool(body.email),
+        "email": normalized_email,
+        "email_verified": False if body.require_email_verification else bool(normalized_email),
         "roles": body.roles,
         "is_active": True,
         "must_change_password": True,

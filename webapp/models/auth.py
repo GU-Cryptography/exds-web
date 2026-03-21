@@ -94,6 +94,18 @@ class SecurityVerifyEmailRequest(ChallengeTokenRequest):
 class SecurityCompleteRequest(ChallengeTokenRequest):
     force: bool = False
 
+
+class ForgotPasswordSendCodeRequest(BaseModel):
+    username: str
+    email: str
+
+
+class ForgotPasswordResetRequest(BaseModel):
+    username: str
+    email: str
+    code: str
+    new_password: str
+
 class CreateRoleRequest(BaseModel):
     code: str
     name: str

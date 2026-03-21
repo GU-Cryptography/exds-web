@@ -30,6 +30,7 @@ from webapp.tools.security import (
     enforce_single_active_session,
     find_active_session,
     get_current_active_user,
+    get_user,
     kick_active_sessions,
 )
 
@@ -115,8 +116,10 @@ def _parse_local_iso(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
-def _check_locked_user(username: str):
+def _check_locked_user(identifier: str):
     now = datetime.now()
+    resolved_user = get_user(db, identifier)
+    username = resolved_user.username if resolved_user else identifier
     user_doc = db.users.find_one(
         {"username": username},
         {"username": 1, "is_active": 1, "login_failed_count": 1, "login_locked_until": 1},
@@ -143,8 +146,10 @@ def _check_locked_user(username: str):
     return user_doc, None
 
 
-def _register_login_failed(username: str) -> dict:
+def _register_login_failed(identifier: str) -> dict:
     now = datetime.now()
+    resolved_user = get_user(db, identifier)
+    username = resolved_user.username if resolved_user else identifier
     user_doc = db.users.find_one(
         {"username": username},
         {"username": 1, "is_active": 1, "login_failed_count": 1},
@@ -169,6 +174,7 @@ def _register_login_failed(username: str) -> dict:
     db.users.update_one({"username": username}, {"$set": update_fields})
     return {
         "tracked": True,
+        "username": username,
         "failed_count": new_count,
         "locked": locked,
         "locked_until": locked_until,
@@ -184,10 +190,11 @@ async def login_for_access_token(
     geo_detail = _build_login_geo_detail(request)
     _, lock_state = _check_locked_user(form_data.username)
     if lock_state:
+        locked_target = lock_state.get("username") if isinstance(lock_state, dict) else form_data.username
         _write_auth_audit_log(
             event="AUTH_LOGIN_BLOCKED_LOCKED",
             operator=form_data.username,
-            target=form_data.username,
+            target=locked_target,
             detail={
                 **geo_detail,
                 **lock_state,
@@ -205,10 +212,11 @@ async def login_for_access_token(
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
         fail_state = _register_login_failed(form_data.username)
+        failed_target = fail_state.get("username") if isinstance(fail_state, dict) else form_data.username
         _write_auth_audit_log(
             event="AUTH_LOGIN_FAILED",
             operator=form_data.username,
-            target=form_data.username,
+            target=failed_target,
             detail={
                 **geo_detail,
                 **fail_state,
@@ -218,7 +226,7 @@ async def login_for_access_token(
             _write_auth_audit_log(
                 event="AUTH_LOGIN_LOCKED",
                 operator=form_data.username,
-                target=form_data.username,
+                target=failed_target,
                 detail={
                     **geo_detail,
                     **fail_state,
