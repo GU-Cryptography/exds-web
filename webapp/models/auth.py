@@ -44,7 +44,7 @@ class UserInfo(BaseModel):
     roles: List[str] = []
     permissions: List[str] = []
     is_super_admin: bool = False
-    idle_timeout_minutes: int = 30     # 前端用于配置空闲超时
+    idle_timeout_minutes: int = 15     # 前端用于配置空闲超时
 
 
 # ---- 管理接口请求/响应模型 ----

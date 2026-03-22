@@ -85,7 +85,11 @@ apiClient.interceptors.response.use(
                     || detailText.includes('newer login')
                     || detailText.includes('session replaced')
                     || detailText.includes('kicked');
-                const reason = isKicked ? 'kicked' : 'session_expired';
+                const isIdleTimeout =
+                    detailText.includes('due to inactivity')
+                    || detailText.includes('idle_timeout')
+                    || detailText.includes('inactive');
+                const reason = isKicked ? 'kicked' : (isIdleTimeout ? 'idle_timeout' : 'session_expired');
                 window.location.href = `/login?reason=${reason}`;
             } else if (error.response.status === 403) {
                 console.warn('访问被拒绝，无相应权限：', error.response.data);

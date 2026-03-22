@@ -65,11 +65,11 @@ else:
     )
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(get_config('JWT', 'access_token_expire_minutes', default_value='60'))
+ACCESS_TOKEN_EXPIRE_MINUTES = int(get_config('JWT', 'access_token_expire_minutes', default_value='180'))
 SECURITY_CHALLENGE_EXPIRE_MINUTES = int(get_config('AUTH', 'security_challenge_expire_minutes', default_value='30'))
 
 # 无操作空闲超时（分钟），从配置读取，默认 30 分钟
-IDLE_TIMEOUT_MINUTES = int(get_config('AUTH', 'idle_timeout_minutes', default_value='30'))
+IDLE_TIMEOUT_MINUTES = int(get_config('AUTH', 'idle_timeout_minutes', default_value='15'))
 
 # 授权开关：从 .exds/config.ini [AUTH] enabled 读取，默认开启
 _auth_enabled_str = get_config('AUTH', 'enabled', default_value='true')
