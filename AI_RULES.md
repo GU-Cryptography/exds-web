@@ -31,6 +31,7 @@
 2. 写按钮必须绑定权限（禁用或隐藏），并给出明确提示文案。
 3. 新增写请求时，必须在 `MUTATION_PERMISSION_RULES` 增加匹配规则。
 4. 菜单和路由的访问权限必须走 `getRequiredViewPermissionForRoute`。
+5. Recharts 图表默认必须去掉点击或键盘聚焦后的黑色焦点外框；图表容器需补充 `& .recharts-surface:focus { outline: none; }`，必要时补充 `& *:focus { outline: none !important; }`。
 
 ## 4. 后端开发硬规则
 

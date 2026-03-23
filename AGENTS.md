@@ -89,8 +89,9 @@ npm test --prefix frontend
 
 1. Material UI Grid 使用 v7 语法：`size={{ xs: 12, md: 6 }}`。
 2. 图表全屏统一使用 `useChartFullscreen`。
-3. 写操作按钮必须做前置权限控制（禁用/隐藏 + 清晰提示）。
-4. 移动端优先，保持响应式布局。
+3. Recharts 图表默认必须去掉点击或键盘聚焦后的黑色焦点外框；图表容器统一补充 `& .recharts-surface:focus { outline: none; }`，必要时补充 `& *:focus { outline: none !important; }`。
+4. 写操作按钮必须做前置权限控制（禁用/隐藏 + 清晰提示）。
+5. 移动端优先，保持响应式布局。
 
 ## 9. 语言与协作约束
 

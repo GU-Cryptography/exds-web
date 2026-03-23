@@ -1,6 +1,8 @@
 import apiClient from './client';
 import {
+    ContractEarningCalculationResponse,
     DayAheadReviewResponse,
+    MonthlyContractDetailResponse,
     OperationDetailResponse,
     TradeDateListResponse,
     TradeDetailResponse,
@@ -20,6 +22,14 @@ export const tradeReviewApi = {
     fetchOperationDetail: (tradeDate: string, deliveryDate: string, operationId: string) =>
         apiClient.get<OperationDetailResponse>('/api/v1/trade-review/operation-detail', {
             params: { trade_date: tradeDate, delivery_date: deliveryDate, operation_id: operationId },
+        }),
+    fetchMonthlyContractDetails: (tradeDate: string, deliveryDate: string, period: number) =>
+        apiClient.get<MonthlyContractDetailResponse>('/api/v1/trade-review/monthly-contract-details', {
+            params: { trade_date: tradeDate, delivery_date: deliveryDate, period },
+        }),
+    calculateContractEarnings: (tradeDate: string, deliveryDate: string) =>
+        apiClient.get<ContractEarningCalculationResponse>('/api/v1/trade-review/contract-earnings', {
+            params: { trade_date: tradeDate, delivery_date: deliveryDate },
         }),
     fetchDayAheadReview: (targetDate: string) =>
         apiClient.get<DayAheadReviewResponse>('/api/v1/trade-review/day-ahead-review', {

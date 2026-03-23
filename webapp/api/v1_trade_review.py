@@ -4,7 +4,9 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query, status
 
 from webapp.models.trade_review import (
+    ContractEarningCalculationResponse,
     DayAheadReviewResponse,
+    MonthlyContractDetailResponse,
     OperationDetailResponse,
     TradeDateListResponse,
     TradeDetailResponse,
@@ -85,6 +87,39 @@ def get_operation_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except Exception as exc:
         logger.error("get_operation_detail error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@router.get("/monthly-contract-details", response_model=MonthlyContractDetailResponse, summary="获取月内交易合同明细")
+def get_monthly_contract_details(
+    trade_date: str = Query(..., description="交易日期 YYYY-MM-DD"),
+    delivery_date: str = Query(..., description="目标日期 YYYY-MM-DD"),
+    period: int = Query(..., ge=1, le=48, description="时段号"),
+) -> MonthlyContractDetailResponse:
+    _validate_date(trade_date)
+    _validate_date(delivery_date)
+    try:
+        return get_service().get_monthly_contract_details(trade_date, delivery_date, period)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("get_monthly_contract_details error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@router.get("/contract-earnings", response_model=ContractEarningCalculationResponse, summary="计算合同成交收益")
+def get_contract_earnings(
+    trade_date: str = Query(..., description="交易日期 YYYY-MM-DD"),
+    delivery_date: str = Query(..., description="目标日期 YYYY-MM-DD"),
+) -> ContractEarningCalculationResponse:
+    _validate_date(trade_date)
+    _validate_date(delivery_date)
+    try:
+        return get_service().calculate_contract_earnings(trade_date, delivery_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("get_contract_earnings error: %s", exc, exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 

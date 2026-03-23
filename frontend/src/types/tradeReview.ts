@@ -148,6 +148,50 @@ export interface OperationDetailResponse {
     table_rows: OperationTableRow[];
 }
 
+export interface MonthlyContractDetailItem {
+    contract_id: string;
+    seller_name: string;
+    date: string;
+    period: number;
+    quantity_mwh: number;
+    price_yuan_per_mwh: number | null;
+}
+
+export interface MonthlyContractDetailSummary {
+    historical_quantity_mwh: number;
+    current_quantity_mwh: number;
+    displayed_quantity_mwh: number;
+    avg_price_yuan_per_mwh: number | null;
+    contract_count: number;
+}
+
+export interface MonthlyContractDetailResponse {
+    trade_date: string;
+    delivery_date: string;
+    period: number;
+    matched: boolean;
+    manual_match_required: boolean;
+    match_message: string | null;
+    summary: MonthlyContractDetailSummary;
+    contracts: MonthlyContractDetailItem[];
+}
+
+export interface ContractEarningPeriodRow {
+    period: number;
+    matched: boolean;
+    trade_net_mwh: number;
+    contract_avg_price_yuan_per_mwh: number | null;
+    spot_price: number | null;
+    period_profit_amount: number | null;
+}
+
+export interface ContractEarningCalculationResponse {
+    trade_date: string;
+    delivery_date: string;
+    summary: ExecutionAnalysisSummary | null;
+    period_rows: ContractEarningPeriodRow[];
+}
+
 export interface TradeDetailResponse {
     trade_date: string;
     delivery_date: string;

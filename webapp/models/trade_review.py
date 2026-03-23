@@ -49,9 +49,9 @@ class SummaryCardsResponse(BaseModel):
 
 
 class ExecutionAnalysisSummary(BaseModel):
-    profit_count: int = Field(..., description="盈利笔数")
+    profit_count: int = Field(..., description="盈利时段数")
     profit_amount: float = Field(..., description="盈利金额")
-    loss_count: int = Field(..., description="亏损笔数")
+    loss_count: int = Field(..., description="亏损时段数")
     loss_amount: float = Field(..., description="亏损金额")
     total_profit_amount: float = Field(..., description="当日交易总收益")
 
@@ -156,6 +156,50 @@ class OperationDetailResponse(BaseModel):
     operation_summary: OperationSummary
     chart_rows: List[OperationChartRow] = Field(default_factory=list, description="申报后挂单图表数据")
     table_rows: List[OperationTableRow] = Field(default_factory=list, description="申报后挂单明细")
+
+
+class MonthlyContractDetailItem(BaseModel):
+    contract_id: str = Field(..., description="合同明细ID")
+    seller_name: str = Field(..., description="售方名称")
+    date: str = Field(..., description="目标日期 YYYY-MM-DD")
+    period: int = Field(..., ge=1, le=48, description="时段")
+    quantity_mwh: float = Field(0.0, description="合同电量")
+    price_yuan_per_mwh: Optional[float] = Field(None, description="合同电价")
+
+
+class MonthlyContractDetailSummary(BaseModel):
+    historical_quantity_mwh: float = Field(0.0, description="历史电量")
+    current_quantity_mwh: float = Field(0.0, description="当前成交电量")
+    displayed_quantity_mwh: float = Field(0.0, description="当前展示合同合计电量")
+    avg_price_yuan_per_mwh: Optional[float] = Field(None, description="当前展示合同加权均价")
+    contract_count: int = Field(0, description="当前展示合同数量")
+
+
+class MonthlyContractDetailResponse(BaseModel):
+    trade_date: str = Field(..., description="交易日期 YYYY-MM-DD")
+    delivery_date: str = Field(..., description="目标日期 YYYY-MM-DD")
+    period: int = Field(..., ge=1, le=48, description="时段")
+    matched: bool = Field(False, description="是否自动匹配成功")
+    manual_match_required: bool = Field(False, description="是否需要手工匹配")
+    match_message: Optional[str] = Field(None, description="匹配提示信息")
+    summary: MonthlyContractDetailSummary
+    contracts: List[MonthlyContractDetailItem] = Field(default_factory=list, description="合同明细")
+
+
+class ContractEarningPeriodRow(BaseModel):
+    period: int = Field(..., ge=1, le=48, description="时段")
+    matched: bool = Field(False, description="是否匹配成功")
+    trade_net_mwh: float = Field(0.0, description="当日净成交电量")
+    contract_avg_price_yuan_per_mwh: Optional[float] = Field(None, description="合同成交均价")
+    spot_price: Optional[float] = Field(None, description="现货价格")
+    period_profit_amount: Optional[float] = Field(None, description="该时段合同成交收益")
+
+
+class ContractEarningCalculationResponse(BaseModel):
+    trade_date: str = Field(..., description="交易日期 YYYY-MM-DD")
+    delivery_date: str = Field(..., description="目标日期 YYYY-MM-DD")
+    summary: Optional[ExecutionAnalysisSummary] = Field(None, description="合同成交收益汇总")
+    period_rows: List[ContractEarningPeriodRow] = Field(default_factory=list, description="逐时段收益明细")
 
 
 class TradeDetailResponse(BaseModel):

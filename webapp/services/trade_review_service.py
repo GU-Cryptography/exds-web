@@ -8,12 +8,17 @@ from pymongo.database import Database
 
 from webapp.models.load_enums import FusionStrategy
 from webapp.models.trade_review import (
+    ContractEarningCalculationResponse,
+    ContractEarningPeriodRow,
     DayAheadReviewChartRow,
     DayAheadReviewResponse,
     DeliveryDateSummary,
     ExecutionAnalysisSummary,
     ExecutionChartRow,
     ExecutionTableRow,
+    MonthlyContractDetailItem,
+    MonthlyContractDetailResponse,
+    MonthlyContractDetailSummary,
     OperationButtonItem,
     OperationChartRow,
     OperationDetailResponse,
@@ -45,6 +50,7 @@ class TradeReviewService:
         self.db = db
         self.trade_declare_collection = db["trade_declare"]
         self.contracts_collection = db["contracts_aggregated_daily"]
+        self.contracts_detailed_collection = db["contracts_detailed_daily"]
         self.mechanism_collection = db["mechanism_energy_monthly"]
         self.contract_service = ContractService(db)
         self.load_forecast_service = LoadForecastService(db)
@@ -121,6 +127,252 @@ class TradeReviewService:
         if target_operation is None:
             raise ValueError(f"未找到对应操作: {operation_id}")
         return self._build_operation_detail(target_operation, records, delivery_date, spot_price_map)
+
+    def get_monthly_contract_details(
+        self,
+        trade_date: str,
+        delivery_date: str,
+        period: int,
+    ) -> MonthlyContractDetailResponse:
+        doc = self._get_trade_doc(trade_date)
+        delivery_group = self._get_delivery_group(doc, delivery_date)
+        records = [self._normalize_record(record) for record in delivery_group.get("records", [])]
+        contract_result = self._build_monthly_contract_match_result(
+            trade_date=trade_date,
+            delivery_date=delivery_date,
+            period=period,
+            records=records,
+        )
+
+        return MonthlyContractDetailResponse(
+            trade_date=trade_date,
+            delivery_date=delivery_date,
+            period=period,
+            matched=contract_result["matched"],
+            manual_match_required=not contract_result["matched"],
+            match_message=contract_result["match_message"],
+            summary=contract_result["summary"],
+            contracts=contract_result["display_contracts"],
+        )
+
+    def calculate_contract_earnings(
+        self,
+        trade_date: str,
+        delivery_date: str,
+    ) -> ContractEarningCalculationResponse:
+        doc = self._get_trade_doc(trade_date)
+        delivery_group = self._get_delivery_group(doc, delivery_date)
+        records = [self._normalize_record(record) for record in delivery_group.get("records", [])]
+        current_day_map, _, _, _ = self._load_trade_day_aggregates(records)
+        spot_price_map = self._load_spot_prices(delivery_date)
+
+        period_rows: List[ContractEarningPeriodRow] = []
+        pnl_values: List[float] = []
+
+        for period in range(1, 49):
+            trade_net_mwh = round(current_day_map.get(period, 0.0), 3)
+            if abs(trade_net_mwh) <= 0.001:
+                continue
+
+            contract_result = self._build_monthly_contract_match_result(
+                trade_date=trade_date,
+                delivery_date=delivery_date,
+                period=period,
+                records=records,
+            )
+            contract_avg_price = contract_result["summary"].avg_price_yuan_per_mwh
+            spot_price = spot_price_map.get(period)
+            period_profit_amount: Optional[float] = None
+            if contract_result["matched"] and contract_avg_price is not None and spot_price is not None:
+                if trade_net_mwh > 0:
+                    period_profit_amount = round((spot_price - contract_avg_price) * abs(trade_net_mwh), 2)
+                else:
+                    period_profit_amount = round((contract_avg_price - spot_price) * abs(trade_net_mwh), 2)
+                pnl_values.append(period_profit_amount)
+
+            period_rows.append(
+                ContractEarningPeriodRow(
+                    period=period,
+                    matched=contract_result["matched"],
+                    trade_net_mwh=trade_net_mwh,
+                    contract_avg_price_yuan_per_mwh=contract_avg_price,
+                    spot_price=spot_price,
+                    period_profit_amount=period_profit_amount,
+                )
+            )
+
+        summary: Optional[ExecutionAnalysisSummary] = None
+        if period_rows and all(row.period_profit_amount is not None for row in period_rows):
+            profit_values = [value for value in pnl_values if value >= 0]
+            loss_values = [value for value in pnl_values if value < 0]
+            summary = ExecutionAnalysisSummary(
+                profit_count=len(profit_values),
+                profit_amount=round(sum(profit_values), 2),
+                loss_count=len(loss_values),
+                loss_amount=round(abs(sum(loss_values)), 2),
+                total_profit_amount=round(sum(pnl_values), 2),
+            )
+
+        return ContractEarningCalculationResponse(
+            trade_date=trade_date,
+            delivery_date=delivery_date,
+            summary=summary,
+            period_rows=period_rows,
+        )
+
+    def _build_monthly_contract_match_result(
+        self,
+        trade_date: str,
+        delivery_date: str,
+        period: int,
+        records: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        raw_contracts = self._load_raw_monthly_contracts(delivery_date, period)
+        all_contracts = [
+            MonthlyContractDetailItem(
+                contract_id=item["contract_id"],
+                seller_name=item["seller_name"],
+                date=item["date"],
+                period=item["period"],
+                quantity_mwh=round(item["quantity_mwh_raw"], 3),
+                price_yuan_per_mwh=item["price_yuan_per_mwh"],
+            )
+            for item in raw_contracts
+        ]
+
+        historical_map = self._load_historical_within_month_net(delivery_date, trade_date)
+        current_day_map, _, _, _ = self._load_trade_day_aggregates(records)
+        historical_quantity_mwh = round(historical_map.get(period, 0.0), 3)
+        current_quantity_mwh = round(current_day_map.get(period, 0.0), 3)
+
+        matched_contract_ids = self._match_monthly_contract_ids(
+            raw_contracts,
+            historical_quantity_mwh=historical_quantity_mwh,
+            current_quantity_mwh=current_quantity_mwh,
+        )
+        matched = matched_contract_ids is not None and len(matched_contract_ids) > 0
+        display_contracts = (
+            [item for item in all_contracts if item.contract_id in matched_contract_ids]
+            if matched_contract_ids is not None and len(matched_contract_ids) > 0
+            else all_contracts
+        )
+        summary = self._build_monthly_contract_detail_summary(
+            display_contracts,
+            historical_quantity_mwh=historical_quantity_mwh,
+            current_quantity_mwh=current_quantity_mwh,
+        )
+
+        if matched:
+            match_message = "已按历史电量与当前成交电量自动匹配合同。"
+        elif abs(current_quantity_mwh) <= 0.001:
+            match_message = "当前时段成交电量为0，未执行自动匹配，请手工核对。"
+        else:
+            match_message = "未能根据历史电量和当前成交电量自动匹配合同，已显示全部合同，请手工匹配。"
+
+        return {
+            "matched": matched,
+            "match_message": match_message,
+            "summary": summary,
+            "display_contracts": display_contracts,
+        }
+
+    def _load_raw_monthly_contracts(self, delivery_date: str, period: int) -> List[Dict[str, Any]]:
+        pipeline = [
+            {
+                "$match": {
+                    "date": delivery_date,
+                    "entity": "售电公司",
+                    "contract_type": "市场化",
+                    "contract_period": "月内",
+                    "periods.period": period,
+                }
+            },
+            {"$unwind": "$periods"},
+            {"$match": {"periods.period": period}},
+            {"$sort": {"_id": 1}},
+            {
+                "$project": {
+                    "_id": {"$toString": "$_id"},
+                    "seller_name": {"$ifNull": ["$售方名称", ""]},
+                    "date": "$date",
+                    "period": "$periods.period",
+                    "quantity_mwh": {"$ifNull": ["$periods.quantity_mwh", 0]},
+                    "price_yuan_per_mwh": "$periods.price_yuan_per_mwh",
+                }
+            },
+        ]
+
+        return [
+            {
+                "contract_id": str(item.get("_id") or ""),
+                "seller_name": str(item.get("seller_name") or ""),
+                "date": str(item.get("date") or delivery_date),
+                "period": int(item.get("period") or period),
+                "quantity_mwh_raw": self._safe_float(item.get("quantity_mwh")),
+                "price_yuan_per_mwh": (
+                    round(float(item["price_yuan_per_mwh"]), 3)
+                    if item.get("price_yuan_per_mwh") is not None
+                    else None
+                ),
+            }
+            for item in self.contracts_detailed_collection.aggregate(pipeline)
+        ]
+
+    def _match_monthly_contract_ids(
+        self,
+        contracts: List[Dict[str, Any]],
+        historical_quantity_mwh: float,
+        current_quantity_mwh: float,
+    ) -> Optional[List[str]]:
+        tolerance = 0.001
+        if not contracts or abs(current_quantity_mwh) <= tolerance:
+            return None
+
+        prefix_quantity = 0.0
+        start_index: Optional[int] = None
+        for index, contract in enumerate(contracts):
+            if abs(prefix_quantity - historical_quantity_mwh) <= tolerance:
+                start_index = index
+                break
+            prefix_quantity += float(contract.get("quantity_mwh_raw") or 0.0)
+
+        if start_index is None:
+            if abs(prefix_quantity - historical_quantity_mwh) <= tolerance:
+                return []
+            return None
+
+        running_quantity = 0.0
+        for end_index in range(start_index, len(contracts)):
+            running_quantity += float(contracts[end_index].get("quantity_mwh_raw") or 0.0)
+            if abs(running_quantity - current_quantity_mwh) <= tolerance:
+                return [str(item.get("contract_id") or "") for item in contracts[start_index:end_index + 1]]
+        return None
+
+    def _build_monthly_contract_detail_summary(
+        self,
+        contracts: List[MonthlyContractDetailItem],
+        historical_quantity_mwh: float,
+        current_quantity_mwh: float,
+    ) -> MonthlyContractDetailSummary:
+        displayed_quantity_mwh = round(sum(item.quantity_mwh for item in contracts), 3)
+        weighted_amount = sum(
+            abs(item.quantity_mwh) * float(item.price_yuan_per_mwh)
+            for item in contracts
+            if item.price_yuan_per_mwh is not None
+        )
+        quantity_for_price = sum(
+            abs(item.quantity_mwh)
+            for item in contracts
+            if item.price_yuan_per_mwh is not None
+        )
+        avg_price = round(weighted_amount / quantity_for_price, 3) if quantity_for_price > 0 else None
+        return MonthlyContractDetailSummary(
+            historical_quantity_mwh=historical_quantity_mwh,
+            current_quantity_mwh=current_quantity_mwh,
+            displayed_quantity_mwh=displayed_quantity_mwh,
+            avg_price_yuan_per_mwh=avg_price,
+            contract_count=len(contracts),
+        )
 
     def get_day_ahead_review(self, target_date: str) -> DayAheadReviewResponse:
         target_dt = datetime.strptime(target_date, "%Y-%m-%d")
@@ -403,11 +655,7 @@ class TradeReviewService:
         if not traded_records or not spot_price_map:
             return None
 
-        profit_count = 0
-        loss_count = 0
-        profit_amount = 0.0
-        loss_amount = 0.0
-        total_profit_amount = 0.0
+        period_profit_map: Dict[int, float] = defaultdict(float)
 
         for record in traded_records:
             spot_price = spot_price_map.get(record["period"])
@@ -423,20 +671,18 @@ class TradeReviewService:
             else:
                 continue
 
-            total_profit_amount += pnl
-            if pnl >= 0:
-                profit_count += 1
-                profit_amount += pnl
-            else:
-                loss_count += 1
-                loss_amount += abs(pnl)
+            period_profit_map[record["period"]] += pnl
+
+        period_pnl_values = [round(value, 2) for value in period_profit_map.values()]
+        profit_values = [value for value in period_pnl_values if value >= 0]
+        loss_values = [value for value in period_pnl_values if value < 0]
 
         return ExecutionAnalysisSummary(
-            profit_count=profit_count,
-            profit_amount=round(profit_amount, 2),
-            loss_count=loss_count,
-            loss_amount=round(loss_amount, 2),
-            total_profit_amount=round(total_profit_amount, 2),
+            profit_count=len(profit_values),
+            profit_amount=round(sum(profit_values), 2),
+            loss_count=len(loss_values),
+            loss_amount=round(abs(sum(loss_values)), 2),
+            total_profit_amount=round(sum(period_pnl_values), 2),
         )
 
     def _load_trade_day_aggregates(

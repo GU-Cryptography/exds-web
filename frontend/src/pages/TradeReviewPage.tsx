@@ -2,11 +2,15 @@
 import {
     Alert,
     Box,
+    Button,
     Card,
     CardContent,
     Checkbox,
     Chip,
     CircularProgress,
+    Dialog,
+    DialogContent,
+    DialogTitle,
     Grid,
     IconButton,
     MenuItem,
@@ -48,7 +52,15 @@ import {
     YAxis,
 } from 'recharts';
 import { tradeReviewApi } from '../api/tradeReview';
-import { OperationDetailResponse, OrderLevelItem, TradeDetailResponse, TradeOverviewResponse } from '../types/tradeReview';
+import {
+    ContractEarningCalculationResponse,
+    MonthlyContractDetailResponse,
+    MonthlyContractDetailItem,
+    OperationDetailResponse,
+    OrderLevelItem,
+    TradeDetailResponse,
+    TradeOverviewResponse,
+} from '../types/tradeReview';
 import { useChartFullscreen } from '../hooks/useChartFullscreen';
 import { useSelectableSeries } from '../hooks/useSelectableSeries';
 
@@ -67,6 +79,17 @@ const formatSignedTrade = (value: number | null | undefined, digits = 2): string
         return `${formatNumber(value, digits)} MWh`;
     }
     return `${formatNumber(Math.abs(value), digits)} MWh（${value > 0 ? '买入' : '卖出'}）`;
+};
+
+const formatSignedNumber = (value: number | null | undefined, digits = 2, suffix = ''): string => {
+    if (value === null || value === undefined || Number.isNaN(value)) {
+        return '-';
+    }
+    const formatted = formatNumber(Math.abs(value), digits);
+    if (value === 0) {
+        return `${formatted}${suffix}`;
+    }
+    return `${value > 0 ? '+' : '-'}${formatted}${suffix}`;
 };
 
 const StatCard: React.FC<{ title: string; lines: string[] }> = ({ title, lines }) => (
@@ -145,18 +168,32 @@ const DetailedExecutionTooltipContent: React.FC<{ row: any; label: number | stri
             <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#0f172a', mb: 1 }}>时段 {label}</Typography>
             <Box sx={{ borderTop: '1px dashed rgba(148, 163, 184, 0.7)', my: 1 }} />
             <Box sx={{ display: 'grid', gap: 0.75 }}>
-                <Typography variant="body2" sx={{ color: '#0f172a' }}>成交均价：<Box component="span" sx={{ fontWeight: 700 }}>{formatNumber(row.trade_avg_price, 3)} 元/MWh</Box>（{row.trade_count ?? 0}次）</Typography>
+                <Typography variant="body2" sx={{ color: '#0f172a' }}>申报价格：<Box component="span" sx={{ fontWeight: 700 }}>{formatNumber(row.trade_avg_price, 3)} 元/MWh</Box>（{row.trade_count ?? 0}次）</Typography>
                 <Typography variant="body2" sx={{ color: '#334155' }}>现货价格：{formatNumber(row.spot_price, 3)} 元/MWh</Typography>
                 <Typography variant="body2" sx={{ color: '#334155' }}>年度月度价格：{formatNumber(row.market_monthly_price, 3)} 元/MWh</Typography>
             </Box>
             <Box sx={{ borderTop: '1px dashed rgba(148, 163, 184, 0.7)', my: 1.25 }} />
             <Box sx={{ display: 'grid', gap: 0.75 }}>
-                <Typography variant="body2" sx={{ color: '#0f172a' }}>成交电量：<Box component="span" sx={{ fontWeight: 700 }}>{formatSignedTrade(row.trade_day_net_mwh, 2)}</Box></Typography>
-                <Typography variant="body2" sx={{ color: '#334155' }}>历史成交：{formatSignedTrade(row.historical_within_month_net_mwh, 2)}</Typography>
-                <Typography variant="body2" sx={{ color: '#334155' }}>基础持仓：年度：{formatNumber(row.annual_monthly_mwh, 2)} 月度：{formatNumber(row.monthly_mwh, 2)} 机制：{formatNumber(row.mechanism_mwh, 2)} MWh</Typography>
-                <Typography variant="body2" sx={{ color: '#334155' }}>最终持仓：{formatNumber(row.final_position_mwh, 2)} MWh</Typography>
-                <Typography variant="body2" sx={{ color: '#334155' }}>实际电量：{formatNumber(row.actual_or_forecast_load_mwh, 2)} MWh{row.load_source === 'forecast' ? '（预测）' : ''}</Typography>
+                <Typography variant="body2" sx={{ color: '#0f172a' }}>成交电量：<Box component="span" sx={{ fontWeight: 700 }}>{formatSignedTrade(row.trade_day_net_mwh, 3)}</Box></Typography>
+                <Typography variant="body2" sx={{ color: '#334155' }}>历史成交：{formatSignedTrade(row.historical_within_month_net_mwh, 3)}</Typography>
+                <Typography variant="body2" sx={{ color: '#334155' }}>基础持仓：年度：{formatNumber(row.annual_monthly_mwh, 3)} 月度：{formatNumber(row.monthly_mwh, 3)} 机制：{formatNumber(row.mechanism_mwh, 3)} MWh</Typography>
+                <Typography variant="body2" sx={{ color: '#334155' }}>最终持仓：{formatNumber(row.final_position_mwh, 3)} MWh</Typography>
+                <Typography variant="body2" sx={{ color: '#334155' }}>实际电量：{formatNumber(row.actual_or_forecast_load_mwh, 3)} MWh{row.load_source === 'forecast' ? '（预测）' : ''}</Typography>
                 <Typography variant="body2" sx={{ color: '#0f172a' }}>签约比例：<Box component="span" sx={{ fontWeight: 700 }}>{formatNumber(contractRatio, 2)}%</Box></Typography>
+            </Box>
+            <Box sx={{ borderTop: '1px dashed rgba(148, 163, 184, 0.7)', my: 1.25 }} />
+            <Box
+                sx={{
+                    px: 1.25,
+                    py: 0.9,
+                    borderRadius: 1.5,
+                    backgroundColor: '#fff7ed',
+                    border: '1px solid #fdba74',
+                }}
+            >
+                <Typography variant="body2" sx={{ color: '#c2410c', fontWeight: 700 }}>
+                    双击当前时段可打开成交合同明细
+                </Typography>
             </Box>
         </Paper>
     );
@@ -166,6 +203,22 @@ const DetailedExecutionTooltip: React.FC<any> = ({ active, payload, label }) => 
     if (!active || !payload || payload.length === 0) return null;
     const row = payload.find((item: any) => item?.payload)?.payload || payload[0]?.payload;
     return row ? <DetailedExecutionTooltipContent row={row} label={label} /> : null;
+};
+
+const resolveChartPeriod = (state: any): number | null => {
+    const candidates = [
+        state?.activeLabel,
+        state?.activePayload?.[0]?.payload?.period,
+        state?.activePayload?.find((item: any) => item?.payload?.period !== undefined)?.payload?.period,
+    ];
+
+    for (const candidate of candidates) {
+        const parsed = Number(candidate);
+        if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 48) {
+            return parsed;
+        }
+    }
+    return null;
 };
 
 const OPERATION_BUY_COLORS = ['#1b5e20', '#2e7d32', '#43a047', '#66bb6a', '#81c784'];
@@ -233,7 +286,15 @@ export const TradeReviewPage: React.FC = () => {
     const [operationTab, setOperationTab] = useState(0);
     const [loading, setLoading] = useState(false);
     const [loadingOperation, setLoadingOperation] = useState(false);
+    const [loadingContractDetails, setLoadingContractDetails] = useState(false);
+    const [loadingContractEarnings, setLoadingContractEarnings] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [contractDialogOpen, setContractDialogOpen] = useState(false);
+    const [contractDialogPeriod, setContractDialogPeriod] = useState<number | null>(null);
+    const [contractDetails, setContractDetails] = useState<MonthlyContractDetailItem[]>([]);
+    const [contractDetailResponse, setContractDetailResponse] = useState<MonthlyContractDetailResponse | null>(null);
+    const [contractDetailsError, setContractDetailsError] = useState<string | null>(null);
+    const [contractEarningsResult, setContractEarningsResult] = useState<ContractEarningCalculationResponse | null>(null);
 
     const executionChartRef = useRef<HTMLDivElement>(null);
     const operationChartRef = useRef<HTMLDivElement>(null);
@@ -268,6 +329,12 @@ export const TradeReviewPage: React.FC = () => {
         setOperationDetail(null);
         setSelectedDeliveryDate('');
         setSelectedOperationId('');
+        setContractEarningsResult(null);
+        setContractDialogOpen(false);
+        setContractDialogPeriod(null);
+        setContractDetails([]);
+        setContractDetailResponse(null);
+        setContractDetailsError(null);
     }, [tradeDateStr]);
 
     useEffect(() => {
@@ -295,6 +362,7 @@ export const TradeReviewPage: React.FC = () => {
             if (!tradeDateStr || !selectedDeliveryDate) return;
             if (overview?.trade_date !== tradeDateStr) return;
             if (!overview.delivery_summaries.some((item) => item.delivery_date === selectedDeliveryDate)) return;
+            setContractEarningsResult(null);
             setLoading(true);
             setError(null);
             try {
@@ -339,6 +407,51 @@ export const TradeReviewPage: React.FC = () => {
         const targetIndex = currentIndex - offset;
         if (targetIndex < 0 || targetIndex >= availableTradeDates.length) return;
         setSelectedTradeDate(parseISO(availableTradeDates[targetIndex]));
+    };
+
+    const handleCloseContractDialog = () => {
+        setContractDialogOpen(false);
+        setContractDialogPeriod(null);
+        setContractDetails([]);
+        setContractDetailResponse(null);
+        setContractDetailsError(null);
+    };
+
+    const handleCalculateContractEarnings = async () => {
+        if (!tradeDateStr || !selectedDeliveryDate) return;
+        setLoadingContractEarnings(true);
+        try {
+            const response = await tradeReviewApi.calculateContractEarnings(tradeDateStr, selectedDeliveryDate);
+            setContractEarningsResult(response.data);
+        } catch (err: any) {
+            setError(err.response?.data?.detail || err.message || '计算合同成交收益失败');
+        } finally {
+            setLoadingContractEarnings(false);
+        }
+    };
+
+    const handleExecutionChartDoubleClick = async (state: any) => {
+        const period = resolveChartPeriod(state);
+        if (!tradeDateStr || !selectedDeliveryDate || !period) return;
+
+        setContractDialogOpen(true);
+        setContractDialogPeriod(period);
+        setContractDetails([]);
+        setContractDetailResponse(null);
+        setContractDetailsError(null);
+        setLoadingContractDetails(true);
+
+        try {
+            const response = await tradeReviewApi.fetchMonthlyContractDetails(tradeDateStr, selectedDeliveryDate, period);
+            setContractDetailResponse(response.data);
+            setContractDetails(response.data.contracts || []);
+        } catch (err: any) {
+            setContractDetails([]);
+            setContractDetailResponse(null);
+            setContractDetailsError(err.response?.data?.detail || err.message || '加载月内合同明细失败');
+        } finally {
+            setLoadingContractDetails(false);
+        }
     };
 
     const executionData = useMemo(() => (detail?.execution_chart || []).map((row) => ({
@@ -520,6 +633,24 @@ export const TradeReviewPage: React.FC = () => {
         },
         [detail]
     );
+    const selectedExecutionRow = useMemo(
+        () => detail?.execution_chart.find((row) => row.period === contractDialogPeriod) ?? null,
+        [detail, contractDialogPeriod]
+    );
+    const earningsComparisonRows = useMemo(() => {
+        if (!executionAnalysisSummary) {
+            return [];
+        }
+
+        const contractSummary = contractEarningsResult?.summary ?? null;
+        return [
+            { label: '盈利时段', current: executionAnalysisSummary.profit_count, contract: contractSummary?.profit_count ?? null, digits: 0, suffix: '' },
+            { label: '亏损时段', current: executionAnalysisSummary.loss_count, contract: contractSummary?.loss_count ?? null, digits: 0, suffix: '' },
+            { label: '盈利金额', current: executionAnalysisSummary.profit_amount, contract: contractSummary?.profit_amount ?? null, digits: 2, suffix: '元' },
+            { label: '亏损金额', current: executionAnalysisSummary.loss_amount, contract: contractSummary?.loss_amount ?? null, digits: 2, suffix: '元' },
+            { label: '总收益', current: executionAnalysisSummary.total_profit_amount, contract: contractSummary?.total_profit_amount ?? null, digits: 2, suffix: '元', highlight: true },
+        ];
+    }, [contractEarningsResult, executionAnalysisSummary]);
     const segmentedTabsSx = {
         minHeight: 44,
         p: 0.5,
@@ -673,9 +804,14 @@ export const TradeReviewPage: React.FC = () => {
                                     <Tab label="数据" />
                                 </Tabs>
                             </Box>
+                            {executionTab === 0 && (
+                                <Alert severity="info" sx={{ mb: 1.5 }}>
+                                    双击图表中的时段，可查看该时段月内市场化合同明细。
+                                </Alert>
+                            )}
 
                             {executionTab === 0 ? (
-                                <Box ref={executionChartRef} sx={{ height: executionPanelBodyHeight, position: 'relative', backgroundColor: executionFullscreen.isFullscreen ? 'background.paper' : 'transparent', p: executionFullscreen.isFullscreen ? 2 : 0, ...(executionFullscreen.isFullscreen && { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1400 }) }}>
+                                <Box ref={executionChartRef} sx={{ height: executionPanelBodyHeight, position: 'relative', backgroundColor: executionFullscreen.isFullscreen ? 'background.paper' : 'transparent', p: executionFullscreen.isFullscreen ? 2 : 0, ...(executionFullscreen.isFullscreen && { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1400 }), '& .recharts-surface:focus': { outline: 'none' }, '& *:focus': { outline: 'none !important' } }}>
                                     <executionFullscreen.FullscreenEnterButton />
                                     <executionFullscreen.FullscreenExitButton />
                                     <executionFullscreen.FullscreenTitle />
@@ -690,7 +826,7 @@ export const TradeReviewPage: React.FC = () => {
                                     <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100% - 88px)', gap: 0.75 }}>
                                         <Box sx={{ flex: 1, minHeight: 0 }}>
                                             <ResponsiveContainer width="100%" height="100%">
-                                                <ComposedChart data={executionData} syncId="execution-review">
+                                                <ComposedChart data={executionData} syncId="execution-review" onDoubleClick={handleExecutionChartDoubleClick}>
                                                     <CartesianGrid strokeDasharray="3 3" />
                                                     <XAxis {...executionXAxisProps} hide />
                                                     <YAxis yAxisId="price" orientation="right" domain={executionPriceDomain} label={{ value: '交易价格', angle: -90, position: 'insideRight' }} />
@@ -703,7 +839,7 @@ export const TradeReviewPage: React.FC = () => {
                                         </Box>
                                         <Box sx={{ flex: 1.25, minHeight: 0 }}>
                                             <ResponsiveContainer width="100%" height="100%">
-                                                <ComposedChart data={executionData} syncId="execution-review">
+                                                <ComposedChart data={executionData} syncId="execution-review" onDoubleClick={handleExecutionChartDoubleClick}>
                                                     <CartesianGrid strokeDasharray="3 3" />
                                                     <XAxis {...executionXAxisProps} />
                                                     <YAxis yAxisId="volume" orientation="right" domain={executionVolumeDomain} label={{ value: '交易电量', angle: -90, position: 'insideRight' }} />
@@ -838,9 +974,9 @@ export const TradeReviewPage: React.FC = () => {
                                             color: 'text.primary',
                                         }}
                                     >
-                                        盈利笔数：{executionAnalysisSummary!.profit_count}，
+                                        盈利时段：{executionAnalysisSummary!.profit_count}，
                                         盈利金额：{formatNumber(executionAnalysisSummary!.profit_amount, 2)}元；
-                                        亏损笔数：{executionAnalysisSummary!.loss_count}，
+                                        亏损时段：{executionAnalysisSummary!.loss_count}，
                                         亏损金额：{formatNumber(executionAnalysisSummary!.loss_amount, 2)}元；
                                         当日交易总收益：
                                         <Box
@@ -861,47 +997,131 @@ export const TradeReviewPage: React.FC = () => {
                                     sx={{
                                         mt: 0.25,
                                         p: { xs: 1.25, sm: 1.5 },
-                                        borderColor: 'divider',
-                                        backgroundColor: 'grey.50',
+                                        borderColor: '#dbe7f3',
+                                        background: 'linear-gradient(180deg, #f8fbff 0%, #f4f7fb 100%)',
                                     }}
                                 >
-                                    <Typography
-                                        variant="subtitle1"
+                                    <Box
                                         sx={{
-                                            fontWeight: 800,
-                                            fontSize: { xs: '1rem', sm: '1.1rem' },
-                                            lineHeight: 1.8,
-                                            color: 'text.primary',
+                                            display: 'flex',
+                                            alignItems: { xs: 'stretch', sm: 'center' },
+                                            justifyContent: 'space-between',
+                                            gap: 1.25,
+                                            flexDirection: { xs: 'column', sm: 'row' },
                                         }}
                                     >
-                                        盈利笔数：
-                                        <Box component="span" sx={{ color: 'success.main', fontWeight: 900 }}>
-                                            {executionAnalysisSummary!.profit_count}
+                                        <Box sx={{ minWidth: 0 }}>
+                                            <Typography
+                                                variant="subtitle1"
+                                                sx={{
+                                                    fontWeight: 900,
+                                                    fontSize: { xs: '1rem', sm: '1.1rem' },
+                                                    color: '#0f172a',
+                                                }}
+                                            >
+                                                盈亏分析对比
+                                            </Typography>
+                                            <Typography
+                                                variant="body2"
+                                                sx={{
+                                                    mt: 0.35,
+                                                    color: 'text.secondary',
+                                                    fontSize: { xs: '0.9rem', sm: '0.95rem' },
+                                                }}
+                                            >
+                                                现货申报口径与合同成交口径分栏展示，便于直接比对差异。
+                                            </Typography>
                                         </Box>
-                                        ，盈利金额：
-                                        <Box component="span" sx={{ color: 'success.main', fontWeight: 900 }}>
-                                            {formatNumber(executionAnalysisSummary!.profit_amount, 2)}元
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                                            <Button
+                                                variant={contractEarningsResult?.summary ? 'contained' : 'outlined'}
+                                                size="small"
+                                                onClick={handleCalculateContractEarnings}
+                                                disabled={loadingContractEarnings}
+                                            >
+                                                {loadingContractEarnings ? '计算中...' : '计算合同成交收益'}
+                                            </Button>
+                                            {contractEarningsResult?.summary && (
+                                                <Typography
+                                                    variant="body2"
+                                                    sx={{
+                                                        color: 'text.secondary',
+                                                        fontWeight: 600,
+                                                    }}
+                                                >
+                                                    当前已显示合同成交口径对比结果
+                                                </Typography>
+                                            )}
                                         </Box>
-                                        ；亏损笔数：
-                                        <Box component="span" sx={{ color: 'error.main', fontWeight: 900 }}>
-                                            {executionAnalysisSummary!.loss_count}
-                                        </Box>
-                                        ，亏损金额：
-                                        <Box component="span" sx={{ color: 'error.main', fontWeight: 900 }}>
-                                            {formatNumber(executionAnalysisSummary!.loss_amount, 2)}元
-                                        </Box>
-                                        ；当日交易总收益：
-                                        <Box
-                                            component="span"
+                                    </Box>
+                                    <TableContainer
+                                        sx={{
+                                            mt: 1.25,
+                                            borderRadius: 2,
+                                            border: '1px solid',
+                                            borderColor: '#dbe7f3',
+                                            backgroundColor: '#ffffff',
+                                            overflowX: 'auto',
+                                        }}
+                                    >
+                                        <Table
+                                            size="small"
                                             sx={{
-                                                ml: 0.5,
-                                                color: executionAnalysisSummary!.total_profit_amount >= 0 ? 'success.main' : 'error.main',
-                                                fontWeight: 900,
+                                                minWidth: 520,
+                                                '& .MuiTableCell-root': {
+                                                    py: 1.15,
+                                                    px: { xs: 1, sm: 1.5 },
+                                                    borderColor: '#e2e8f0',
+                                                },
+                                                '& .MuiTableHead-root .MuiTableCell-root': {
+                                                    fontWeight: 800,
+                                                    color: '#334155',
+                                                    backgroundColor: '#eef4fb',
+                                                },
                                             }}
                                         >
-                                            {formatNumber(executionAnalysisSummary!.total_profit_amount, 2)}元
-                                        </Box>
-                                    </Typography>
+                                            <TableHead>
+                                                <TableRow>
+                                                    <TableCell sx={{ width: { xs: 112, sm: 140 } }}>指标</TableCell>
+                                                    <TableCell>现货申报收益</TableCell>
+                                                    <TableCell>合同成交收益</TableCell>
+                                                    <TableCell>差异</TableCell>
+                                                </TableRow>
+                                            </TableHead>
+                                            <TableBody>
+                                                {earningsComparisonRows.map((row) => {
+                                                    const diffValue = row.contract === null ? null : row.contract - row.current;
+                                                    const currentColor = row.highlight
+                                                        ? row.current >= 0 ? 'success.main' : 'error.main'
+                                                        : 'text.primary';
+                                                    const contractColor = row.highlight
+                                                        ? row.contract === null ? 'text.disabled' : row.contract >= 0 ? 'success.main' : 'error.main'
+                                                        : row.contract === null ? 'text.disabled' : 'text.primary';
+                                                    const diffColor = diffValue === null
+                                                        ? 'text.disabled'
+                                                        : diffValue >= 0 ? 'success.main' : 'error.main';
+
+                                                    return (
+                                                        <TableRow
+                                                            key={row.label}
+                                                            sx={row.highlight ? { '& .MuiTableCell-root': { backgroundColor: '#f8fafc', fontWeight: 800 } } : undefined}
+                                                        >
+                                                            <TableCell sx={{ fontWeight: 800, color: '#0f172a' }}>{row.label}</TableCell>
+                                                            <TableCell sx={{ color: currentColor, fontWeight: row.highlight ? 900 : 700 }}>
+                                                                {formatNumber(row.current, row.digits)}{row.suffix}
+                                                            </TableCell>
+                                                            <TableCell sx={{ color: contractColor, fontWeight: row.highlight ? 900 : 700 }}>
+                                                                {row.contract === null ? '待计算' : `${formatNumber(row.contract, row.digits)}${row.suffix}`}
+                                                            </TableCell>
+                                                            <TableCell sx={{ color: diffColor, fontWeight: 800 }}>
+                                                                {diffValue === null ? '点击上方按钮计算' : formatSignedNumber(diffValue, row.digits, row.suffix)}
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    );
+                                                })}
+                                            </TableBody>
+                                        </Table>
+                                    </TableContainer>
                                 </Paper>
                             )}
                         </Paper>
@@ -982,6 +1202,8 @@ export const TradeReviewPage: React.FC = () => {
                                                 height: '100vh',
                                                 zIndex: 1400,
                                             }),
+                                            '& .recharts-surface:focus': { outline: 'none' },
+                                            '& *:focus': { outline: 'none !important' },
                                         }}
                                     >
                                         <operationFullscreen.FullscreenEnterButton />
@@ -1085,6 +1307,119 @@ export const TradeReviewPage: React.FC = () => {
                         )}
                     </>
                 ) : null}
+                <Dialog
+                    open={contractDialogOpen}
+                    onClose={handleCloseContractDialog}
+                    maxWidth="md"
+                    fullWidth
+                >
+                    <DialogTitle sx={{ fontWeight: 800 }}>
+                        {`月内交易合同明细${contractDialogPeriod ? ` - 时段 ${contractDialogPeriod}` : ''}`}
+                    </DialogTitle>
+                    <DialogContent dividers sx={{ p: 0 }}>
+                        <Box sx={{ px: 3, py: 2, borderBottom: '1px solid rgba(148, 163, 184, 0.2)', bgcolor: 'rgba(248,250,252,0.8)' }}>
+                            <Typography variant="body2" color="text.secondary">
+                                交易日：{tradeDateStr || '-'}　目标日：{selectedDeliveryDate || '-'}
+                            </Typography>
+                        </Box>
+                        {loadingContractDetails ? (
+                            <Box sx={{ minHeight: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <CircularProgress size={28} />
+                            </Box>
+                        ) : contractDetailsError ? (
+                            <Alert severity="error" sx={{ m: 2 }}>
+                                {contractDetailsError}
+                            </Alert>
+                        ) : contractDetails.length === 0 ? (
+                            <Box sx={{ minHeight: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', px: 3, textAlign: 'center' }}>
+                                <Typography variant="body2" color="text.secondary">
+                                    当前时段未查询到月内市场化合同明细。
+                                </Typography>
+                            </Box>
+                        ) : (
+                            <>
+                                {contractDetailResponse?.match_message && (
+                                    <Alert severity={contractDetailResponse.manual_match_required ? 'warning' : 'success'} sx={{ m: 2, mb: 1 }}>
+                                        {contractDetailResponse.match_message}
+                                    </Alert>
+                                )}
+                                {contractDetailResponse?.summary && (
+                                    <Box sx={{ px: 3, pb: 2, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, minmax(0, 1fr))' }, gap: 1.5 }}>
+                                        <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
+                                            <Typography variant="caption" color="text.secondary">历史电量 / 当前成交电量</Typography>
+                                            <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 700 }}>
+                                                {formatNumber(contractDetailResponse.summary.historical_quantity_mwh, 3)} / {formatNumber(contractDetailResponse.summary.current_quantity_mwh, 3)} MWh
+                                            </Typography>
+                                        </Paper>
+                                        <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
+                                            <Typography variant="caption" color="text.secondary">展示合同合计 / 数量</Typography>
+                                            <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 700 }}>
+                                                {formatNumber(contractDetailResponse.summary.displayed_quantity_mwh, 3)} MWh / {contractDetailResponse.summary.contract_count}笔
+                                            </Typography>
+                                        </Paper>
+                                        <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
+                                            <Typography variant="caption" color="text.secondary">平均成交价格</Typography>
+                                            <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 700 }}>
+                                                {formatNumber(contractDetailResponse.summary.avg_price_yuan_per_mwh, 3)} 元/MWh
+                                            </Typography>
+                                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                                                申报价格：{formatNumber(selectedExecutionRow?.trade_avg_price, 3)} 元/MWh
+                                            </Typography>
+                                        </Paper>
+                                    </Box>
+                                )}
+                                <TableContainer sx={{ maxHeight: 420 }}>
+                                    <Table stickyHeader sx={{ '& .MuiTableCell-root': { fontSize: { xs: '0.75rem', sm: '0.875rem' } } }}>
+                                        <TableHead>
+                                            <TableRow>
+                                                <TableCell>售方名称</TableCell>
+                                                <TableCell>date</TableCell>
+                                                <TableCell>时段</TableCell>
+                                                <TableCell>电量(MWh)</TableCell>
+                                                <TableCell>电价(元/MWh)</TableCell>
+                                            </TableRow>
+                                        </TableHead>
+                                        <TableBody>
+                                            {contractDetails.map((item) => (
+                                                <TableRow key={item.contract_id}>
+                                                    <TableCell>{item.seller_name || '-'}</TableCell>
+                                                    <TableCell>{item.date}</TableCell>
+                                                    <TableCell>{item.period}</TableCell>
+                                                    <TableCell>{formatNumber(item.quantity_mwh, 3)}</TableCell>
+                                                    <TableCell>{formatNumber(item.price_yuan_per_mwh, 3)}</TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                        {contractDetailResponse?.summary && (
+                                            <TableFooter
+                                                sx={{
+                                                    position: 'sticky',
+                                                    bottom: 0,
+                                                    zIndex: 2,
+                                                    backgroundColor: 'background.paper',
+                                                    '& .MuiTableCell-root': {
+                                                        backgroundColor: '#ecfeff',
+                                                        borderTop: '1px solid',
+                                                        borderColor: 'divider',
+                                                        fontWeight: 700,
+                                                    },
+                                                }}
+                                            >
+                                                <TableRow>
+                                                    <TableCell>合计</TableCell>
+                                                    <TableCell>-</TableCell>
+                                                    <TableCell>{contractDialogPeriod ?? '-'}</TableCell>
+                                                    <TableCell>{formatNumber(contractDetailResponse.summary.displayed_quantity_mwh, 3)}</TableCell>
+                                                    <TableCell>{formatNumber(contractDetailResponse.summary.avg_price_yuan_per_mwh, 3)}</TableCell>
+                                                </TableRow>
+                                            </TableFooter>
+                                        )}
+                                    </Table>
+                                </TableContainer>
+                            </>
+                        )}
+                    </DialogContent>
+                </Dialog>
             </Box>
         </LocalizationProvider>
     );
