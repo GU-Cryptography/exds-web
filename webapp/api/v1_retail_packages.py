@@ -16,7 +16,7 @@ async def create_package(
     package: RetailPackage,
     save_as_draft: bool = True,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:package:create"))
+    _ctx = Depends(require_permission("module:customer_retail_packages:edit"))
 ):
     """创建新的零售套餐"""
     service = PackageService(DATABASE)
@@ -45,7 +45,7 @@ async def update_package(
     package_id: str,
     package: RetailPackage,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:package:update"))
+    _ctx = Depends(require_permission("module:customer_retail_packages:edit"))
 ):
     """更新套餐"""
     service = PackageService(DATABASE)
@@ -78,7 +78,7 @@ async def update_package(
 async def copy_package(
     package_id: str,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:package:create"))
+    _ctx = Depends(require_permission("module:customer_retail_packages:edit"))
 ):
     """复制套餐"""
     service = PackageService(DATABASE)
@@ -128,7 +128,7 @@ async def list_packages(
 async def activate_package(
     package_id: str,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:package:update"))
+    _ctx = Depends(require_permission("module:customer_retail_packages:edit"))
 ):
     """激活套餐"""
     service = PackageService(DATABASE)
@@ -156,7 +156,7 @@ async def activate_package(
 async def archive_package(
     package_id: str,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:package:update"))
+    _ctx = Depends(require_permission("module:customer_retail_packages:edit"))
 ):
     """归档套餐"""
     service = PackageService(DATABASE)

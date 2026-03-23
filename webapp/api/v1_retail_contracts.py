@@ -19,7 +19,7 @@ router = APIRouter(prefix="/retail-contracts", tags=["Retail Contracts"])
 async def create_contract(
     contract: ContractCreate,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:contract:create"))
+    _ctx = Depends(require_permission("module:customer_retail_contracts:edit"))
 ):
     """创建新合同"""
     service = ContractService(DATABASE)
@@ -103,7 +103,7 @@ async def get_contract_years(
 async def import_contracts(
     file: UploadFile = File(..., description="交易中心平台下载的Excel文件"),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:contract:create"))
+    _ctx = Depends(require_permission("module:customer_retail_contracts:edit"))
 ):
     """
     批量导入合同数据（同步方案）
@@ -311,7 +311,7 @@ async def update_contract(
     contract_id: str,
     contract: ContractCreate,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:contract:update"))
+    _ctx = Depends(require_permission("module:customer_retail_contracts:edit"))
 ):
     """更新合同（仅待生效状态）"""
     service = ContractService(DATABASE)
@@ -541,7 +541,7 @@ from webapp.services.contract_pdf_service import ContractPdfService
 async def upload_contract_pdfs(
     files: List[UploadFile] = File(..., description="PDF文件列表"),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:contract:update"))
+    _ctx = Depends(require_permission("module:customer_retail_contracts:edit"))
 ):
     """
     批量上传PDF文件，自动匹配合同记录
@@ -644,7 +644,7 @@ import dateutil.parser
 async def parse_contract_pdf(
     file: UploadFile = File(..., description="合同原件PDF文件"),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:contract:create"))
+    _ctx = Depends(require_permission("module:customer_retail_contracts:edit"))
 ):
     """
     解析PDF返回其中提取的数据，并检查与现有系统的重复情况。
@@ -737,7 +737,7 @@ async def parse_contract_pdf(
 async def import_create_contract(
     req: ImportCreateRequest,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:contract:create"))
+    _ctx = Depends(require_permission("module:customer_retail_contracts:edit"))
 ):
     """
     根据前端确认的数据创建客户、套餐和合同
@@ -891,7 +891,7 @@ async def upload_single_pdf(
     contract_id: str,
     file: UploadFile = File(..., description="PDF文件"),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:contract:update"))
+    _ctx = Depends(require_permission("module:customer_retail_contracts:edit"))
 ):
     """
     为指定合同上传/替换PDF文件

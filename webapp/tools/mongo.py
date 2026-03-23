@@ -15,6 +15,18 @@ exds_path = f'{base_path}{os.sep}.exds'
 config_path = f'{exds_path}{os.sep}config.ini'
 logger = logging.getLogger(__name__)
 
+# 将默认配置写入 config.ini（自动创建目录/文件/section）
+def set_config(section, option, value):
+    config = configparser.ConfigParser()
+    os.makedirs(exds_path, exist_ok=True)
+    if os.path.exists(config_path):
+        config.read(config_path, encoding='utf-8')
+    if not config.has_section(section):
+        config.add_section(section)
+    config.set(section, option, '' if value is None else str(value))
+    with open(config_path, 'w', encoding='utf-8') as f:
+        config.write(f)
+
 # 从配置文件config.ini中读取指定的配置参数。
 def get_config(section, option, default_value=None):
     """
@@ -37,7 +49,12 @@ def get_config(section, option, default_value=None):
             raise FileNotFoundError("Config file not found.")
     except (configparser.NoSectionError, configparser.NoOptionError, FileNotFoundError) as e:
         logger.warning(f'配置项 [{section}].{option} 不存在或文件未找到, 将使用并设置默认值。原因: {e}')
-        # 如果提供了默认值，则调用 set_config 将其写入文件
+        # 如果提供了默认值，则写回 config.ini，避免下次重复告警
+        if default_value is not None:
+            try:
+                set_config(section, option, default_value)
+            except Exception as write_err:
+                logger.warning(f'写入默认配置失败 [{section}].{option}: {write_err}')
         return default_value
 
 # --- 配置读取 ---

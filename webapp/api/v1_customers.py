@@ -17,7 +17,7 @@ router = APIRouter(prefix="/customers", tags=["Customers"])
 async def create_customer(
     customer: CustomerCreate,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:create"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """创建新客户"""
     service = CustomerService(DATABASE)
@@ -54,7 +54,7 @@ async def preview_sync_data(
 async def sync_customers(
     request: SyncRequest,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:create"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """批量同步客户数据"""
     service = CustomerService(DATABASE)
@@ -129,7 +129,7 @@ async def update_customer(
     customer_id: str,
     customer: CustomerUpdate,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:update"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """更新客户信息"""
     service = CustomerService(DATABASE)
@@ -196,7 +196,7 @@ async def add_utility_account(
     customer_id: str,
     account_data: dict = Body(...),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:update"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """为客户添加户号"""
     service = CustomerService(DATABASE)
@@ -232,7 +232,7 @@ async def update_utility_account(
     account_id: str,
     account_data: dict = Body(...),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:update"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """更新户号信息"""
     service = CustomerService(DATABASE)
@@ -263,7 +263,7 @@ async def delete_utility_account(
     customer_id: str,
     account_id: str,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:update"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """删除户号"""
     service = CustomerService(DATABASE)
@@ -288,7 +288,7 @@ async def add_metering_point(
     account_id: str,
     metering_point_data: dict = Body(...),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:update"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """为户号添加计量点"""
     service = CustomerService(DATABASE)
@@ -326,7 +326,7 @@ async def update_metering_point(
     metering_point_id: str,
     metering_point_data: dict = Body(...),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:update"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """更新计量点信息"""
     service = CustomerService(DATABASE)
@@ -359,7 +359,7 @@ async def delete_metering_point(
     account_id: str,
     metering_point_id: str,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:update"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """删除计量点"""
     service = CustomerService(DATABASE)
@@ -400,7 +400,7 @@ async def sync_update_meter(
     meter_id: str,
     update_data: SyncUpdateRequest,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:update"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """同步更新电表信息"""
     service = CustomerService(DATABASE)
@@ -431,7 +431,7 @@ async def sign_contract(
     customer_id: str,
     contract_id: Optional[str] = Body(None, embed=True, description="关联的合同ID"),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:update"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """
     签约操作：将意向客户转换为待生效状态
@@ -465,7 +465,7 @@ async def cancel_contract(
     customer_id: str,
     reason: Optional[str] = Body(None, description="撤销原因"),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:update"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """
     撤销操作：将待生效客户转换为已终止状态
@@ -498,7 +498,7 @@ async def cancel_contract(
 async def activate(
     customer_id: str,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:update"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """
     生效操作：将待生效客户转换为执行中状态
@@ -531,7 +531,7 @@ async def suspend(
     customer_id: str,
     reason: Optional[str] = Body(None, description="暂停原因"),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:update"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """
     暂停操作：将执行中客户转换为已暂停状态
@@ -564,7 +564,7 @@ async def suspend(
 async def resume(
     customer_id: str,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:update"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """
     恢复操作：将已暂停客户转换为执行中状态
@@ -597,7 +597,7 @@ async def terminate(
     customer_id: str,
     reason: Optional[str] = Body(None, description="终止原因"),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:update"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """
     终止操作：将执行中或已暂停客户转换为已终止状态
@@ -656,7 +656,7 @@ async def get_customer_tags(
 async def create_customer_tag(
     tag_data: dict = Body(...),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:update"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """创建新的客户标签"""
     from webapp.tools.mongo import DATABASE
@@ -696,7 +696,7 @@ async def update_customer_tag(
     tag_id: str,
     tag_data: dict = Body(...),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:update"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """更新客户标签"""
     from webapp.tools.mongo import DATABASE
@@ -770,7 +770,7 @@ async def update_customer_tag(
 async def delete_customer_tag(
     tag_id: str,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:profile:update"))
+    _ctx = Depends(require_permission("module:customer_profiles:edit"))
 ):
     """删除客户标签"""
     from webapp.tools.mongo import DATABASE

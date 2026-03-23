@@ -36,7 +36,7 @@ def save_manual_adjustment(
     request: SaveAdjustmentRequest,
     service: LoadForecastService = Depends(get_service),
     current_user: Any = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("forecast:adjust:update"))
+    _ctx = Depends(require_permission("module:forecast_short_term_load:edit"))
 ):
     user_info = {
         "username": current_user.username if hasattr(current_user, "username") else str(current_user),
@@ -61,7 +61,7 @@ def reset_manual_adjustment(
     request: ResetAdjustmentRequest,
     service: LoadForecastService = Depends(get_service),
     current_user: Any = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("forecast:adjust:update"))
+    _ctx = Depends(require_permission("module:forecast_short_term_load:edit"))
 ):
     user_info = {
         "username": current_user.username if hasattr(current_user, "username") else str(current_user)
