@@ -50,7 +50,7 @@ async def list_intent_customers(
 async def preview_intent_customer_files(
     files: List[UploadFile] = File(..., description="电表数据文件"),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:intent:import")),
+    _ctx = Depends(require_permission("module:analysis_intent_customer_diagnosis:edit")),
 ):
     del current_user
     if not files:
@@ -66,7 +66,7 @@ async def import_intent_customer_files(
     meter_configs_json: str = Form(..., description="倍率配置JSON"),
     files: List[UploadFile] = File(..., description="电表数据文件"),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:intent:import")),
+    _ctx = Depends(require_permission("module:analysis_intent_customer_diagnosis:edit")),
 ):
     del current_user
     try:
@@ -113,7 +113,7 @@ async def get_intent_customer_load_data(
 async def calculate_intent_customer_wholesale_simulation(
     customer_id: str,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:intent:simulate")),
+    _ctx = Depends(require_permission("module:analysis_intent_customer_diagnosis:edit")),
 ):
     del current_user
     service = IntentCustomerDiagnosisService()
@@ -197,7 +197,7 @@ async def calculate_intent_customer_retail_simulation(
     customer_id: str,
     payload: IntentRetailSimulationRequest,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:intent:simulate")),
+    _ctx = Depends(require_permission("module:analysis_intent_customer_diagnosis:edit")),
 ):
     del current_user
     service = IntentCustomerRetailSimulationService()
@@ -242,7 +242,7 @@ async def delete_intent_customer_retail_package(
     customer_id: str,
     package_id: str,
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:intent:delete")),
+    _ctx = Depends(require_permission("module:analysis_intent_customer_diagnosis:edit")),
 ):
     del current_user
     service = IntentCustomerRetailSimulationService()
@@ -260,7 +260,7 @@ async def delete_intent_customer(
     customer_id: str,
     payload: DeleteIntentCustomerRequest = Body(...),
     current_user: User = Depends(get_current_active_user),
-    _ctx = Depends(require_permission("customer:intent:delete")),
+    _ctx = Depends(require_permission("module:analysis_intent_customer_diagnosis:edit")),
 ):
     user_in_db = get_user(db_instance, current_user.username)
     if not user_in_db or not verify_password(payload.password, user_in_db.hashed_password):
