@@ -139,6 +139,39 @@ def get_accuracy(
         )
 
 
+@router.get(
+    "/accuracy-history",
+    response_model=List[Dict[str, Any]],
+    status_code=status.HTTP_200_OK,
+    summary="获取历史准确率曲线",
+    description="""
+    获取指定日期区间内的历史 WMAPE 准确率曲线。
+
+    返回规则：
+    - 按 target_date 聚合
+    - 若同一天有多个版本，取 calculated_at 最新的一条
+    """
+)
+def get_accuracy_history(
+    start_date: str = Query(..., description="开始日期, 格式 YYYY-MM-DD"),
+    end_date: str = Query(..., description="结束日期, 格式 YYYY-MM-DD"),
+    forecast_type: str = Query("d1_price", description="预测类型: d1_price")
+) -> List[Dict[str, Any]]:
+    """获取历史准确率曲线"""
+    try:
+        service = get_service()
+        result = service.get_accuracy_history(start_date, end_date, forecast_type)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"获取历史准确率曲线失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="服务器内部错误"
+        )
+
+
 # ============ 预测触发相关 API ============
 
 class TriggerRequest(BaseModel):
@@ -270,7 +303,8 @@ async def get_command_status(command_id: str) -> Dict[str, Any]:
             "started_at": doc["started_at"].isoformat() if doc.get("started_at") else None,
             "completed_at": doc["completed_at"].isoformat() if doc.get("completed_at") else None,
             "result_message": doc.get("result_message"),
-            "error_message": doc.get("error_message")
+            "error_message": doc.get("error_message"),
+            "result": doc.get("result"),
         }
     except HTTPException:
         raise

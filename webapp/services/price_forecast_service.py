@@ -275,3 +275,79 @@ class PriceForecastService:
         except Exception as e:
             logger.error(f"获取准确度评估数据失败: {e}", exc_info=True)
             raise ValueError(f"获取准确度评估数据失败: {str(e)}")
+
+    def get_accuracy_history(
+        self,
+        start_date: str,
+        end_date: str,
+        forecast_type: str = "d1_price"
+    ) -> List[Dict[str, Any]]:
+        """
+        获取历史准确率曲线数据。
+
+        规则：
+        - 按 target_date 聚合
+        - 同一天若存在多个版本，取 calculated_at 最新的一条
+        """
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+            end_exclusive = end_dt + timedelta(days=1)
+
+            pipeline = [
+                {
+                    "$match": {
+                        "forecast_type": forecast_type,
+                        "target_date": {"$gte": start_dt, "$lt": end_exclusive},
+                        "wmape_accuracy": {"$ne": None},
+                    }
+                },
+                {
+                    "$sort": {
+                        "target_date": 1,
+                        "calculated_at": -1,
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": "$target_date",
+                        "target_date": {"$first": "$target_date"},
+                        "forecast_id": {"$first": "$forecast_id"},
+                        "wmape_accuracy": {"$first": "$wmape_accuracy"},
+                        "mae": {"$first": "$mae"},
+                        "rmse": {"$first": "$rmse"},
+                        "direction_accuracy": {"$first": "$direction_accuracy"},
+                        "rate_90_pass": {"$first": "$rate_90_pass"},
+                        "rate_85_pass": {"$first": "$rate_85_pass"},
+                        "calculated_at": {"$first": "$calculated_at"},
+                    }
+                },
+                {"$sort": {"target_date": 1}},
+                {
+                    "$project": {
+                        "_id": 0,
+                        "target_date": 1,
+                        "forecast_id": 1,
+                        "wmape_accuracy": 1,
+                        "mae": 1,
+                        "rmse": 1,
+                        "direction_accuracy": 1,
+                        "rate_90_pass": 1,
+                        "rate_85_pass": 1,
+                        "calculated_at": 1,
+                    }
+                }
+            ]
+
+            result = list(self.accuracy_daily.aggregate(pipeline))
+            for doc in result:
+                for field in ["target_date", "calculated_at"]:
+                    if doc.get(field) and isinstance(doc[field], datetime):
+                        doc[field] = doc[field].isoformat()
+
+            logger.info(f"获取历史准确率曲线成功: {start_date} ~ {end_date}, 共 {len(result)} 条")
+            return result
+
+        except Exception as e:
+            logger.error(f"获取历史准确率曲线失败: {e}", exc_info=True)
+            raise ValueError(f"获取历史准确率曲线失败: {str(e)}")

@@ -50,6 +50,18 @@ export interface AccuracyData {
     calculated_at: string;
 }
 
+export interface AccuracyHistoryPoint {
+    target_date: string;
+    forecast_id: string;
+    wmape_accuracy: number | null;
+    mae?: number | null;
+    rmse?: number | null;
+    direction_accuracy?: number | null;
+    rate_90_pass?: boolean;
+    rate_85_pass?: boolean;
+    calculated_at?: string | null;
+}
+
 // ============ API 调用 ============
 
 export const priceForecastApi = {
@@ -72,6 +84,13 @@ export const priceForecastApi = {
      */
     fetchAccuracy: (params: { forecast_id: string; target_date?: string }) => {
         return apiClient.get<AccuracyData | null>('/api/v1/price-forecast/accuracy', { params });
+    },
+
+    /**
+     * 获取历史准确率曲线
+     */
+    fetchAccuracyHistory: (params: { start_date: string; end_date: string; forecast_type?: string }) => {
+        return apiClient.get<AccuracyHistoryPoint[]>('/api/v1/price-forecast/accuracy-history', { params });
     },
 
     /**
@@ -115,6 +134,18 @@ export interface TriggerResult {
     created_at?: string;
 }
 
+export interface CommandResult {
+    status?: 'waiting' | 'FAILED' | 'error' | 'skipped' | null | string;
+    summary?: string | null;
+    msg?: string | null;
+    details?: {
+        error?: string | null;
+        blocked_date?: string | null;
+        missing_items?: string[] | null;
+        [key: string]: any;
+    } | null;
+}
+
 /** 命令状态 */
 export interface CommandStatus {
     command_id: string;
@@ -125,4 +156,5 @@ export interface CommandStatus {
     completed_at: string | null;
     result_message: string | null;
     error_message: string | null;
+    result?: CommandResult | null;
 }
